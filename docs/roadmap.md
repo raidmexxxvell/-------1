@@ -87,6 +87,8 @@
     1. ✅ Создать модель News в database_models.py (id, title, content, date, author_id)
     2. ✅ Добавить CRUD в существующую админ-панель
     3. ✅ Вывести на главную с кэшированием 5 минут через multilevel_cache.py
+  4. ✅ Стилизация клиентского блока (карточки, адаптив, hover)
+  5. ✅ Инвалидация кэша новостей при create/update/delete (invalidate_pattern)
   - [ ] Автоматические анонсы матчей
     1. Генерировать анонсы в background_tasks.py за 24 часа до матча
     2. Простой шаблон: "Завтра в {time} - {home} vs {away}"
