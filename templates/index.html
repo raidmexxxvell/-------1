@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Лига Обнинска</title>
+    <!-- ИСПРАВЛЕНО: Убраны лишние пробелы в URL Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- WebSocket отключён (можно вернуть, раскомментировав) -->
+    <!-- <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script> -->
+    <script>window.__WEBSOCKETS_ENABLED__ = false; // отключено для диагностики мобильной загрузки</script>
+        {# Подключаем оверлей ошибок только администратору #}
+        {% if admin_user_id %}
+        <script>
+            (function(){
+                const ADMIN_ID = '{{ admin_user_id }}';
+                // Попытка взять user id из Telegram WebApp initData (доступно после загрузки sdk)
+                function loadOverlay(){
+                    try {
+                        // Если уже инициализировано — выходим
+                        if (window.__ERROR_OVERLAY_INJECTED__) return;
+                        const tg = window.Telegram && window.Telegram.WebApp;
+                        let uid = null;
+                        if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id){
+                            uid = String(tg.initDataUnsafe.user.id);
+                        }
+                        // Дополнительный fallback: атрибут body data-user-id (если позже добавите)
+                        if (!uid){
+                            try { uid = document.body.getAttribute('data-user-id'); } catch(_){ uid=null; }
+                        }
+                        if (uid && ADMIN_ID && uid === ADMIN_ID){
+                            // Защита от повторной вставки скрипта
+                            if (document.querySelector('script[src*="/static/js/error-overlay.js"]')) { window.__ERROR_OVERLAY_INJECTED__ = true; return; }
+                            var s=document.createElement('script');
+                            s.id = 'error-overlay-loader';
+                            s.src='/static/js/error-overlay.js?v={{ static_version }}';
+                            document.head.appendChild(s);
+                            window.__ERROR_OVERLAY_INJECTED__ = true;
+                        }
+                    } catch(_){ /* silent */ }
+                }
+                // Telegram SDK может загрузиться чуть позже — пробуем несколько попыток
+                let tries=0; const timer=setInterval(()=>{ tries++; loadOverlay(); if(tries>20) clearInterval(timer); }, 300);
+                // Также пробуем сразу
+                loadOverlay();
+            })();
+        </script>
+        {% endif %}
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/splash.css">
+    <link rel="stylesheet" href="/static/css/blb.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚽</text></svg>">
+</head>
+<body data-admin="{{ admin_user_id }}" class="theme-ufo">
+    <!-- ЗАСТАВКА -->
+    <div id="splash">
+        <img src="/static/img/logo_liga.png" alt="Логотип" class="splash-logo-img">
+        <div class="splash-text">Футбольная лига Обнинска</div>
+        <div class="splash-loading-label">Идет загрузка...</div>
+        <div class="loading-bar">
+            <div class="loading-progress" id="loading-progress"></div>
+        </div>
+    </div>
+
+    <!-- ОСНОВНОЕ ПРИЛОЖЕНИЕ -->
+    <!-- Скрываем по умолчанию (чтобы не было мигания) -->
+    <div class="container" id="app-content" style="display:none;">
+        <div class="top-bar">
+            <div class="league-title">Лига Обнинска</div>
+            <img class="league-logo" src="/static/img/logo.png" alt="Логотип лиги">
+        </div>
+        <!-- Новая стартовая вкладка Главная -->
+        <div id="tab-home">
+            <div class="ads-wrap">
+                <div class="ads-carousel" id="ads-carousel">
+                    <div class="ads-track" id="ads-track">
+                        <!-- Слайды наполнятся через JS; по умолчанию один заглушечный -->
+                    </div>
+                    <div class="ads-dots" id="ads-dots"></div>
+                </div>
+            </div>
+            <div class="ufo-content" id="home-content">
+                <div class="ufo-pane" id="home-pane" style="min-height: 120px; display: flex; align-items: center; justify-content: center; color: var(--gray);">
+                    <!-- Пусто: стилизовано как панели лиг; можно заполнить позже -->
+                </div>
+            </div>
+        </div>
+    <div id="tab-profile" style="display:none;">
+    <div class="profile-top-area" id="profile-top-area">
+    <div class="shade-bg" id="shade-bg" aria-hidden="true"></div>
+    <div class="profile-header profile-centered">
+            <div class="profile-avatar" id="user-avatar">
+                <img src="" alt="Аватар">
+            </div>
+            <div class="profile-info">
+                <div style="display:flex; align-items:center; justify-content:center; gap:8px;">
+                    <h2 id="user-name">Загрузка...</h2>
+                    <button id="profile-shade-btn" class="profile-shade-btn" title="Выбрать фон профиля" aria-label="Выбрать фон"></button>
+                </div>
+                <div class="favorite-team-row" style="margin-top:6px;">
+                    <label for="favorite-team" style="font-size:12px; color:var(--gray); margin-right:8px;">Любимый клуб:</label>
+                    <select id="favorite-team" style="min-width:160px; max-width:240px;"><option value="">— выбрать —</option></select>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <div class="profile-stats">
+            <div class="stat-card">
+                <div class="stat-value" id="credits">0</div>
+                <div class="stat-label">Кредиты</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="level">1</div>
+                <div class="stat-label">Уровень</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="xp">0/100</div>
+                <div class="stat-label">Опыт</div>
+            </div>
+        </div>
+    <div class="xp-section">
+            <div class="level-info">
+                <span>Уровень <span id="current-level">1</span></span>
+                <span><span id="current-xp">0</span>/<span id="xp-needed">100</span> XP</span>
+            </div>
+            <div class="xp-progress-container">
+                <div class="xp-progress" id="xp-progress"></div>
+            </div>
+        </div>
+
+        <div class="checkin-section">
+            <div class="checkin-title">
+                <span>Ежедневные награды</span>
+                <span id="streak-days">День <span id="current-streak">1</span></span>
+            </div>
+            <div class="checkin-days" id="checkin-days">
+                <!-- Дни цикла будут сгенерированы JS -->
+            </div>
+            <button class="checkin-button" id="checkin-btn">Получить награду</button>
+            <div class="checkin-status" id="checkin-status"></div>
+        </div>
+
+    <div class="achievements-section">
+            <div class="subtabs" id="profile-subtabs">
+                <div class="subtab-item active" data-psub="badges">Достижения</div>
+                <div class="subtab-item" data-psub="ref">Реферальная ссылка</div>
+            </div>
+            <div id="profile-pane-badges" class="profile-pane">
+            <div class="achievements-container" id="badges">
+                <!-- Достижение будет загружено через API -->
+                <div class="achievement-card locked" id="achievement-placeholder">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLXRyb2Z5Ij48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwb2x5bGluZSBwb2ludHM9IjEyIDYgMTYgMTQgMTIgMTAgOCAxNCAxMiA2Ii8+PC9zdmc+" alt="Достижение">
+                    <div class="badge-name">Бронза</div>
+                    <div class="badge-requirements">7 дней подряд</div>
+                </div>
+            </div>
+            </div>
+            
+            <div id="profile-pane-ref" class="profile-pane" style="display:none;">
+                <div class="referral-box">
+                    <button class="share-btn" id="share-ref">Поделиться ссылкой</button>
+                    <div class="ref-stats">Приглашено: <span id="ref-count">0</span></div>
+                    <div class="ref-note" id="ref-note">Зачёт происходит, когда приглашённый достигнет 2 уровня аккаунта.</div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <!-- Shade selection modal -->
+    <div id="shade-modal" class="modal" style="display:none;">
+        <div class="modal-backdrop" data-close="true"></div>
+        <div class="modal-dialog" role="dialog" aria-labelledby="shade-modal-title" aria-modal="true">
+            <div class="modal-title" id="shade-modal-title">Выбор фона профиля</div>
+            <div class="modal-desc">Выберите один из предустановленных фонов.</div>
+            <div id="shade-list" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding-bottom:6px;"></div>
+            <div class="modal-actions">
+                <button id="shade-cancel" class="btn btn-secondary" type="button">Закрыть</button>
+                <button id="shade-set" class="btn btn-primary" type="button">Установить фон</button>
+            </div>
+        </div>
+    </div>
+
+        <!-- Вкладка НЛО -->
+    <div id="tab-ufo" style="display:none;">
+            <!-- Подвкладки основной лиги НЛО -->
+            <div class="subtabs" id="ufo-subtabs">
+                <div class="subtab-item active" data-subtab="table">Таблица</div>
+                <div class="subtab-item" data-subtab="stats">Статистика</div>
+                <div class="subtab-item" data-subtab="schedule">Расписание</div>
+                <div class="subtab-item" data-subtab="results">Результаты</div>
+            </div>
+            <div class="ufo-content" id="ufo-content">
+                <div id="ufo-table" class="ufo-pane">
+                    <div class="league-table-wrap">
+                        <table class="league-table" id="league-table">
+                            <tbody>
+                                <!-- 10 строк будут заполнены через JS -->
+                            </tbody>
+                        </table>
+                        <div class="table-updated" id="league-table-updated">
+                            <span id="league-updated-text"></span>
+                            {% if admin_user_id %}
+                            <button class="refresh-btn" id="league-refresh-btn" style="display:none;">Обновить</button>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div id="ufo-stats" class="ufo-pane" style="display:none;">
+                    <div class="league-table-wrap">
+                        <table class="league-table" id="stats-table">
+                            <tbody>
+                                <!-- 11 строк будут заполнены через JS -->
+                            </tbody>
+                        </table>
+                        <div class="table-updated" id="stats-table-updated"></div>
+                    </div>
+                </div>
+                <div id="ufo-schedule" class="ufo-pane" style="display:none;">Загрузка расписания...</div>
+                <div id="ufo-results" class="ufo-pane" style="display:none;">Загрузка результатов...</div>
+                <!-- Детальный экран матча (вместо модалки) -->
+                <div id="ufo-match-details" class="ufo-pane" style="display:none;">
+                    <div class="match-details-topbar">
+                        <button id="match-back" class="back-btn">← Назад</button>
+                        <div class="md-title">Детали матча</div>
+                    </div>
+                    <div class="match-modal-header">
+                        <div class="team side home">
+                            <img class="logo" id="md-home-logo" alt="">
+                            <div class="name" id="md-home-name"></div>
+                        </div>
+                        <div class="center">
+                            <div class="score" id="md-score">— : —</div>
+                            <div class="datetime" id="md-datetime"></div>
+                        </div>
+                        <div class="team side away">
+                            <img class="logo" id="md-away-logo" alt="">
+                            <div class="name" id="md-away-name"></div>
+                        </div>
+                    </div>
+                    <div class="subtabs modal-subtabs">
+                        <div class="subtab-item active" data-mdtab="home">Команда 1</div>
+                        <div class="subtab-item" data-mdtab="away">Команда 2</div>
+                    </div>
+                    <div class="modal-body">
+                        <div id="md-pane-home" class="md-pane"></div>
+                        <div id="md-pane-away" class="md-pane" style="display:none;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Блок БЛБ: пустые подвкладки -->
+            <div id="blb-block" style="display:none;">
+                <div class="subtabs" id="blb-subtabs">
+                    <div class="subtab-item active" data-blbtab="table">Таблица</div>
+                    <div class="subtab-item" data-blbtab="stats">Статистика</div>
+                    <div class="subtab-item" data-blbtab="schedule">Расписание</div>
+                    <div class="subtab-item" data-blbtab="results">Результаты</div>
+                </div>
+                <div class="ufo-content" id="blb-content">
+                    <div id="blb-table" class="ufo-pane">Скоро...</div>
+                    <div id="blb-stats" class="ufo-pane" style="display:none;">Скоро...</div>
+                    <div id="blb-schedule" class="ufo-pane" style="display:none;">Скоро...</div>
+                    <div id="blb-results" class="ufo-pane" style="display:none;">Скоро...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Нижняя навигация -->
+    <nav class="nav" id="bottom-nav">
+        <div class="nav-league-panel" id="nav-league-panel" aria-hidden="true">
+            <button class="nav-league-btn" id="nav-league-switch" type="button">
+                <span class="icon" id="nav-league-icon">🛸</span>
+                <span class="text" id="nav-league-text">НЛО</span>
+            </button>
+        </div>
+        <div class="nav-item active" data-tab="home">
+            <div class="nav-icon">🏠</div>
+            <div class="nav-label">Главная</div>
+        </div>
+        <div class="nav-item" data-tab="ufo">
+            <div class="nav-icon">🛸</div>
+            <div class="nav-label">Лига</div>
+        </div>
+        <div class="nav-item" data-tab="predictions">
+            <div class="nav-icon">📈</div>
+            <div class="nav-label">Прогнозы</div>
+        </div>
+        <div class="nav-item" data-tab="leaderboard">
+            <div class="nav-icon">🏆</div>
+            <div class="nav-label">Лидерборд</div>
+        </div>
+        <div class="nav-item" data-tab="shop">
+            <div class="nav-icon">🛒</div>
+            <div class="nav-label">Магазин</div>
+        </div>
+        {% if admin_user_id %}
+        <div class="nav-item" data-tab="admin" id="nav-admin" style="display:none;">
+            <div class="nav-icon">🛠️</div>
+            <div class="nav-label">Админ</div>
+        </div>
+        {% endif %}
+        <div class="nav-item" data-tab="profile">
+            <div class="nav-icon">👤</div>
+            <div class="nav-label">Профиль</div>
+        </div>
+    </nav>
+
+    <!-- Name change modal removed — name is read-only and taken from Telegram -->
+
+    <!-- Оверлей выбора лиг над нижним меню -->
+    <div id="league-overlay" style="display:none; position: fixed; left: 0; bottom: 0; z-index: 1100;">
+        <!-- Контент плашки подставляет JS -->
+    </div>
+
+    <!-- Боковое меню лиг -->
+    <aside id="league-drawer" aria-hidden="true" style="display:none; position: fixed; top: 0; right: 0; bottom: 0; width: 78%; max-width: 360px; background: rgba(10,18,40,0.98); border-left: 1px solid rgba(255,255,255,0.08); box-shadow: -12px 0 24px rgba(0,0,0,0.45); transform: translateX(100%); transition: transform .28s ease-out; z-index: 1500;">
+        <div class="drawer-header" style="padding: 14px 14px 8px; font-weight: 800; font-size: 16px;">Футбол</div>
+        <div class="drawer-sep" style="height: 1px; background: rgba(255,255,255,0.08);"></div>
+        <div class="drawer-list" id="league-drawer-list" style="padding: 8px; display: grid; gap: 8px;">
+            <button class="drawer-item" data-league="UFO" style="display:flex; align-items:center; gap:10px; padding:10px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color:#fff; border-radius: 10px; font-weight: 800; cursor:pointer;">🛸 <span>НЛО</span></button>
+            <button class="drawer-item" data-league="BLB" style="display:flex; align-items:center; gap:10px; padding:10px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color:#fff; border-radius: 10px; font-weight: 800; cursor:pointer;">❔ <span>БЛБ</span></button>
+        </div>
+    </aside>
+
+    <!-- Экран перехода между лигами (анимация заливки и логотип) -->
+    <div id="league-transition" style="display:none;">
+        <!-- наполняется через JS -->
+    </div>
+
+    <!-- Оверлей блокировки ландшафтной ориентации на мобильных -->
+    <div class="orientation-overlay" id="orientation-overlay" aria-hidden="true">
+        <div class="orientation-inner">
+            Поверните устройство в портретный режим
+        </div>
+    </div>
+
+    <!-- Экраны-заглушки для новых вкладок -->
+    <div id="tab-predictions" style="display:none;">
+        <div class="predictions-wrap">
+            <div class="subtabs" id="pred-subtabs">
+                <div class="subtab-item active" data-ptab="place">Сделать прогноз</div>
+                <div class="subtab-item" data-ptab="mybets">Мои ставки</div>
+            </div>
+            <div id="pred-pane-place" class="pred-pane">
+                <div class="pred-tours" id="pred-tours">Загрузка матчей...</div>
+            </div>
+            <div id="pred-pane-mybets" class="pred-pane" style="display:none;">
+                <div class="my-bets" id="my-bets">Загрузка...</div>
+            </div>
+        </div>
+    </div>
+    <div id="tab-leaderboard" style="display:none;">
+        <div class="leaderboard-wrap">
+            <div class="subtabs" id="leader-subtabs">
+                <div class="subtab-item active" data-ltab="predictors">Топ прогнозистов</div>
+                <div class="subtab-item" data-ltab="rich">Лидеры месяца</div>
+                <div class="subtab-item" data-ltab="server">Лидеры сервера</div>
+                <div class="subtab-item" data-ltab="prizes">Призы</div>
+            </div>
+            <div id="leader-week-badge" class="leader-week-badge" style="text-align:center; color: var(--gray); font-size: 12px; margin: 4px 0 0;">Период: —</div>
+            <div id="leader-pane-predictors" class="leader-pane">
+                <div class="league-table-wrap">
+                    <table class="league-table" id="lb-predictors">
+                        <thead>
+                            <tr><th>#</th><th>Имя</th><th>Ставок</th><th>Выигрышей</th><th>Win%</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="table-updated" id="lb-predictors-updated"></div>
+                </div>
+            </div>
+            <div id="leader-pane-rich" class="leader-pane" style="display:none;">
+                <div class="league-table-wrap">
+                    <table class="league-table" id="lb-rich">
+                        <thead>
+                            <tr><th>#</th><th>Имя</th><th>Прирост</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="table-updated" id="lb-rich-updated"></div>
+                </div>
+            </div>
+            <div id="leader-pane-server" class="leader-pane" style="display:none;">
+                <div class="league-table-wrap">
+                    <table class="league-table" id="lb-server">
+                        <thead>
+                            <tr><th>#</th><th>Имя</th><th>Уровень</th><th>XP</th><th>Серия</th><th>Скор</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="table-updated" id="lb-server-updated"></div>
+                </div>
+            </div>
+            <div id="leader-pane-prizes" class="leader-pane" style="display:none;">
+                <div class="prizes-wrap" id="lb-prizes">
+                    <!-- Здесь будут пьедесталы трех категорий -->
+                </div>
+                <div class="table-updated" id="lb-prizes-updated"></div>
+            </div>
+        </div>
+    </div>
+
+    {% if admin_user_id %}
+    <!-- Вкладка Админ (только владелец; показывается через JS при совпадении ID) -->
+    <div id="tab-admin" style="display:none;">
+        <div class="predictions-wrap">
+            <div class="subtabs" id="admin-subtabs">
+                <div class="subtab-item active" data-atab="service">Сервис</div>
+                <div class="subtab-item" data-atab="stats">Статистика</div>
+                <div class="subtab-item" data-atab="orders">Заказы</div>
+                <div class="subtab-item" data-atab="streams">Трансляции</div>
+            </div>
+            <div id="admin-pane-service" class="pred-pane">
+                <div class="store-grid" style="grid-template-columns: repeat(2, minmax(0,1fr));">
+                    <div class="store-item">
+                        <div class="store-name">Обновить все таблицы</div>
+                        <div class="store-price" style="opacity:.8">Лига, статистика, расписание, результаты</div>
+                        <button class="details-btn" id="admin-refresh-all">Обновить</button>
+                    </div>
+                    <div class="store-item">
+                        <div class="store-name">Сброс кэша клиентов</div>
+                        <div class="store-price">Версия up</div>
+                        <button class="details-btn" id="admin-bump-version">Применить</button>
+                    </div>
+                    <div class="store-item">
+                        <div class="store-name">Синхронизация</div>
+                        <div class="store-price" id="admin-sync-summary">—</div>
+                        <button class="details-btn" id="admin-sync-refresh">Показать</button>
+                    </div>
+                </div>
+            </div>
+            <div id="admin-pane-stats" class="pred-pane" style="display:none;">
+                <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+                    <button class="details-btn" id="admin-stats-refresh">Обновить</button>
+                    <div class="table-updated" id="admin-stats-updated"></div>
+                </div>
+                <div class="league-table-wrap">
+                    <table class="league-table" id="admin-stats-table">
+                        <thead>
+                            <tr>
+                                <th>Метрика</th>
+                                <th>Значение</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- строки будут заполнены из JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div id="admin-pane-orders" class="pred-pane" style="display:none;">
+                <div class="league-table-wrap">
+                    <table class="league-table" id="admin-orders-table">
+                        <thead>
+                            <tr>
+                                <th>№</th>
+                                <th>Пользователь</th>
+                                <th>Товары</th>
+                                <th>Шт</th>
+                                <th>Сумма</th>
+                                <th>Создан</th>
+                                <th>Статус</th>
+                                <th>✖</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="table-updated" id="admin-orders-updated"></div>
+                </div>
+            </div>
+            <div id="admin-pane-streams" class="pred-pane" style="display:none;">
+                <div class="store-grid" id="admin-streams-list" style="grid-template-columns: 1fr; gap: 8px;">
+                    <div class="store-item" style="opacity:.85">
+                        <div class="store-name">Здесь появятся матчи за 60 минут до начала</div>
+                        <div class="store-price">Выберите матч, вставьте ссылку VK и подтвердите</div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; margin-top:12px; align-items:center; flex-wrap:wrap;">
+                    <button class="details-btn" id="admin-streams-refresh">Обновить список</button>
+                    <label style="font-size:12px; color:var(--gray); display:flex; align-items:center; gap:6px;">Окно (минут): <input id="admin-streams-window" type="number" min="60" max="480" value="360" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.2); background:transparent; color:#fff;"></label>
+                </div>
+                <div id="admin-streams-msg" style="margin-top:8px; font-size:12px; color: var(--gray);"></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Вкладка Магазин -->
+    <div id="tab-shop" style="display:none;">
+        <div class="predictions-wrap">
+            <div class="subtabs" id="shop-subtabs">
+                <div class="subtab-item active" data-stab="store">Магазин</div>
+                <div class="subtab-item" data-stab="cart">Корзина</div>
+                <div class="subtab-item" data-stab="myorders">Мои заказы</div>
+            </div>
+            <div id="shop-pane-store" class="pred-pane">
+                <div class="store-grid">
+                    <div class="store-item" data-id="boots" data-name="Бутсы" data-price="500">
+                        <div class="store-img"><img src="/static/img/shop/boots.png" alt="Бутсы" loading="lazy" onerror="this.style.display='none'"></div>
+                        <div class="store-name">Бутсы</div>
+                        <div class="store-price">500 кредитов</div>
+                        <button class="details-btn">Купить</button>
+                    </div>
+                    <div class="store-item" data-id="ball" data-name="Мяч" data-price="500">
+                        <div class="store-img"><img src="/static/img/shop/ball.png" alt="Мяч" loading="lazy" onerror="this.style.display='none'"></div>
+                        <div class="store-name">Мяч</div>
+                        <div class="store-price">500 кредитов</div>
+                        <button class="details-btn">Купить</button>
+                    </div>
+                    <div class="store-item" data-id="tshirt" data-name="Футболка" data-price="500">
+                        <div class="store-img"><img src="/static/img/shop/tshirt.png" alt="Футболка" loading="lazy" onerror="this.style.display='none'"></div>
+                        <div class="store-name">Футболка</div>
+                        <div class="store-price">500 кредитов</div>
+                        <button class="details-btn">Купить</button>
+                    </div>
+                    <div class="store-item" data-id="cap" data-name="Кепка" data-price="500">
+                        <div class="store-img"><img src="/static/img/shop/cap.png" alt="Кепка" loading="lazy" onerror="this.style.display='none'"></div>
+                        <div class="store-name">Кепка</div>
+                        <div class="store-price">500 кредитов</div>
+                        <button class="details-btn">Купить</button>
+                    </div>
+                </div>
+            </div>
+            <div id="shop-pane-cart" class="pred-pane" style="display:none;">
+                <div style="padding:12px; color: var(--gray);">Корзина пуста.</div>
+            </div>
+            <div id="shop-pane-myorders" class="pred-pane" style="display:none;">
+                <div style="padding:12px; color: var(--gray);">Загрузка...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/team-utils.js"></script>
+    <script src="/static/js/match-utils.js"></script>
+    <script src="/static/js/animations.js"></script>
+    <script src="/static/js/splash.js"></script>
+    <script src="/static/js/telegram-patch.js"></script>
+    <script src="/static/js/league.js"></script>
+    <script src="/static/js/shop.js"></script>
+    <script src="/static/js/admin.js"></script>
+    <script src="/static/js/profile-user.js"></script>
+    <script src="/static/js/profile-achievements.js"></script>
+    <script src="/static/js/profile-checkin.js"></script>
+    <script src="/static/js/profile-live.js"></script>
+    <script src="/static/js/profile-match-roster-events.js"></script>
+    <script src="/static/js/profile-match-advanced.js"></script>
+    <script src="/static/js/profile-match-live-score.js"></script>
+    <script src="/static/js/profile-match-admin.js"></script>
+    <script src="/static/js/profile-match-stats.js"></script>
+    <script src="/static/js/profile-match-specials.js"></script>
+    <script src="/static/js/profile-match-stream.js"></script>
+    <script src="/static/js/profile-referral.js"></script>
+    <script src="/static/js/profile-ads-featured.js"></script>
+    <script src="/static/js/profile-core.js"></script>
+    <script src="/static/js/profile.js"></script>
+    <script src="/static/js/profile-scorers.js"></script>
+    <script src="/static/js/nav-fallback.js"></script>
+    <script src="/static/js/streams.js"></script>
+    <script src="/static/js/predictions.js"></script>
+    <!-- Real-time обновления через WebSocket -->
+    <script src="/static/js/realtime-updates.js"></script>
+        <script>
+        // Fallback навигации: активируется, если основной скрипт не сработал (некоторые мобильные WebView срезают ошибки)
+        (function(){
+            try {
+                if (window.__NAV_FALLBACK_INIT__) return; // уже инициализировано
+                const nav = document.querySelectorAll('.nav-item');
+                // если основная логика не выставила глобальный маркер
+                if (!window.ProfileLive && nav.length) {
+                    window.__NAV_FALLBACK_INIT__ = true;
+                    nav.forEach(it => {
+                        it.addEventListener('click', () => {
+                            try {
+                                document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+                                it.classList.add('active');
+                                const tab = it.getAttribute('data-tab');
+                                ['home','ufo','predictions','leaderboard','shop','admin','profile'].forEach(id=>{
+                                    const el = document.getElementById('tab-'+id); if(el) el.style.display = (tab===id?'':'none');
+                                });
+                            } catch(e) { console.warn('Fallback nav error', e); }
+                        }, { passive:true });
+                    });
+                }
+            } catch(e) {}
+        })();
+        </script>
+
+</body>
+</html>

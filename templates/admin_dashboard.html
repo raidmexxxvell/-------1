@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Админ-панель - Лига Обнинска</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/static/js/error-overlay.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/database-ui.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚽</text></svg>">
+</head>
+<body class="tg">
+    <div class="app-container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo-container">
+                <img src="/static/img/logo_liga.png" alt="Лига Обнинска" class="logo">
+            </div>
+            <h1 class="app-title">Админ-панель</h1>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Admin Subtabs -->
+            <div id="admin-subtabs" class="subtabs">
+                <div class="subtab-item active" data-atab="matches">Матчи и составы</div>
+                <div class="subtab-item" data-atab="players">Управление игроками</div>
+                <div class="subtab-item" data-atab="news">Новости</div>
+                <div class="subtab-item" data-atab="service">Сервис</div>
+                <div class="subtab-item" data-atab="stats">Статистика</div>
+            </div>
+
+            <!-- Matches and Lineups Pane -->
+            <div id="admin-pane-matches" class="admin-pane">
+                <div class="admin-section">
+                    <h3>Ближайшие матчи</h3>
+                    <button id="admin-matches-refresh" class="action-btn">Обновить список матчей</button>
+                    <div id="matches-list" class="matches-container">
+                        <!-- Динамически заполняется списком матчей -->
+                    </div>
+                </div>
+
+                <!-- Match Details Modal -->
+                <div id="match-details-modal" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 id="match-details-title">Редактирование состава</h3>
+                            <button class="modal-close" onclick="closeMatchModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="teams-container">
+                                <!-- Home Team -->
+                                <div class="team-section">
+                                    <h4 id="home-team-name">Команда 1</h4>
+                                    <div class="lineup-section">
+                                        <h5>Основной состав</h5>
+                                        <div id="home-main-lineup" class="lineup-list">
+                                            <!-- Основной состав команды хозяев -->
+                                        </div>
+                                        <button class="add-player-btn" onclick="addPlayerToLineup('home', 'main')">+ Добавить игрока</button>
+                                    </div>
+                                    <div class="lineup-section">
+                                        <h5>Запасные</h5>
+                                        <div id="home-sub-lineup" class="lineup-list">
+                                            <!-- Запасные команды хозяев -->
+                                        </div>
+                                        <button class="add-player-btn" onclick="addPlayerToLineup('home', 'sub')">+ Добавить запасного</button>
+                                    </div>
+                                </div>
+
+                                <!-- Away Team -->
+                                <div class="team-section">
+                                    <h4 id="away-team-name">Команда 2</h4>
+                                    <div class="lineup-section">
+                                        <h5>Основной состав</h5>
+                                        <div id="away-main-lineup" class="lineup-list">
+                                            <!-- Основной состав команды гостей -->
+                                        </div>
+                                        <button class="add-player-btn" onclick="addPlayerToLineup('away', 'main')">+ Добавить игрока</button>
+                                    </div>
+                                    <div class="lineup-section">
+                                        <h5>Запасные</h5>
+                                        <div id="away-sub-lineup" class="lineup-list">
+                                            <!-- Запасные команды гостей -->
+                                        </div>
+                                        <button class="add-player-btn" onclick="addPlayerToLineup('away', 'sub')">+ Добавить запасного</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="modal-actions">
+                                <button id="save-lineups-btn" class="action-btn">Сохранить составы</button>
+                                <button class="cancel-btn" onclick="closeMatchModal()">Отмена</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Players Management Pane -->
+            <div id="admin-pane-players" class="admin-pane" style="display: none;">
+                <div class="admin-section">
+                    <h3>Управление игроками</h3>
+                    <div class="players-controls">
+                        <input type="text" id="player-search" placeholder="Поиск игроков..." class="search-input">
+                        <select id="team-filter" class="team-select">
+                            <option value="">Все команды</option>
+                            <!-- Динамически заполняется -->
+                        </select>
+                        <button id="add-new-player-btn" class="action-btn">+ Новый игрок</button>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Имя</th>
+                                    <th>Команда</th>
+                                    <th>Позиция</th>
+                                    <th>Номер</th>
+                                    <th>Статус</th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="players-table">
+                                <!-- Динамически заполняется -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Add/Edit Player Modal -->
+                <div id="player-modal" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 id="player-modal-title">Добавить игрока</h3>
+                            <button class="modal-close" onclick="closePlayerModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="player-form">
+                                <div class="form-group">
+                                    <label for="player-name">Имя игрока:</label>
+                                    <input type="text" id="player-name" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="player-team">Команда:</label>
+                                    <select id="player-team" required>
+                                        <!-- Динамически заполняется -->
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="player-position">Позиция:</label>
+                                    <select id="player-position">
+                                        <option value="GK">Вратарь</option>
+                                        <option value="DEF">Защитник</option>
+                                        <option value="MID">Полузащитник</option>
+                                        <option value="FWD">Нападающий</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="player-number">Номер:</label>
+                                    <input type="number" id="player-number" min="1" max="99">
+                                </div>
+                                <div class="form-group">
+                                    <label for="player-status">Статус:</label>
+                                    <select id="player-status">
+                                        <option value="active">Активный</option>
+                                        <option value="injured">Травмирован</option>
+                                        <option value="suspended">Дисквалифицирован</option>
+                                        <option value="inactive">Неактивный</option>
+                                    </select>
+                                </div>
+                                <div class="modal-actions">
+                                    <button type="submit" class="action-btn">Сохранить</button>
+                                    <button type="button" class="cancel-btn" onclick="closePlayerModal()">Отмена</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- News Management Pane -->
+            <div id="admin-pane-news" class="admin-pane" style="display: none;">
+                <div class="admin-section">
+                    <h3>Управление новостями</h3>
+                    <div class="news-controls">
+                        <button id="add-new-news-btn" class="action-btn" onclick="window.AdminEnhanced.openNewsModal()">+ Создать новость</button>
+                    </div>
+                    
+                    <div id="news-list" class="news-container">
+                        <!-- Динамически заполняется новостями -->
+                    </div>
+                </div>
+
+                <!-- Add/Edit News Modal -->
+                <div id="news-modal" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 id="news-modal-title">Создать новость</h3>
+                            <button class="modal-close" onclick="window.AdminEnhanced.closeNewsModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="news-form">
+                                <div class="form-group">
+                                    <label for="news-title">Заголовок:</label>
+                                    <input type="text" id="news-title" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="news-content">Содержание:</label>
+                                    <textarea id="news-content" rows="8" required></textarea>
+                                </div>
+                                <div class="modal-actions">
+                                    <button type="button" id="save-news-btn" class="action-btn" onclick="window.AdminEnhanced.saveNews()">Сохранить</button>
+                                    <button type="button" class="cancel-btn" onclick="window.AdminEnhanced.closeNewsModal()">Отмена</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Service Pane -->
+            <div id="admin-pane-service" class="admin-pane" style="display: none;">
+                <div class="admin-section">
+                    <h3>Обновление данных</h3>
+                    <button id="admin-refresh-all" class="action-btn">Обновить все данные</button>
+                    <p class="help-text">Обновляет турнирную таблицу, статистику, расписание и результаты</p>
+                </div>
+            </div>
+
+            <!-- Stats Pane -->
+            <div id="admin-pane-stats" class="admin-pane" style="display: none;">
+                <div class="admin-section">
+                    <h3>Статистика</h3>
+                    <button id="admin-stats-refresh" class="action-btn">Обновить статистику</button>
+                    <div id="admin-stats-display" class="stats-container">
+                        <!-- Статистика матчей и составов -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/telegram-patch.js"></script>
+    <script src="/static/js/admin-enhanced.js"></script>
+</body>
+</html>

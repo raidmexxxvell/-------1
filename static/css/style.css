@@ -1,0 +1,1204 @@
+ :root {
+    /* UFO League Theme (default) */
+    --bg:#0f1720;
+    --card:#111827;
+    --muted:#9aa4b2;
+    --accent1:linear-gradient(135deg,#ffb86b,#6c8cff);
+    --glass:rgba(255,255,255,0.03);
+    --primary: #6c8cff;
+    --primary-dark: #5c7cef;
+    --secondary: #ffb86b;
+    --success: #10b981;
+    --danger: #ef4444;
+    --light: #f1f5f9;
+    --gray: #9aa4b2;
+    --border-radius: 12px;
+    --transition: all 0.3s ease;
+}
+
+/* BLB League Theme */
+body.blb-theme {
+    --bg: #0a1128;
+    --card: #1e2a47;
+    --muted: #c9c08b;
+    --accent1: linear-gradient(135deg, #7a5f26, #eebb11);
+    --glass: rgba(59, 130, 246, 0.05);
+    --primary: #eebb11;
+    --primary-dark: #af8e21;
+    --secondary: #8d6e2f;
+    --success: #10b981;
+    --danger: #ef4444;
+    --light: #f8fafc;
+    --gray: #c9be8b;
+    --border-radius: 8px;
+    --transition: all 0.3s ease;
+}
+
+/* splash-стили перенесены в splash.css */
+
+/* --- ОСНОВНОЕ ПРИЛОЖЕНИЕ --- */
+body {
+    background: var(--bg);
+    color: var(--light);
+    min-height: 100vh;
+    padding: 16px 0 64px; /* без боковых полей */
+    line-height: 1.6;
+    margin: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    touch-action: manipulation; /* отключаем pinch-zoom на поддерживаемых браузерах */
+}
+
+/* Блокировка ландшафтной ориентации: показываем полу-прозрачный оверлей в landscape */
+.orientation-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); color:#fff; display:none; z-index: 2000; }
+.orientation-overlay .orientation-inner { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); text-align:center; padding:16px 20px; border:1px solid rgba(255,255,255,0.15); border-radius:12px; background: rgba(15,23,42,0.95); font-weight:800; }
+@media (orientation: landscape) and (max-width: 1024px) {
+    /* Показываем оверлей только если НЕ разрешён ландшафт (напр. вне вкладки с трансляцией) */
+    body:not(.allow-landscape) .orientation-overlay { display: block; }
+}
+
+.container { max-width: 600px; margin: 0 auto; padding: 0 12px; } /* внутренние отступы переносим в контейнер */
+.nav {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    width: min(600px, 100vw);
+    background: rgba(10, 18, 40, 0.92);
+    backdrop-filter: blur(12px);
+    border-radius: 0; /* без закруглений */
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    justify-content: space-between;
+    z-index: 1000;
+    box-shadow: 0 -8px 22px rgba(0,0,0,0.35);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    overflow: hidden;
+}
+
+.nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0px; /* меньше расстояние между иконкой и подписью */
+    color: rgba(255,255,255,0.75);
+    font-size: 11px;
+    padding: 4px 6px; /* компактнее общий отступ */
+    border-radius: 10px;
+    transition: var(--transition);
+    cursor: pointer;
+    min-width: auto;
+    position: relative;
+    -webkit-tap-highlight-color: transparent; /* убрать подсветку */
+    touch-action: manipulation; /* улучшить отзывчивость */
+    user-select: none;
+}
+
+.nav-item:hover, .nav-item.active {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Панель переключения лиги: встроена внутрь нижнего меню и раздвигает контент слева */
+.nav-league-panel {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    bottom: 8px;
+    height: auto;
+    width: 0;
+    overflow: hidden;
+    /* бесшовно, без отдельной обводки и тени — часть нижнего меню */
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    box-shadow: none;
+    display: flex;
+    align-items: center;
+    padding: 0;
+    transition: var(--transition);
+}
+/* режим показа альтернативной лиги через полку-оверлей — панель оставляем скрытой */
+.nav-league-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center; /* центрируем иконку в узкой панели */
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    color: rgba(255,255,255,0.9);
+    border: none;
+    border-radius: 10px;
+    font-weight: 800;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 6px 8px;
+}
+.nav-league-btn:hover { background: rgba(255,255,255,0.08); }
+.nav-league-btn .icon { font-size: 16px; line-height: 1; }
+.nav-league-btn .text { white-space: nowrap; display: none; } /* текст скрыт — только иконка */
+
+.nav-icon { font-size: 16px; line-height: 1; margin-bottom: 2px; }
+.nav-label {
+    display: block;
+    font-size: 10px;
+    line-height: 1.1;
+    white-space: nowrap;
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: .9;
+}
+.nav-item .nav-badge { position: absolute; top: -2px; right: 2px; background: #ef4444; color: #fff; border-radius: 999px; padding: 1px 5px; font-size: 10px; font-weight: 800; line-height: 1; border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 0 0 1px rgba(0,0,0,0.4); }
+
+/* Полка выбора лиг (красивое открытие) */
+#league-overlay { left: 50% !important; transform: translateX(-50%) !important; width: min(600px, calc(100% - 24px)) !important; }
+.league-shelf {
+    background: rgba(10,18,40,0.96);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-bottom: none;
+    border-radius: 14px 14px 0 0;
+    padding: 10px;
+    box-shadow: 0 -10px 30px rgba(0,0,0,0.45);
+    transform: translateY(100%);
+    transition: transform .28s ease-out, opacity .28s ease-out;
+    opacity: 0.98;
+}
+.league-shelf.show { transform: translateY(0); }
+.league-shelf .league-options { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+.league-shelf .league-tile { display: flex; gap: 8px; align-items: center; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 8px; cursor: pointer; transition: transform .15s ease; }
+.league-shelf .league-tile:hover { transform: translateY(-1px); }
+.league-shelf .league-icon { font-size: 18px; }
+.league-shelf .league-name { font-weight: 800; }
+
+/* --- МОдалка --- */
+.modal { position: fixed; inset: 0; z-index: 1200; display: none; }
+.modal.show { display: block; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
+.modal-dialog { position: relative; margin: 0 auto; top: 20vh; width: min(480px, calc(100% - 32px)); background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 16px; box-shadow: 0 12px 28px rgba(0,0,0,0.5); }
+.modal-title { font-weight: 800; font-size: 16px; margin-bottom: 6px; }
+.modal-desc { font-size: 12px; color: var(--gray); margin-bottom: 10px; }
+.modal-input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(2,6,23,0.6); color: #fff; outline: none; }
+.modal-error { color: var(--danger); font-size: 12px; min-height: 16px; margin-top: 6px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.btn { padding: 8px 12px; border-radius: 10px; font-weight: 700; border: 1px solid transparent; cursor: pointer; }
+.btn-primary { background: var(--primary-dark); color: #fff; border-color: rgba(255,255,255,0.06); }
+.btn-secondary { background: transparent; color: var(--light); border-color: rgba(255,255,255,0.2); }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Стили для модалки ввода ставки */
+.stake-modal .modal-dialog { width: min(420px, calc(100% - 32px)); top: 28vh; border-radius: 12px; padding: 14px; }
+.stake-modal .modal-title { font-size: 15px; margin-bottom: 6px; }
+.stake-modal .modal-desc { font-size: 13px; color: var(--gray); margin-bottom: 10px; }
+.stake-modal .modal-input { font-size: 18px; padding: 12px 14px; border-radius: 10px; text-align: center; font-weight:800; letter-spacing:1px; }
+.stake-modal .modal-actions { justify-content: space-between; margin-top: 14px; }
+.stake-modal .modal-actions .btn-secondary { background: transparent; border-color: rgba(255,255,255,0.06); }
+.stake-modal .modal-actions .btn-primary { background: var(--primary); border-color: transparent; color: #061028; }
+.stake-modal .modal-error { color: var(--danger); font-size: 13px; min-height: 18px; text-align:center; margin-top:8px; }
+
+/* --- Трансляция VK --- */
+.stream-wrap { width: 100%; border-radius: 12px; overflow: hidden; background: rgba(2,6,23,0.6); border: 1px solid rgba(255,255,255,0.08); }
+.stream-aspect {
+    position: relative; width: 100%; padding-top: 56.25%; /* 16:9 */
+}
+.stream-aspect iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* Поддержка полноэкранного режима для мобильных устройств */
+.stream-aspect iframe:-webkit-full-screen { width: 100vw !important; height: 100vh !important; }
+.stream-aspect iframe:-moz-full-screen { width: 100vw !important; height: 100vh !important; }
+.stream-aspect iframe:fullscreen { width: 100vw !important; height: 100vh !important; }
+.stream-skeleton { display:flex; align-items:center; justify-content:center; color: var(--gray); font-size: 12px; height: 220px; }
+
+/* Кнопка фуллскрина */
+.stream-wrap { position: relative; }
+.stream-fs-btn { 
+    position: absolute; 
+    right: 8px; 
+    bottom: 8px; 
+    z-index: 3; 
+    background: rgba(0,0,0,0.8); 
+    color: #fff; 
+    border: 2px solid rgba(255,255,255,0.4); 
+    border-radius: 8px; 
+    padding: 10px 12px; 
+    font-weight: 800; 
+    line-height: 1; 
+    font-size: 18px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    min-width: 40px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.stream-fs-btn:hover { background: rgba(0,0,0,0.95); border-color: rgba(255,255,255,0.6); }
+.stream-fs-btn:active { transform: scale(0.92); background: rgba(0,0,0,1); border-color: rgba(255,255,255,0.8); }
+
+/* Псевдо-фуллскрин для Telegram WebApp на мобильных */
+#md-pane-stream.fs-mode { 
+    position: fixed !important; 
+    inset: 0 !important; 
+    z-index: 2500 !important; 
+    background: #000 !important; 
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    border: none !important;
+}
+#md-pane-stream.fs-mode .stream-wrap { 
+    position: absolute !important; 
+    inset: 0 !important; 
+    width: 100% !important; 
+    height: 100% !important; 
+    border-radius: 0 !important; 
+    border: none !important; 
+    margin: 0 !important;
+    padding: 0 !important;
+}
+#md-pane-stream.fs-mode .stream-aspect { 
+    position: absolute !important; 
+    inset: 0 !important; 
+    padding: 0 !important; 
+    margin: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+}
+#md-pane-stream.fs-mode .stream-aspect iframe { 
+    position: absolute !important; 
+    inset: 0 !important; 
+    width: 100% !important; 
+    height: 100% !important; 
+    border: 0 !important; 
+}
+/* Скрываем кнопку фуллскрина в псевдо-режиме */
+#md-pane-stream.fs-mode .stream-fs-btn { display: none !important; }
+
+/* Убираем скролл и другие элементы UI в псевдо-фуллскрине */
+body.allow-landscape #md-pane-stream.fs-mode {
+    overflow: hidden !important;
+}
+body.allow-landscape #md-pane-stream.fs-mode * {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Комментарии под трансляцией */
+.comments-box { margin-top: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 8px; }
+.comments-title { font-weight: 800; font-size: 14px; margin-bottom: 6px; }
+.comments-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+.comment-item { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 8px; }
+.comment-meta { font-size: 11px; color: var(--gray); margin-bottom: 2px; }
+.comment-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.cm-empty { color: var(--gray); font-size: 12px; text-align: center; padding: 8px 0; }
+.comments-form { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 8px; }
+.comments-input { padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(2,6,23,0.6); color: #fff; outline: none; }
+.comments-hint { color: var(--gray); font-size: 11px; margin-top: 6px; }
+
+/* --- Админ: трансляции --- */
+.stream-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
+.stream-row .title { flex: 1 1 auto; font-weight: 700; }
+.stream-row .time { color: var(--gray); font-size: 12px; }
+.stream-row input[type="text"] { flex: 1 1 360px; min-width: 180px; max-width: 100%; padding: 8px 10px; border-radius: 10px; border:1px solid rgba(255,255,255,0.2); background: transparent; color:#fff; box-sizing: border-box; }
+.stream-row .confirm { white-space: nowrap; margin-left: auto; }
+
+/* Подпись сохранения ссылки трансляции */
+.save-hint { margin-top: 6px; font-size: 12px; color: var(--gray); text-align: left; }
+.save-hint.success { color: var(--success); }
+.save-hint.error { color: var(--danger); }
+
+
+/* --- ВЕРХНЯЯ ПАНЕЛЬ --- */
+.top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.league-title {
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.league-logo {
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+}
+
+/* --- Главная: рекламный щит/карусель --- */
+.ads-wrap { margin: 10px 0 14px; }
+.ads-carousel { position: relative; border-radius: 14px; overflow: hidden; background: rgba(2,6,23,0.6); border: 1px solid rgba(255,255,255,0.08); }
+.ads-track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; -ms-overflow-style: none; scrollbar-width: none; }
+.ads-track::-webkit-scrollbar { display: none; }
+.ads-slide { position: relative; min-width: 100%; scroll-snap-align: start; }
+.ads-slide img { display:block; width: 100%; height: 160px; object-fit: cover; }
+.ads-slide .ads-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 12px; background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.55) 100%); color:#fff; font-weight:700; font-size:14px; text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+.ads-dots { position: absolute; left: 0; right: 0; bottom: 6px; display: flex; gap: 6px; justify-content: center; align-items: center; }
+.ads-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.45); }
+.ads-dot.active { background: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,0.35); }
+
+.winner-glow:hover {
+    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.9), 0 0 12px rgba(234, 179, 8, 0.9);
+    transform: translateY(-2px) scale(1.02);
+}
+
+/* Результаты: список карточек как в расписании/статистике */
+.results-list {
+    display: flex;
+    flex-direction: column;
+}
+.match-card.result .match-header {
+    font-weight: 600;
+    color: var(--light);
+    margin-bottom: 6px;
+}
+
+/* --- СТИЛИ ПРОФИЛЯ --- */
+.profile-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 18px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    gap: 12px;
+}
+
+.profile-info {
+    display: flex; 
+    flex-direction: column; 
+    gap: 6px; 
+    flex: 1;
+    z-index: 3;
+}
+
+.profile-avatar {
+    width: 110px;
+    height: 110px;
+    border-radius: 50%;
+    overflow: hidden;
+    margin: 0 auto;
+    border: 3px solid var(--primary);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.45);
+    position: relative;
+    z-index: 3;
+}
+
+.profile-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profile-info { display: flex; flex-direction: column; gap: 6px; text-align: center; }
+.profile-info h2 { font-size: 22px; margin: 6px 0 0 0; }
+
+/* centered variant used on mobile profile screen */
+.profile-header.profile-centered { flex-direction: column; padding-top: 12px; }
+
+/* Background area behind avatar/name/stats (profile shade) */
+.profile-top-area {
+    overflow: hidden;
+    padding-top: 34px;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    position: relative;
+    background-size: cover;
+    background-position: center;
+    /* make profile-top-area full-bleed across the viewport (no side gaps) */
+    width: 100vw;
+    max-width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+}
+
+.shade-bg {
+    position: absolute;
+    inset: 0; /* fill entire profile-top-area */
+    z-index: 0;
+    background-size: cover;
+    background-position: center;
+    height: auto;
+}
+.profile-top-area > * { z-index: 1; }
+
+.profile-top-area::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.35) 100%);
+    pointer-events: none;
+}
+
+.profile-shade-btn { display:inline-block; width: 34px; height: 22px; margin-left:8px; vertical-align: middle; border-radius:6px; background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06); cursor:pointer; }
+.profile-shade-btn:focus { outline:none; box-shadow:0 0 0 2px rgba(108,140,255,0.10); }
+.profile-shade-btn::before, .profile-shade-btn::after { content:''; display:block; width:60%; height:2px; margin:3px auto; background: rgba(255,255,255,0.95); border-radius:1px; }
+
+/* modal thin tweaks for shade list */
+#shade-list img { width:64px; height:64px; object-fit:cover; border-radius:8px; cursor:pointer; border:2px solid transparent; }
+#shade-list img.selected { border-color: var(--primary); }
+
+/* hide the app top-bar when profile is visible */
+.container.profile-hide-top .top-bar { display: none; }
+
+/* Любимый клуб — селект */
+#favorite-team {
+    appearance: none;
+    -webkit-appearance: none;
+    background: rgba(255,255,255,0.08);
+    color: var(--light);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: 8px 30px 8px 10px;
+    font-size: 14px;
+    background-image: linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.8) 50%),
+                      linear-gradient(135deg, rgba(255,255,255,0.8) 50%, transparent 50%);
+    background-position: right 12px top 50%, right 6px top 50%;
+    background-size: 8px 8px, 8px 8px;
+    background-repeat: no-repeat;
+}
+#favorite-team:focus { outline: none; border-color: rgba(255,255,255,0.28); box-shadow: 0 0 0 2px rgba(255,255,255,0.12) inset; }
+/* Цвет для открытого списка в поддерживаемых браузерах */
+#favorite-team option { background: rgba(10, 18, 40, 0.98); color: var(--light); }
+
+/* Кнопка «Обновить» в таблице */
+.refresh-btn {
+    background: var(--accent1);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.refresh-btn:disabled { opacity: .7; cursor: not-allowed; }
+
+.profile-stats {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.stat-card {
+    flex: 1;
+    background: var(--card);
+    border-radius: var(--border-radius);
+    padding: 10px 8px;
+    text-align: center;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: var(--transition);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+}
+
+.stat-value {
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--secondary);
+    margin: 3px 0;
+}
+
+.stat-label {
+    font-size: 12px;
+    color: var(--gray);
+}
+
+.xp-progress-container {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    height: 10px;
+    overflow: hidden;
+    margin: 15px 0;
+}
+
+.xp-progress {
+    height: 100%;
+    background: var(--accent1);
+    border-radius: 20px;
+    width: 0;
+    transition: width 1s ease-out;
+}
+
+.level-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--gray);
+}
+
+.checkin-section {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 10px;
+    margin: 14px 0;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.checkin-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    color: var(--light);
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.checkin-days {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+    overflow: hidden;
+    padding-bottom: 6px;
+    margin: 6px 0 0;
+}
+
+.checkin-day {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-weight: 600;
+    border: 1px solid rgba(255,255,255,0.08);
+    transition: var(--transition);
+    color: var(--light);
+    position: relative;
+    font-size: 13px;
+    box-shadow: inset 0 -1px 0 rgba(0,0,0,0.18);
+    box-sizing: border-box;
+    min-width: 0;
+}
+
+.checkin-day::after { display: none; content: none; }
+.checkin-day.completed::after { display: none; content: none; }
+
+.checkin-day.completed {
+    /* совпадает с градиентом активной подвкладки */
+    background: var(--accent1);
+    border-color: rgba(255,255,255,0.22);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.checkin-day.active {
+    background: var(--accent1);
+    border-color: rgba(255,255,255,0.22);
+    color: #fff;
+}
+
+.checkin-button {
+    background: var(--accent1);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-weight: 700;
+    font-size: 14px;
+    width: 100%;
+    margin-top: 10px;
+    cursor: pointer;
+    transition: var(--transition);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+}
+
+.checkin-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 7px 10px -3px rgba(0, 0, 0, 0.3);
+}
+
+.checkin-button:disabled {
+    background: linear-gradient(90deg, #4b5563, #374151);
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.achievements-section {
+    margin-top: 20px;
+}
+
+.section-title {
+    font-size: 18px;
+    margin: 20px 0 15px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--light);
+}
+
+.achievements-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    padding-bottom: 10px;
+}
+
+.achievement-card {
+    background: var(--card);
+    border-radius: var(--border-radius);
+    padding: 10px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: var(--transition);
+    cursor: pointer;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    box-sizing: border-box;
+}
+
+.achievement-card.locked {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.achievement-card img {
+    width: 52px;
+    height: 52px;
+    object-fit: contain;
+    margin-bottom: 8px;
+}
+
+.achievement-card.locked img {
+    filter: grayscale(100%);
+    opacity: 0.5;
+}
+
+.badge-name {
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: 4px;
+    color: var(--light);
+}
+
+.badge-requirements {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+}
+
+/* Тоггл описания достижения */
+.achv-desc-toggle {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--secondary);
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    display: inline-block;
+    padding: 4px 8px;
+    cursor: pointer;
+    user-select: none;
+}
+.achv-desc-toggle:hover { background: rgba(255,255,255,0.16); }
+
+/* прогресс в карточке достижения */
+.achv-progress-container {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    height: 6px;
+    overflow: hidden;
+    margin-top: 6px;
+    width: 100%;
+}
+
+.achv-progress-bar {
+    height: 100%;
+    background: var(--accent1);
+    border-radius: 10px;
+    width: 0%;
+    transition: width 0.8s ease-out;
+}
+
+.achv-progress {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, var(--secondary), var(--primary));
+    transition: width 0.6s ease;
+}
+
+.checkin-status {
+    text-align: center;
+    margin-top: 8px;
+    min-height: 18px;
+    font-size: 13px;
+}
+
+.reward-animation {
+    animation: fadeInOut 2s ease;
+    color: var(--success);
+    font-weight: bold;
+}
+
+@keyframes fadeInOut {
+    0% { opacity: 0; transform: translateY(5px); }
+    20% { opacity: 1; transform: translateY(0); }
+    80% { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-5px); }
+}
+
+/* --- АДАПТИВНОСТЬ --- */
+@media (max-width: 480px) {
+    .profile-header {
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+    }
+    
+    .profile-avatar {
+        margin: 0 0 8px 0;
+    }
+    
+    .stat-card {
+        padding: 8px 6px;
+    }
+    
+    .stat-value {
+        font-size: 16px;
+    }
+    
+    .stat-label {
+        font-size: 11px;
+    }
+}
+
+/* --- Подвкладки НЛО --- */
+.subtabs {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0;
+    margin: 0 0 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 0; /* без скруглений слева и справа */
+    overflow: hidden;
+    background: rgba(255,255,255,0.04);
+    /* full-bleed во всю ширину экрана */
+    width: 100vw;
+    max-width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+}
+
+.subtab-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: var(--gray);
+    padding: 8px 6px; /* компактнее, ближе к краям */
+    font-size: 14px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+/* разделители для сетки 2x2 */
+.subtabs .subtab-item:nth-child(1),
+.subtabs .subtab-item:nth-child(2) {
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.subtabs .subtab-item:nth-child(1),
+.subtabs .subtab-item:nth-child(3) {
+    border-right: 1px solid rgba(255,255,255,0.08);
+}
+
+.subtab-item:hover {
+    color: var(--light);
+    background: rgba(255,255,255,0.06);
+}
+
+.subtab-item.active {
+    background: var(--accent1);
+    color: #fff;
+}
+
+.ufo-content {
+    background: transparent;
+    border-radius: 0;
+    border: none;
+    padding: 0;
+}
+
+/* Подвкладки профиля переиспользуют .subtabs стили */
+.profile-pane { padding-top: 8px; }
+.referral-box {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+    .ref-note {
+        margin-top: 6px;
+        font-size: 12px;
+        color: #888;
+    }
+}
+.referral-box.full { width: 100vw; max-width: 100vw; margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw); border-radius: 0; border-left: none; border-right: none; }
+.ref-link {
+    word-break: break-all;
+    background: rgba(255,255,255,0.06);
+    border: 1px dashed rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 10px;
+}
+.ref-stats { color: var(--gray); font-size: 14px; margin-top: 8px; }
+.share-btn {
+    width: 100%;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    margin: 6px 0;
+    background: linear-gradient(90deg, var(--secondary), var(--primary));
+    color: #0b1220;
+}
+.share-btn:active { transform: translateY(1px); }
+/* Тема BLB: золотистая кнопка, тёмный текст */
+body.theme-blb .share-btn {
+    background: linear-gradient(180deg, #e5c45a, #c7a22c);
+    color: #1a1a1a;
+}
+.share-btn:active { transform: translateY(1px); }
+
+/* Таблица лиги */
+.league-table-wrap {
+    overflow-x: auto;
+    width: 100vw;
+    max-width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+}
+
+.league-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: var(--light);
+    font-size: 14px;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.15); /* тонкая белая обводка */
+}
+
+/* заголовок берется из первой строки данных */
+
+.league-table tbody td {
+    padding: 10px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.10);
+    border-right: 1px solid rgba(255,255,255,0.06);
+    text-align: center; /* центрируем по ширине */
+    vertical-align: middle; /* центрируем по высоте */
+}
+
+.league-table tbody tr:nth-child(even) {
+    background: rgba(255,255,255,0.03);
+}
+
+.league-table tbody tr:hover {
+    background: rgba(255,255,255,0.06);
+}
+
+.league-table tbody td:first-child,
+.league-table thead th:first-child {
+    width: 44px;
+    text-align: center;
+    color: var(--gray);
+}
+
+.league-table tbody td:nth-child(2) {
+    font-weight: 600;
+}
+.user-link { color: var(--secondary); text-decoration: none; font-weight: 800; }
+.user-link:hover { text-decoration: underline; }
+/* Реферальный блок больше не full-bleed — вписывается в контейнер приложения */
+.referral-box { width: auto; max-width: 100%; margin: 12px 0; }
+
+.table-updated {
+    margin-top: 8px;
+    color: var(--gray);
+    font-size: 12px;
+}
+
+/* ------ ЛИДЕРБОРД ------ */
+.leaderboard-wrap { margin-top: 8px; }
+.leader-pane { padding-top: 6px; }
+.podium { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 10px 20px; align-items: end; }
+.podium-place { background: var(--card-bg); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px 8px; text-align: center; position: relative; }
+.podium-place.gold { box-shadow: 0 0 0 2px rgba(255,215,0,0.3) inset; }
+.podium-place.silver { box-shadow: 0 0 0 2px rgba(192,192,192,0.3) inset; }
+.podium-place.bronze { box-shadow: 0 0 0 2px rgba(205,127,50,0.3) inset; }
+.podium-avatar { width: 64px; height: 64px; border-radius: 50%; overflow: hidden; margin: 0 auto 6px; border: 2px solid rgba(255,255,255,0.15); }
+.podium-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.podium-name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prize-block { margin-top: 12px; }
+.prize-block h3 { margin: 8px 12px; font-size: 15px; }
+
+/* Каталог достижений: усилим разграничение и заголовки */
+#achv-catalog-table tbody tr.achv-header td {
+    font-weight: 700;
+    background: rgba(255,255,255,0.05);
+}
+#achv-catalog-table tbody tr.achv-desc td:first-child {
+    color: var(--gray);
+    width: 25%;
+}
+#achv-catalog-table tbody td {
+    border-bottom: 1px solid rgba(255,255,255,0.10);
+    border-right: 1px solid rgba(255,255,255,0.06);
+    padding: 8px;
+}
+
+/* Подсветка ТОП-3: золото, серебро, бронза (по классам) */
+.league-table tbody tr.rank-1 {
+    background: linear-gradient(90deg, rgba(255, 215, 0, 0.20), rgba(255, 215, 0, 0.10));
+    border-left: 4px solid #FFD700;
+}
+.league-table tbody tr.rank-2 {
+    background: linear-gradient(90deg, rgba(192, 192, 192, 0.18), rgba(192, 192, 192, 0.08));
+    border-left: 4px solid #C0C0C0;
+}
+.league-table tbody tr.rank-3 {
+    background: linear-gradient(90deg, rgba(205, 127, 50, 0.18), rgba(205, 127, 50, 0.08));
+    border-left: 4px solid #CD7F32;
+}
+
+/* --------- РАСПИСАНИЕ --------- */
+.tour-block { margin: 12px 10px 20px; }
+.tour-title {
+    text-align: center;
+    font-weight: 800;
+    font-size: 16px;
+    margin: 10px 0 6px;
+    background: linear-gradient(90deg, var(--secondary), var(--primary));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+.match-card {
+    background: var(--card-bg);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 12px;
+    margin: 10px 0;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.25);
+}
+.match-header { color: var(--gray); font-size: 12px; margin-bottom: 6px; text-align:center; }
+.match-center { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+.team { font-weight: 600; text-align: center; display:flex; flex-direction: column; align-items: center; gap: 6px; }
+.team .logo { width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); border-radius: 0; background: transparent; image-rendering: -webkit-optimize-contrast; backface-visibility: hidden; }
+.team .team-name { max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.score { color: var(--secondary); font-weight: 800; font-size: 18px; }
+.match-footer { margin-top: 10px; display: flex; justify-content: center; gap: 8px; }
+.details-btn {
+    background: var(--accent1);
+    color: #fff;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.schedule-loading, .schedule-empty, .schedule-error { color: var(--gray); padding: 10px; }
+
+/* --- Голосование (расписание) старое: вертикальные бары --- */
+.match-vote { margin-top: 8px; }
+.vote-row { display: grid; grid-template-columns: 28px 1fr 48px; align-items: center; gap: 8px; margin: 2px 0; }
+.vote-label { color: var(--light); font-weight: 700; text-align: center; }
+.vote-bar { height: 8px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.10); border-radius: 999px; overflow: hidden; }
+.vote-fill { height: 100%; background: linear-gradient(90deg, var(--secondary), var(--primary)); box-shadow: inset 0 0 8px rgba(0,0,0,0.25); width: 0%; transition: width .4s ease; }
+.vote-pct { color: var(--gray); font-size: 12px; text-align: right; }
+
+/* --- Новый вид голосования: одна горизонтальная полоса с тремя сегментами --- */
+.home-feature { text-align: center; display: block; width: 100%; max-width: 100%; margin: 10px 0; border-radius: 14px; }
+.home-feature .match-header { font-weight: 900; font-size: 16px; color: var(--light); margin-bottom: 2px; }
+.home-feature .match-subheader { color: var(--gray); font-size: 12px; margin-top: 2px; }
+.home-feature .vote-inline { margin-top: 10px; display: grid; gap: 6px; text-align: center; }
+.vote-title { font-weight: 900; letter-spacing: .3px; color: var(--light); text-align: center; }
+.vote-strip { display:flex; height: 12px; border-radius: 999px; overflow: hidden; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); box-shadow: inset 0 2px 6px rgba(0,0,0,0.2); }
+.vote-strip .seg { position: relative; width: 0%; transition: width .6s ease; background-size: 200% 100%; animation: voteShimmer 2.8s linear infinite; }
+/* Цвета сегментов задаются из JS (getTeamColor), поэтому дефолтные градиенты убраны */
+.vote-strip .seg-h { left: auto; }
+.vote-strip .seg-d { left: auto; }
+.vote-strip .seg-a { left: auto; }
+.vote-legend { display: grid; grid-template-columns: repeat(3, 1fr); font-size: 12px; color: var(--gray); text-align: center; }
+.vote-inline-btns, .vote-btns { display:flex; justify-content:center; gap: 12px; padding-top: 6px; }
+.vote-confirm { text-align: center; }
+
+@keyframes voteShimmer {
+    0% { background-position: 0% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* --------- РЕЗУЛЬТАТЫ: пагинация по туру --------- */
+.results-container { margin: 12px 10px 20px; }
+.results-pager { display:flex; align-items:center; justify-content: space-between; margin-bottom: 10px; }
+.pager-btn { background: linear-gradient(90deg, var(--primary), var(--secondary)); color: #0b1220; border:none; border-radius: 10px; padding: 6px 10px; font-weight: 800; cursor:pointer; }
+.pager-btn:disabled { opacity: .5; cursor: not-allowed; }
+.pager-title { font-weight: 900; font-size: 16px; letter-spacing: .3px; background: linear-gradient(90deg, var(--secondary), var(--primary)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* winner-ring отключён */
+/* .winner-ring { border: 2px solid rgba(234,179,8,0.95) !important; box-shadow: none !important; }
+.winner-ring:hover { box-shadow: none; transform: none; } */
+
+/* Modal */
+.modal { position: fixed; inset: 0; z-index: 2000; }
+.modal-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); }
+.modal-content { position: relative; background: rgba(2,6,23,0.98); border:1px solid rgba(255,255,255,0.1); border-radius: 14px; max-width: 560px; margin: 40px auto; padding: 12px; }
+.modal-close { position: absolute; right: 8px; top: 6px; background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer; }
+.match-modal-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px; padding: 8px 4px; }
+.match-modal-header .side { display:flex; flex-direction: column; align-items: center; gap:6px; }
+.match-modal-header .logo { width: 56px; height: 56px; object-fit: contain; border-radius: 0; background: transparent; }
+.match-modal-header .name { font-weight: 700; text-align:center; }
+.match-modal-header .center { display:flex; flex-direction: column; align-items:center; gap:4px; }
+.match-modal-header .score { color: var(--secondary); font-size:20px; font-weight:800; }
+.match-modal-header .datetime { color: var(--gray); font-size: 12px; }
+.modal-subtabs { margin: 8px 0; }
+.md-pane { min-height: 80px; }
+/* Детали матча: подкладки внутри модального экрана не должны выходить за границы */
+.match-details-topbar, .match-modal-header, .modal-subtabs, .modal-body, #ufo-match-details {
+    max-width: 100%;
+    overflow: hidden;
+}
+.modal-subtabs .subtab-item { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.match-modal-header .name { max-width: 42vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Match details screen */
+.match-details-topbar { display: flex; align-items: center; gap: 8px; margin: 6px 6px 10px; }
+.match-details-topbar .md-title { font-weight: 700; }
+.back-btn { background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.12); padding: 6px 10px; border-radius: 10px; cursor: pointer; }
+/* Rosters */
+.roster-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr; gap: 6px; }
+.roster-list li { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); padding: 8px 10px; border-radius: 8px; }
+.roster-list li.empty { opacity: .7; text-align: center; }
+.hidden { display: none !important; }
+.details-btn[disabled] { opacity: 0.7; cursor: progress; }
+
+/* --------- ПРОГНОЗЫ / СТАВКИ --------- */
+.predictions-wrap { margin-top: 8px; }
+.pred-tours-container { margin: 0; }
+.predictions-wrap .tour-block { margin: 0; }
+/* Плоские полноширинные карточки только во вкладке Прогнозы */
+#tab-predictions .match-card { background: transparent; border: none; border-radius: 0; box-shadow: none; margin: 0; padding: 12px 8px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+#tab-predictions .match-header { text-align: center; }
+#tab-predictions .match-footer { justify-content: flex-start; }
+.betting-line { margin-top: 10px; display:flex; justify-content: center; }
+.options-box { display:flex; gap: 8px; }
+.bet-btn { background: linear-gradient(90deg, var(--primary), var(--secondary)); color: #fff; border:none; border-radius: 10px; padding: 8px 12px; font-weight: 800; cursor: pointer; }
+.bet-btn:disabled { opacity: .5; cursor: not-allowed; }
+.my-bets { margin: 12px 10px 20px; }
+.bets-list { display: flex; flex-direction: column; gap: 10px; }
+.bet-card { background: var(--card-bg); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px; }
+.bet-top { display:flex; align-items:center; justify-content: space-between; margin-bottom: 6px; }
+.bet-title { font-weight: 700; }
+.bet-when { color: var(--gray); font-size: 12px; }
+.bet-mid { color: var(--light); font-size: 13px; margin-bottom: 6px; }
+.bet-status { font-weight: 800; text-transform: uppercase; font-size: 12px; }
+.bet-status.open { color: #fbbf24; }
+.bet-status.won { color: #10b981; }
+.bet-status.lost { color: #ef4444; }
+.bet-status.void { color: #94a3b8; }
+
+/* Доп.рынки: уменьшенный шрифт и плотность только в Прогнозах */
+.extra-markets { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 8px; }
+.totals-table { display: flex; flex-direction: column; gap: 6px; }
+.totals-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); padding: 4px 0; }
+.totals-row:last-child { border-bottom: none; }
+.totals-line { color: var(--light); font-weight: 600; }
+#tab-predictions .extra-markets { font-size: 13px; }
+#tab-predictions .totals-row .bet-btn { padding: 6px 10px; font-weight: 700; }
+#tab-predictions .details-btn { font-size: 13px; padding: 6px 10px; border-radius: 8px; }
+
+/* Подсветка карточки при переходе из расписания */
+#tab-predictions .match-card.highlight { background: rgba(255,255,255,0.06); transition: background 600ms ease; }
+
+/* LIVE badge / dot */
+.live-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(0, 200, 0, 0.12); color: #2de02d; border: 1px solid rgba(0, 200, 0, 0.25); border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; margin-left: 8px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: #2de02d; box-shadow: 0 0 6px #2de02d; }
+
+/* (Удалены старые .toast* стили: заменены на NotificationSystem) */
+
+/* Match stats */
+.stats-grid { display: flex; flex-direction: column; gap: 10px; }
+.metric { display: flex; flex-direction: column; gap: 6px; }
+.metric-title { font-size: 12px; opacity: .9; font-weight: 700; text-align: center; }
+/* Новая раскладка: цифры и +/- по краям, полоса строго по центру */
+.stat-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; }
+.stat-side { display: flex; align-items: center; gap: 6px; justify-content: center; }
+.stat-side .stat-val { min-width: 18px; text-align: center; font-weight: 700; }
+.stat-side .admin-inc { display:flex; gap:4px; }
+.stat-bar { position: relative; height: 12px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); }
+.stat-fill-left { position: absolute; left: 0; top: 0; bottom: 0; }
+.stat-fill-right { position: absolute; right: 0; top: 0; bottom: 0; }
+
+/* Магазин */
+.store-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 12px 10px 20px; }
+.store-item { background: var(--card-bg); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px; text-align: center; }
+.store-img { width: 100%; aspect-ratio: 1 / 1; background: rgba(255,255,255,0.06); border: 1px dashed rgba(255,255,255,0.12); border-radius: 10px; margin-bottom: 8px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.store-img img { max-width: 90%; max-height: 90%; object-fit: contain; display:block; }
+.store-name { font-weight: 700; margin-bottom: 4px; }
+.store-price { color: var(--gray); font-size: 13px; margin-bottom: 8px; }
+.cart-list { margin: 12px 10px 20px; display:flex; flex-direction: column; gap: 6px; }
+.cart-line { display:flex; align-items:center; justify-content: space-between; gap: 10px; background: var(--card-bg); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 12px; }
+.cart-left { display:flex; align-items:center; gap: 10px; font-weight: 700; }
+.cart-right { display:flex; align-items:center; gap: 10px; color: var(--gray); }
+.qty-control { display:inline-flex; align-items:center; gap: 6px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10); border-radius: 8px; padding: 2px 6px; }
+.qty-btn { appearance: none; background: rgba(255,255,255,0.08); color: #fff; border: 0; border-radius: 6px; width: 26px; height: 26px; font-weight: 900; line-height: 1; display:flex; align-items:center; justify-content:center; }
+.qty-input { width: 38px; text-align: center; background: transparent; color: #fff; border: 0; outline: none; font-weight: 800; }
+.cart-total { margin: 10px; font-weight: 900; text-align: right; }
+
+/* Админ: подвкладки */
+#admin-subtabs .subtab-item { padding: 8px 6px; }
+
+/* App-like buttons */
+.app-btn {
+    appearance: none;
+    background: linear-gradient(180deg, var(--btn-primary, #48caff) 0%, var(--btn-secondary, #2ee9d7) 100%);
+    color: #0b1220;
+    border: 0;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-weight: 900;
+    letter-spacing: 0.2px;
+    box-shadow: 0 2px 0 rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.08);
+    transition: transform .06s ease, box-shadow .12s ease, opacity .2s ease;
+}
+.app-btn:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.06); }
+.app-btn[disabled] { opacity: .6; cursor: progress; }
+
+/* Variants */
+.app-btn.neutral {
+    background: linear-gradient(180deg, #d7dde2 0%, #c7d0d8 100%);
+}
+.app-btn.danger {
+    background: linear-gradient(180deg, #ff6b6b 0%, #f53844 100%);
+}
+
+/* Status badge */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+}
