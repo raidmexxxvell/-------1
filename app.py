@@ -4507,6 +4507,23 @@ def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 2
         return None
 
     if not init_data:
+        # Fallback: эмуляция admin пользователя по cookie (для браузерного входа без Telegram)
+        try:
+            from flask import request as _rq
+            cookie_token = _rq.cookies.get('admin_auth')
+            admin_id = os.environ.get('ADMIN_USER_ID','')
+            admin_pass = os.environ.get('ADMIN_PASSWORD','')
+            if cookie_token and admin_id and admin_pass:
+                expected = hmac.new(admin_pass.encode('utf-8'), admin_id.encode('utf-8'), hashlib.sha256).hexdigest()
+                if hmac.compare_digest(cookie_token, expected):
+                    # Возвращаем псевдо auth структуру
+                    return {
+                        'user': {'id': int(admin_id) if admin_id.isdigit() else admin_id, 'first_name': 'Admin', 'username': 'admin', 'auth_via': 'cookie'},
+                        'auth_date': int(time.time()),
+                        'raw': ''
+                    }
+        except Exception:
+            pass
         return None
 
     parsed = parse_qs(init_data)
@@ -7561,11 +7578,402 @@ def api_match_comments_add():
 
 @app.route('/admin')
 @app.route('/admin/')
-@require_admin()
-@rate_limit(max_requests=10, time_window=300)  # 10 запросов за 5 минут для админки
+@require_admin()          # теперь сам декоратор умеет принимать Telegram или cookie
+@rate_limit(max_requests=10, time_window=300)
 def admin_dashboard():
-    """Админ панель для управления БД"""
+    """Админ панель управления (cookie+Telegram)."""
     return render_template('admin_dashboard.html')
+
+@app.route('/admin/login', methods=['GET','POST'])
+def admin_login_page():
+    if request.method == 'GET':
+        # Простой HTML без внешних зависимостей
+        return ('<!doctype html><html><head><meta charset="utf-8"><title>Admin Login</title>'
+                '<style>body{font-family:system-ui;background:#0f1720;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}'
+                '.box{background:#111c28;padding:24px;border-radius:12px;min-width:320px;border:1px solid #243446}'
+                'input{width:100%;padding:10px;margin:8px 0;border:1px solid #33475a;background:#182635;color:#fff;border-radius:6px}'
+                'button{width:100%;padding:10px;background:#2563eb;color:#fff;border:0;border-radius:6px;font-weight:600;cursor:pointer}'
+                'button:hover{background:#1d4ed8}'
+                '.msg{margin-top:8px;font-size:12px;opacity:.85}'
+                'a{color:#93c5fd;text-decoration:none}a:hover{text-decoration:underline}'
+                '</style></head><body><form class="box" method="POST" autocomplete="off">'
+                '<h2 style="margin:0 0 12px">Admin Login</h2>'
+                '<input type="text" name="user" placeholder="Admin ID (Telegram)" required>'
+                '<input type="password" name="password" placeholder="Admin Password" required>'
+                '<button type="submit">Войти</button>'
+                '<div class="msg">После входа откроется <a href="/admin">/admin</a>. <br>Используйте Telegram WebApp для автоматического входа.</div>'
+                '</form></body></html>')
+    # POST
+    user = (request.form.get('user') or '').strip()
+    password = (request.form.get('password') or '').strip()
+    admin_id = os.environ.get('ADMIN_USER_ID','')
+    admin_pass = os.environ.get('ADMIN_PASSWORD','')
+    if not admin_id or not admin_pass:
+        return 'Admin not configured', 500
+    if user != admin_id or password != admin_pass:
+        return 'Invalid credentials', 401
+    # Выдать cookie (HMAC(admin_pass, admin_id))
+    token = hmac.new(admin_pass.encode('utf-8'), admin_id.encode('utf-8'), hashlib.sha256).hexdigest()
+    resp = flask.make_response(flask.redirect('/admin'))
+    resp.set_cookie('admin_auth', token, httponly=True, secure=False, samesite='Lax', max_age=3600*6)
+    return resp
+
+@app.route('/admin/logout')
+def admin_logout():
+    resp = flask.make_response(flask.redirect('/admin/login'))
+    # сбрасываем cookie
+    resp.delete_cookie('admin_auth')
+    return resp
+
+# ---- Админ: сезонный rollover (дублируем здесь, т.к. blueprint admin не зарегистрирован) ----
+def _admin_cookie_or_telegram_ok():
+    """True если запрос от админа: либо валидный Telegram initData, либо cookie admin_auth."""
+    admin_id = os.environ.get('ADMIN_USER_ID','')
+    if not admin_id:
+        return False
+    # Telegram initData
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData','') or request.args.get('initData',''))
+        if parsed and parsed.get('user') and str(parsed['user'].get('id')) == admin_id:
+            return True
+    except Exception:
+        pass
+    # Cookie fallback
+    try:
+        cookie_token = request.cookies.get('admin_auth')
+        admin_pass = os.environ.get('ADMIN_PASSWORD','')
+        if cookie_token and admin_pass:
+            expected = hmac.new(admin_pass.encode('utf-8'), admin_id.encode('utf-8'), hashlib.sha256).hexdigest()
+            if hmac.compare_digest(cookie_token, expected):
+                return True
+    except Exception:
+        pass
+    return False
+
+@app.route('/api/admin/season/rollover', methods=['POST'])
+def api_admin_season_rollover_inline():
+    """Endpoint сезонного rollover (cookie или Telegram)."""
+    if not _admin_cookie_or_telegram_ok():
+        return jsonify({'error': 'Недействительные данные'}), 401
+    try:
+        # Расширенная схема
+        from database.database_models import db_manager as adv_db_manager, Tournament
+        adv_db_manager._ensure_initialized()
+    except Exception as e:
+        return jsonify({'error': f'advanced schema unavailable: {e}'}), 500
+    dry_run = request.args.get('dry') in ('1','true','yes')
+    soft_mode = request.args.get('soft') in ('1','true','yes')
+    deep_mode = (not soft_mode) and (request.args.get('deep') in ('1','true','yes'))  # deep только в full-reset
+    adv_sess = adv_db_manager.get_session()
+    from sqlalchemy import text as _sql_text
+    import json as _json, hashlib as _hashlib
+    try:
+        active = (adv_sess.query(Tournament)
+                  .filter(Tournament.status=='active')
+                  .order_by(Tournament.start_date.desc().nullslast(), Tournament.created_at.desc())
+                  .first())
+        def _compute_next(season_str: str|None):
+            import re, datetime as _dt
+            if season_str:
+                m = re.match(r'^(\d{2})[-/](\d{2})$', season_str.strip())
+                if m:
+                    a=int(m.group(1)); b=int(m.group(2))
+                    return f"{(a+1)%100:02d}-{(b+1)%100:02d}"
+            now=_dt.date.today()
+            if now.month>=7:
+                a=now.year%100; b=(now.year+1)%100
+            else:
+                a=(now.year-1)%100; b=now.year%100
+            return f"{a:02d}-{b:02d}"
+        new_season = _compute_next(active.season if active else None)
+        # rate-limit (10 мин) если не dry
+        # Попытка создать таблицу season_rollovers заранее (чтобы SELECT не падал)
+        try:
+            adv_sess.execute(_sql_text("""
+                CREATE TABLE IF NOT EXISTS season_rollovers (
+                    id SERIAL PRIMARY KEY,
+                    prev_tournament_id INT NULL,
+                    prev_season TEXT NULL,
+                    new_tournament_id INT NOT NULL,
+                    new_season TEXT NOT NULL,
+                    soft_mode BOOLEAN NOT NULL DEFAULT FALSE,
+                    legacy_cleanup_done BOOLEAN NOT NULL DEFAULT FALSE,
+                    pre_hash TEXT NULL,
+                    post_hash TEXT NULL,
+                    pre_meta TEXT NULL,
+                    post_meta TEXT NULL,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )"""))
+            adv_sess.commit()
+        except Exception:
+            try: adv_sess.rollback()
+            except Exception: pass
+        if not dry_run:
+            try:
+                last_row = adv_sess.execute(_sql_text("SELECT created_at FROM season_rollovers ORDER BY created_at DESC LIMIT 1")).fetchone()
+                if last_row:
+                    from datetime import datetime as _dtm, timezone as _tz
+                    delta = (_dtm.now(_tz.utc) - last_row[0]).total_seconds()
+                    if delta < 600:
+                        return jsonify({'error':'rate_limited','retry_after_seconds': int(600-delta)}), 429
+            except Exception as _rl_err:
+                # Обязательно откатываем сессию — иначе дальнейшие запросы 'InFailedSqlTransaction'
+                try: adv_sess.rollback()
+                except Exception: pass
+                app.logger.warning(f"season rollover rate-limit check failed (rollback applied): {_rl_err}")
+        def _collect_summary():
+            summary={}
+            try:
+                t_total = adv_sess.execute(_sql_text('SELECT COUNT(*) FROM tournaments')).scalar() or 0
+                t_active = adv_sess.execute(_sql_text("SELECT COUNT(*) FROM tournaments WHERE status='active'" )).scalar() or 0
+                last_season_row = adv_sess.execute(_sql_text('SELECT season FROM tournaments ORDER BY created_at DESC LIMIT 1')).fetchone()
+                summary['tournaments_total']=t_total
+                summary['tournaments_active']=t_active
+                summary['last_season']= last_season_row[0] if last_season_row else None
+                try:
+                    m_total = adv_sess.execute(_sql_text('SELECT COUNT(*) FROM matches')).scalar() or 0
+                    summary['matches_total']=m_total
+                except Exception as _me:
+                    summary['matches_total_error']=str(_me)
+                ps_rows = adv_sess.execute(_sql_text('SELECT COUNT(*) FROM player_statistics')).scalar() or 0
+                summary['player_statistics_rows']=ps_rows
+            except Exception as _e:
+                summary['error_tournaments']=str(_e)
+            legacy_counts={}
+            legacy_db_local = get_db()
+            try:
+                for tbl in ['team_player_stats','match_scores','match_player_events','match_lineups','match_stats','match_flags']:
+                    try:
+                        cnt = legacy_db_local.execute(_sql_text(f'SELECT COUNT(*) FROM {tbl}')).scalar() or 0
+                        legacy_counts[tbl]=cnt
+                    except Exception as _tbl_e:
+                        legacy_counts[tbl]=f'err:{_tbl_e}'
+            finally:
+                try: legacy_db_local.close()
+                except Exception: pass
+            summary['legacy']=legacy_counts
+            try:
+                summary['_hash'] = _hashlib.sha256(_json.dumps(summary, sort_keys=True).encode()).hexdigest()
+            except Exception:
+                summary['_hash']=None
+            return summary
+        pre_summary=_collect_summary()
+        if dry_run:
+            return jsonify({
+                'ok':True,
+                'dry_run':True,
+                'would_complete': active.season if active else None,
+                'would_create': new_season,
+                'soft_mode': soft_mode,
+                'deep_mode': deep_mode,
+                'legacy_cleanup': [] if soft_mode else ['team_player_stats','match_scores','match_player_events','match_lineups','match_stats','match_flags'],
+                'advanced_cleanup': [] if (soft_mode or not deep_mode or not active) else ['matches','match_events','team_compositions','player_statistics'],
+                'pre_hash': pre_summary.get('_hash'),
+                'pre_summary': pre_summary
+            })
+        prev_id = active.id if active else None
+        prev_season = active.season if active else None
+        from datetime import date as _date
+        if active:
+            active.status='completed'; active.end_date=_date.today()
+        new_tournament = Tournament(name=f"Лига Обнинска {new_season}",season=new_season,status='active',start_date=_date.today(),description=f"Сезон {new_season}")
+        adv_sess.add(new_tournament)
+        adv_sess.flush()
+        # ensure audit table
+        try:
+            adv_sess.execute(_sql_text("""
+                CREATE TABLE IF NOT EXISTS season_rollovers (
+                    id SERIAL PRIMARY KEY,
+                    prev_tournament_id INT NULL,
+                    prev_season TEXT NULL,
+                    new_tournament_id INT NOT NULL,
+                    new_season TEXT NOT NULL,
+                    soft_mode BOOLEAN NOT NULL DEFAULT FALSE,
+                    legacy_cleanup_done BOOLEAN NOT NULL DEFAULT FALSE,
+                    pre_hash TEXT NULL,
+                    post_hash TEXT NULL,
+                    pre_meta TEXT NULL,
+                    post_meta TEXT NULL,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )"""))
+            for col in ['pre_hash TEXT','post_hash TEXT','pre_meta TEXT','post_meta TEXT']:
+                try: adv_sess.execute(_sql_text(f'ALTER TABLE season_rollovers ADD COLUMN IF NOT EXISTS {col}'))
+                except Exception: pass
+        except Exception as _crt_err:
+            app.logger.warning(f'season_rollovers create/alter failed: {_crt_err}')
+        legacy_cleanup_done=False
+        advanced_cleanup_done=False
+        schedule_imported=0
+        schedule_errors=[]
+        if not soft_mode:
+            legacy_db = get_db()
+            try:
+                for tbl in ['team_player_stats','match_scores','match_player_events','match_lineups','match_stats','match_flags']:
+                    try: legacy_db.execute(_sql_text(f'DELETE FROM {tbl}'))
+                    except Exception as tbl_err: app.logger.warning(f'Failed to clear {tbl}: {tbl_err}')
+                legacy_db.commit(); legacy_cleanup_done=True
+            finally:
+                try: legacy_db.close()
+                except Exception: pass
+        # Deep advanced cleanup (старые матчи расширенной схемы + статистика) только если deep_mode
+        if deep_mode and active and not dry_run:
+            try:
+                # Удаляем зависимые сущности явно (на случай отсутствия CASCADE в БД)
+                adv_sess.execute(_sql_text('DELETE FROM match_events WHERE match_id IN (SELECT id FROM matches WHERE tournament_id=:tid)'), {'tid': active.id})
+                adv_sess.execute(_sql_text('DELETE FROM team_compositions WHERE match_id IN (SELECT id FROM matches WHERE tournament_id=:tid)'), {'tid': active.id})
+                adv_sess.execute(_sql_text('DELETE FROM player_statistics WHERE tournament_id=:tid'), {'tid': active.id})
+                adv_sess.execute(_sql_text('DELETE FROM matches WHERE tournament_id=:tid'), {'tid': active.id})
+                advanced_cleanup_done=True
+            except Exception as _adv_del_err:
+                app.logger.warning(f'advanced deep cleanup failed: {_adv_del_err}')
+        # Импорт расписания (первые 300 строк) для нового турнира если deep_mode + очистка колонок B,D (счета) до 300 строки
+        if deep_mode and not dry_run:
+            try:
+                import json as _jsonmod, os as _os, datetime as _dt
+                import gspread
+                from google.oauth2.service_account import Credentials as _Creds
+                creds_json = _os.environ.get('GOOGLE_SHEETS_CREDS_JSON','')
+                sheet_url = _os.environ.get('GOOGLE_SHEET_URL','')
+                if creds_json and sheet_url:
+                    try:
+                        creds_data = _jsonmod.loads(creds_json)
+                        scope=['https://www.googleapis.com/auth/spreadsheets','https://www.googleapis.com/auth/drive']
+                        creds=_Creds.from_service_account_info(creds_data, scopes=scope)
+                        client=gspread.authorize(creds)
+                        sh=client.open_by_url(sheet_url)
+                        target_ws=None
+                        for ws in sh.worksheets():
+                            ttl=ws.title.lower()
+                            if 'расписание' in ttl or 'schedule' in ttl:
+                                target_ws=ws; break
+                        if target_ws:
+                            # Очистка колонок B и D (до 300 строки) — предполагаем что там счета/разделитель
+                            try:
+                                # gspread batch_clear требует A1 диапазоны
+                                target_ws.batch_clear(["B2:B300","D2:D300"])
+                            except Exception as _clr_err:
+                                schedule_errors.append(f'clear_fail:{_clr_err}'[:120])
+                            values = target_ws.get_all_values()[:301]  # включая header (0..300)
+                            # Assume header row present -> parse rows after header
+                            header = values[0] if values else []
+                            # Heuristics: columns: [Дата, Дома, Гости, Время, Место ...]
+                            for row in values[1:]:
+                                if not row or len(row) < 3:
+                                    continue
+                                date_str = (row[0] or '').strip()
+                                home_team = (row[1] or '').strip()
+                                away_team = (row[2] or '').strip()
+                                time_str = (row[3] or '').strip() if len(row) > 3 else ''
+                                venue = (row[4] or '').strip() if len(row) > 4 else ''
+                                if not (date_str and home_team and away_team):
+                                    continue
+                                # parse date/time
+                                match_dt=None
+                                for fmt in ("%d.%m.%Y %H:%M","%d.%m.%Y","%Y-%m-%d %H:%M","%Y-%m-%d"):
+                                    try:
+                                        if time_str and '%H:%M' in fmt:
+                                            match_dt=_dt.datetime.strptime(f"{date_str} {time_str}", fmt)
+                                        else:
+                                            match_dt=_dt.datetime.strptime(date_str, fmt)
+                                        break
+                                    except ValueError:
+                                        continue
+                                if not match_dt:
+                                    schedule_errors.append(f'bad_date:{date_str}')
+                                    continue
+                                # ensure teams
+                                from database.database_models import Team, Match as AdvMatch
+                                home = adv_sess.query(Team).filter(Team.name==home_team).first()
+                                if not home:
+                                    home=Team(name=home_team,is_active=True)
+                                    adv_sess.add(home); adv_sess.flush()
+                                away = adv_sess.query(Team).filter(Team.name==away_team).first()
+                                if not away:
+                                    away=Team(name=away_team,is_active=True)
+                                    adv_sess.add(away); adv_sess.flush()
+                                exists = adv_sess.query(AdvMatch).filter(AdvMatch.tournament_id==new_tournament.id,AdvMatch.home_team_id==home.id,AdvMatch.away_team_id==away.id,AdvMatch.match_date==match_dt).first()
+                                if exists:
+                                    continue
+                                adv_sess.add(AdvMatch(tournament_id=new_tournament.id,home_team_id=home.id,away_team_id=away.id,match_date=match_dt,venue=venue,status='scheduled'))
+                                schedule_imported+=1
+                        else:
+                            schedule_errors.append('worksheet_not_found')
+                    except Exception as _sched_err:
+                        schedule_errors.append(str(_sched_err)[:200])
+                else:
+                    schedule_errors.append('creds_or_url_missing')
+            except Exception as _outer_sched_err:
+                schedule_errors.append(f'outer:{_outer_sched_err}')
+        audit_id=None
+        try:
+            res = adv_sess.execute(_sql_text("""
+                INSERT INTO season_rollovers (prev_tournament_id, prev_season, new_tournament_id, new_season, soft_mode, legacy_cleanup_done, pre_hash, pre_meta)
+                VALUES (:pid,:ps,:nid,:ns,:soft,:lcd,:ph,:pm) RETURNING id
+            """), {'pid': prev_id,'ps': prev_season,'nid': new_tournament.id,'ns': new_season,'soft': soft_mode,'lcd': legacy_cleanup_done,'ph': pre_summary.get('_hash'),'pm': _json.dumps(pre_summary, ensure_ascii=False)})
+            row = res.fetchone(); audit_id = row and row[0]
+        except Exception as _ins_err:
+            app.logger.warning(f'season_rollovers audit insert failed: {_ins_err}')
+        post_summary=_collect_summary()
+        try:
+            if audit_id is not None:
+                adv_sess.execute(_sql_text('UPDATE season_rollovers SET post_hash=:h, post_meta=:pm WHERE id=:id'), {'h': post_summary.get('_hash'),'pm': _json.dumps(post_summary, ensure_ascii=False),'id': audit_id})
+        except Exception as _upd_err:
+            app.logger.warning(f'season_rollovers audit post update failed: {_upd_err}')
+        adv_sess.commit()
+        # инвалидация кэшей
+        try:
+            from optimizations.multilevel_cache import get_cache as _gc
+            cache=_gc();
+            for key in ('league_table','stats_table','results','schedule','tours','betting-tours'):
+                try: cache.invalidate(key)
+                except Exception: pass
+        except Exception as _c_err:
+            app.logger.warning(f'cache invalidate failed season rollover: {_c_err}')
+        # Фоновый прогрев кэшей (best-effort) чтобы UI не увидел пустоту после инвалидции
+        try:
+            from threading import Thread
+            def _warm():
+                try:
+                    with app.app_context():
+                        # Поддерживаемые refresh endpoints если существуют
+                        import requests, os as _os
+                        base = _os.environ.get('SELF_BASE_URL') or ''  # можно задать для продакшена
+                        # Локально может не работать без полного URL — поэтому fallback пропускаем
+                        endpoints = [
+                            '/api/league-table','/api/stats-table','/api/schedule','/api/results','/api/betting/tours'
+                        ]
+                        for ep in endpoints:
+                            try:
+                                if base:
+                                    requests.get(base+ep, timeout=3)
+                            except Exception:
+                                pass
+                except Exception as _werr:
+                    app.logger.warning(f'cache warm failed: {_werr}')
+            Thread(target=_warm, daemon=True).start()
+        except Exception as _tw:  # не критично
+            app.logger.warning(f'failed to dispatch warm thread: {_tw}')
+        return jsonify({
+            'ok':True,
+            'previous_season': prev_season,
+            'new_season': new_season,
+            'tournament_id': new_tournament.id,
+            'soft_mode': soft_mode,
+            'deep_mode': deep_mode,
+            'legacy_cleanup_done': (not soft_mode) and legacy_cleanup_done,
+            'advanced_cleanup_done': advanced_cleanup_done,
+            'schedule_imported_matches': schedule_imported,
+            'schedule_errors': schedule_errors,
+            'pre_hash': pre_summary.get('_hash'),
+            'post_hash': post_summary.get('_hash'),
+            'cache_warm_dispatched': True
+        })
+    except Exception as e:
+        app.logger.error(f'Season rollover error (inline): {e}')
+        return jsonify({'error':'season rollover failed'}), 500
+    finally:
+        try: adv_sess.close()
+        except Exception: pass
 
 @app.route('/test-themes')
 def test_themes():
