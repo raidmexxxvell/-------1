@@ -159,11 +159,48 @@ class RealtimeUpdater {
             case 'betting_odds':
                 this.refreshBettingOdds(data);
                 break;
+            case 'lineups_updated':
+                // Авто-обновление составов конкретного матча
+                this.handleLineupsUpdated(data);
+                break;
                 
             default:
                 // Общее обновление данных
                 this.triggerDataRefresh(dataType);
         }
+    }
+
+    handleLineupsUpdated(data){
+        try {
+            if(!data) return;
+            // Проверяем, есть ли на странице что-то связанное с матчем (ростер или карточка матча)
+            const selectorMatchCard = `[data-match-home="${data.home}"][data-match-away="${data.away}"]`;
+            const rosterPresent = document.querySelector('.roster-table') || document.querySelector(selectorMatchCard);
+            if(!rosterPresent){
+                // Ничего подходящего – пропускаем тихо
+                return;
+            }
+            // Фетчим свежие детали матча, чтобы получить обновлённые составы
+            if(data.home && data.away){
+                                const params = new URLSearchParams({ home: data.home, away: data.away });
+                                // сначала пробуем новый компактный эндпоинт из БД
+                                fetch(`/api/match/lineups?${params.toString()}`, { headers: { 'Cache-Control':'no-store' } })
+                                    .then(r=> r.ok? r.json(): Promise.reject(new Error('HTTP '+r.status)))
+                                    .then(dbPayload => {
+                                            // Трансформируем в формат match-details (минимум, чтобы слушатели отработали)
+                                            const details = { rosters: dbPayload.rosters || {home:[],away:[]}, source: 'db' };
+                                            this.refreshMatchDetails(details);
+                                            this.showNotification(`Обновлены составы: ${data.home} vs ${data.away}`);
+                                    })
+                                    .catch(_=>{
+                                        // fallback на старый эндпоинт, если ошибка
+                                        fetch(`/api/match-details?${params.toString()}`, { headers: { 'Cache-Control':'no-store' } })
+                                            .then(r=> r.ok? r.json(): Promise.reject(new Error('HTTP '+r.status)))
+                                            .then(details => { this.refreshMatchDetails(details); this.showNotification(`Обновлены составы: ${data.home} vs ${data.away}`); })
+                                            .catch(()=>{});
+                                    });
+            }
+        } catch(_) {}
     }
     
     updateMatchScore(home, away, data) {
