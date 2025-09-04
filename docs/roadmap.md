@@ -99,6 +99,9 @@
   - [x] achievements localStorage + If-None-Match
   - [x] checkin status ETag
   - [ ] Унифицировать utility fetchEtag(url, cacheKey)
+    - [x] Базовая утилита `etag-fetch.js` добавлена
+    - [x] Мигрирован /api/achievements на fetchEtag
+    - [ ] Миграция schedule/results/profile (поэтапно)
 
 UI / UX мелкие правки (быстрый финиш)
   - [x] Стилизованная модалка подтверждения в стиле приложения (замена native confirm)

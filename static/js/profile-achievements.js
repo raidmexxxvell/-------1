@@ -221,47 +221,46 @@
   }
   
   function fetchAchievements(){
-    const LS_KEY = 'achievements:v1';
-    const SWR_MAX_AGE = 30 * 1000; // 30s fresh window
-    const now = Date.now();
-    // Пробуем локальный кэш
-    let cached = null;
-    try { cached = JSON.parse(localStorage.getItem(LS_KEY)||'null'); } catch(_) {}
-    const hasFresh = cached && (now - (cached.ts||0) < SWR_MAX_AGE) && Array.isArray(cached.data);
-    if (hasFresh) {
-      if(!_loadedOnce) { _loadedOnce = true; renderAchievements(cached.data); }
+    // Если есть универсальная утилита fetchEtag — используем её
+    if (window.fetchEtag){
+      const initData = tg?.initData || '';
+      const params = initData ? { initData } : null;
+      return window.fetchEtag('/api/achievements', {
+        cacheKey: 'achievements:v1',
+        swrMs: 30000,
+        params,
+        extract: j => Array.isArray(j.achievements) ? j.achievements : [],
+      }).then(res => {
+        if(!_loadedOnce) { renderAchievements(res.data); _loadedOnce = true; }
+        else if(res.updated) { renderAchievements(res.data); }
+        return res.data;
+      }).catch(err => {
+        console.error('achievements load error', err);
+        // fallback: если в localStorage что-то было (fetchEtag уже сам вернёт), иначе пусто
+        return [];
+      });
     }
-    // Если есть ETag — делаем условный запрос, иначе полный
+    // Fallback: старая реализация (если по какой-то причине fetchEtag не подключился)
+    const LS_KEY = 'achievements:v1';
+    const SWR_MAX_AGE = 30 * 1000;
+    const now = Date.now();
+    let cached = null; try { cached = JSON.parse(localStorage.getItem(LS_KEY)||'null'); } catch(_) {}
+    const hasFresh = cached && (now - (cached.ts||0) < SWR_MAX_AGE) && Array.isArray(cached.data);
+    if (hasFresh && !_loadedOnce){ _loadedOnce=true; renderAchievements(cached.data); }
     const etag = cached?.etag || null;
     const initData = tg?.initData || '';
-    const params = new URLSearchParams();
-    if (initData) params.set('initData', initData);
-    const url = '/api/achievements' + (params.toString() ? ('?'+params.toString()) : '');
-    const headers = etag ? { 'If-None-Match': etag } : {};
-    const doFetch = fetch(url, { method:'GET', headers })
-      .then(async r => {
-        if (r.status === 304 && cached) {
-            // Ничего не изменилось
-            return { etag: etag, data: cached.data };
-        }
-        const data = await r.json();
-        const newEtag = data.version || r.headers.get('ETag') || null;
-        if (Array.isArray(data.achievements)) {
-          try { localStorage.setItem(LS_KEY, JSON.stringify({ etag: newEtag, data: data.achievements, ts: Date.now() })); } catch(_) {}
-          return { etag: newEtag, data: data.achievements };
-        }
-        return { etag: newEtag, data: [] };
+    const q = new URLSearchParams(); if (initData) q.set('initData', initData);
+    const url = '/api/achievements' + (q.toString() ? ('?'+q.toString()) : '');
+    return fetch(url, { headers: etag ? { 'If-None-Match': etag } : {} })
+      .then(r=>r.status===304 && cached ? { achievements: cached.data, version: etag } : r.json())
+      .then(j=>{
+        const newE = j.version || null;
+        const arr = Array.isArray(j.achievements) ? j.achievements : [];
+        try { localStorage.setItem(LS_KEY, JSON.stringify({ etag: newE, data: arr, ts: Date.now() })); } catch(_) {}
+        if(!_loadedOnce || !hasFresh){ renderAchievements(arr); _loadedOnce=true; }
+        return arr;
       })
-      .then(pack => {
-        if(!_loadedOnce || !hasFresh) { renderAchievements(pack.data); _loadedOnce = true; }
-        return pack.data;
-      })
-      .catch(err => {
-        console.error('achievements load error', err);
-        if(!_loadedOnce) { _loadedOnce = true; renderAchievements(cached?.data||[]); }
-        return cached?.data||[];
-      });
-    return doFetch;
+      .catch(err=>{ console.error('achievements load error', err); if(!_loadedOnce){ _loadedOnce=true; renderAchievements(cached?.data||[]); } return cached?.data||[]; });
   }
   // Автозагрузка при готовности профиля и при клике на вкладку "Достижения"
   window.addEventListener('profile:user-loaded', ()=>{ try { const active = document.querySelector('.subtab-item.active[data-psub="badges"]'); if(active) fetchAchievements(); } catch(_) {} });
