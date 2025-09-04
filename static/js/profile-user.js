@@ -59,7 +59,29 @@
   async function initFavoriteTeamUI(user){ await fetchTeamsAndCounts(); renderFavoriteSelect(user && (user.favorite_team||user.favoriteTeam)); }
   async function saveFavoriteTeam(value){
     try {
-      if (value){ const ok = confirm('Сменить любимый клуб можно только один раз. Подтвердить выбор?'); if(!ok) return false; }
+      if (value){
+        // use app-styled confirm modal if available
+        const confirmModal = document.getElementById('confirm-modal');
+        if (confirmModal) {
+          const ok = await new Promise(resolve => {
+            const title = document.getElementById('confirm-modal-title');
+            const desc = document.getElementById('confirm-modal-desc');
+            const btnOk = document.getElementById('confirm-ok');
+            const btnCancel = document.getElementById('confirm-cancel');
+            try { if (title) title.textContent = 'Подтвердите выбор'; if (desc) desc.textContent = 'Сменить любимый клуб можно только один раз. Подтвердить выбор?'; } catch(_){}
+            confirmModal.style.display='block'; confirmModal.classList.add('show');
+            function cleanup(result){ try{ confirmModal.classList.remove('show'); confirmModal.style.display='none'; }catch(_){} resolve(result); btnOk.removeEventListener('click', onOk); btnCancel.removeEventListener('click', onCancel); confirmModal.querySelector('.modal-backdrop')?.removeEventListener('click', onCancel); }
+            function onOk(){ cleanup(true); }
+            function onCancel(){ cleanup(false); }
+            btnOk.addEventListener('click', onOk);
+            btnCancel.addEventListener('click', onCancel);
+            confirmModal.querySelector('.modal-backdrop')?.addEventListener('click', onCancel);
+          });
+          if (!ok) return false;
+        } else {
+          const ok = confirm('Сменить любимый клуб можно только один раз. Подтвердить выбор?'); if(!ok) return false;
+        }
+      }
       const fd = new FormData(); fd.append('initData', (tg?.initData || '')); fd.append('team', value||'');
       const res = await fetch('/api/user/favorite-team',{ method:'POST', body: fd }); const data = await res.json().catch(()=>({}));
       if(!res.ok){ const msg = data?.message || (data?.error==='limit' ? 'Сменить любимый клуб можно только один раз' : 'Не удалось сохранить клуб'); try { window.showAlert?.(msg,'info'); } catch(_) { alert(msg); } return false; }

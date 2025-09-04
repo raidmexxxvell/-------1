@@ -189,6 +189,34 @@ body {
 .btn-secondary { background: transparent; color: var(--light); border-color: rgba(255,255,255,0.2); }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
+/* Confirmation modal variant (compact, app-styled) */
+.confirm-modal .modal-dialog { width: min(380px, calc(100% - 32px)); top: 30vh; border-radius: 12px; padding: 12px; }
+.confirm-modal .modal-title { font-size: 15px; color: var(--light); text-align: center; }
+.confirm-modal .modal-desc { font-size: 13px; color: var(--gray); text-align: center; margin-top: 6px; }
+.confirm-modal .modal-actions { justify-content: center; gap: 12px; margin-top: 14px; }
+.confirm-modal .btn { min-width: 92px; padding: 8px 10px; }
+.confirm-modal .btn-secondary { border-color: rgba(255,255,255,0.06); }
+
+/* Новости: крупный центрированный заголовок */
+.news-title { margin: 0 0 10px; font-size: 16px; color: var(--text-primary, var(--light)); text-align: center; font-weight: 800; }
+
+/* Админ: компактная таблица заказов */
+#admin-orders-table { font-size: 13px; }
+#admin-orders-table thead th { padding: 8px 6px; font-weight:800; text-align:center; white-space:nowrap; }
+#admin-orders-table tbody td { padding: 8px 6px; text-align:center; vertical-align: middle; }
+#admin-orders-table thead th:nth-child(2), #admin-orders-table tbody td:nth-child(2) { max-width: 140px; overflow:hidden; text-overflow:ellipsis; }
+#admin-orders-table thead th:nth-child(3), #admin-orders-table tbody td:nth-child(3) { max-width: 120px; overflow:hidden; text-overflow:ellipsis; }
+#admin-orders-table thead th:nth-child(6), #admin-orders-table tbody td:nth-child(6) { max-width: 110px; }
+#admin-orders-table thead th:nth-child(7), #admin-orders-table tbody td:nth-child(7) { max-width: 90px; }
+#admin-orders-table thead th:nth-child(8), #admin-orders-table tbody td:nth-child(8) { width: 36px; }
+#admin-orders-table .short-label { display:inline-block; }
+
+@media (max-width: 520px) {
+    #admin-orders-table thead th:nth-child(4), #admin-orders-table tbody td:nth-child(4),
+    #admin-orders-table thead th:nth-child(5), #admin-orders-table tbody td:nth-child(5) { display:none; }
+    #admin-orders-table thead th:nth-child(2), #admin-orders-table tbody td:nth-child(2) { max-width: 100px; }
+}
+
 /* Стили для модалки ввода ставки */
 .stake-modal .modal-dialog { width: min(420px, calc(100% - 32px)); top: 28vh; border-radius: 12px; padding: 14px; }
 .stake-modal .modal-title { font-size: 15px; margin-bottom: 6px; }
