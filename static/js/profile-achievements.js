@@ -221,22 +221,47 @@
   }
   
   function fetchAchievements(){
-    if(_loadedOnce) return Promise.resolve([]);
-    const send=(init)=> fetch('/api/achievements',{ method:'POST', body: init })
-      .then(r=>r.json())
-      .then(data=>{ 
-        console.debug('achievements raw data',data); 
-        if (data.achievements) {
-          data.achievements.forEach(a => {
-            console.debug(`Achievement: ${a.name}, group: ${a.group}, value: ${a.value}, target: ${a.target}, next_target: ${a.next_target}`);
-          });
+    const LS_KEY = 'achievements:v1';
+    const SWR_MAX_AGE = 30 * 1000; // 30s fresh window
+    const now = Date.now();
+    // Пробуем локальный кэш
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(LS_KEY)||'null'); } catch(_) {}
+    const hasFresh = cached && (now - (cached.ts||0) < SWR_MAX_AGE) && Array.isArray(cached.data);
+    if (hasFresh) {
+      if(!_loadedOnce) { _loadedOnce = true; renderAchievements(cached.data); }
+    }
+    // Если есть ETag — делаем условный запрос, иначе полный
+    const etag = cached?.etag || null;
+    const initData = tg?.initData || '';
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', initData);
+    const url = '/api/achievements' + (params.toString() ? ('?'+params.toString()) : '');
+    const headers = etag ? { 'If-None-Match': etag } : {};
+    const doFetch = fetch(url, { method:'GET', headers })
+      .then(async r => {
+        if (r.status === 304 && cached) {
+            // Ничего не изменилось
+            return { etag: etag, data: cached.data };
         }
-        _loadedOnce=true; 
-        renderAchievements(data.achievements||[]); 
-        return data.achievements||[]; 
+        const data = await r.json();
+        const newEtag = data.version || r.headers.get('ETag') || null;
+        if (Array.isArray(data.achievements)) {
+          try { localStorage.setItem(LS_KEY, JSON.stringify({ etag: newEtag, data: data.achievements, ts: Date.now() })); } catch(_) {}
+          return { etag: newEtag, data: data.achievements };
+        }
+        return { etag: newEtag, data: [] };
+      })
+      .then(pack => {
+        if(!_loadedOnce || !hasFresh) { renderAchievements(pack.data); _loadedOnce = true; }
+        return pack.data;
+      })
+      .catch(err => {
+        console.error('achievements load error', err);
+        if(!_loadedOnce) { _loadedOnce = true; renderAchievements(cached?.data||[]); }
+        return cached?.data||[];
       });
-    if(!tg || !tg.initDataUnsafe?.user){ const fd=new FormData(); fd.append('initData', tg?.initData||''); return send(fd).catch(err=>{ console.error('achievements load error (no tg user)',err); renderAchievements([]); return []; }); }
-    const fd=new FormData(); fd.append('initData', tg.initData||''); return send(fd).catch(err=>{ console.error('achievements load error',err); renderAchievements([]); return []; });
+    return doFetch;
   }
   // Автозагрузка при готовности профиля и при клике на вкладку "Достижения"
   window.addEventListener('profile:user-loaded', ()=>{ try { const active = document.querySelector('.subtab-item.active[data-psub="badges"]'); if(active) fetchAchievements(); } catch(_) {} });

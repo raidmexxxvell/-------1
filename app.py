@@ -9,7 +9,8 @@ from datetime import datetime, date, timezone
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
-from flask import Flask, request, jsonify, render_template, send_from_directory, g
+from flask import Flask, request, jsonify, render_template, send_from_directory, g, make_response
+import flask
 
 # Импорты для системы безопасности и мониторинга (Фаза 3)
 try:
@@ -5112,23 +5113,48 @@ def daily_checkin():
         app.logger.error(f"Ошибка чекина: {str(e)}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
-@app.route('/api/achievements', methods=['POST'])
+@app.route('/api/achievements', methods=['GET','POST'])
 def get_achievements():
-    """Получает достижения пользователя"""
+    """Получает достижения пользователя с поддержкой ETag + SWR.
+
+    Варианты вызова:
+      POST: form-data initData=<telegram init data> (старый способ, обратно совместимо)
+      GET:  /api/achievements?initData=<urlencoded initData>  или заголовок X-Telegram-Init-Data
+
+    Кэш на 30 сек в памяти; при совпадении If-None-Match возвращается 304.
+    Заголовок Cache-Control: public, max-age=30, stale-while-revalidate=30
+    """
     try:
         global ACHIEVEMENTS_CACHE
         if 'ACHIEVEMENTS_CACHE' not in globals():
             ACHIEVEMENTS_CACHE = {}
-    # Быстрый выход из кэша итогового ответа (30 сек)
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+
+        # Извлекаем initData из разных источников
+        init_data = ''
+        if request.method == 'POST':
+            init_data = request.form.get('initData', '')
+        else:
+            init_data = request.args.get('initData', '') or request.headers.get('X-Telegram-Init-Data','')
+
+        parsed = parse_and_verify_telegram_init_data(init_data)
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = parsed['user'].get('id')
         cache_key = f"ach:{user_id}"
         now_ts = time.time()
+        client_etag = request.headers.get('If-None-Match')
         ce = ACHIEVEMENTS_CACHE.get(cache_key)
         if ce and (now_ts - ce.get('ts',0) < 30):
-            return jsonify(ce['data'])
+            # Быстрый ответ из кэша / условный 304
+            if client_etag and client_etag == ce.get('etag'):
+                resp = flask.make_response('', 304)
+                resp.headers['ETag'] = ce.get('etag')
+                resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+                return resp
+            resp = jsonify(ce['data'])
+            resp.headers['ETag'] = ce.get('etag','')
+            resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+            return resp
 
         # User fetch (DB or Sheets)
         if SessionLocal is None:
@@ -5256,7 +5282,24 @@ def get_achievements():
         add('bigodds', bigodds_tier, {1:'Рисковый',2:'Хайроллер',3:'Легенда кэфов'}, bet_stats['max_win_odds'], bigodds_targets, {1:'bronze',2:'silver',3:'gold'}, bool(bigodds_tier))
         add('markets', markets_tier, {1:'Универсал I',2:'Универсал II',3:'Универсал III'}, len(bet_stats['markets_used']), markets_targets, {1:'bronze',2:'silver',3:'gold'}, bool(markets_tier))
         add('weeks', weeks_tier, {1:'Регуляр',2:'Постоянный',3:'Железный'}, len(bet_stats['weeks_active']), weeks_targets, {1:'bronze',2:'silver',3:'gold'}, bool(weeks_tier))
-        resp={'achievements':achievements}; ACHIEVEMENTS_CACHE[cache_key]={'ts':now_ts,'data':resp}; return jsonify(resp)
+        # Финальный payload
+        resp_payload = {'achievements': achievements}
+        # Стабильный ETag (sorted keys)
+        try:
+            etag = _etag_for_payload(resp_payload)
+        except Exception:
+            etag = hashlib.md5(str(user_id).encode()).hexdigest()
+        ACHIEVEMENTS_CACHE[cache_key] = {'ts': now_ts, 'data': resp_payload, 'etag': etag}
+        # Условный ответ если клиент уже имеет актуальное
+        if client_etag and client_etag == etag:
+            resp = flask.make_response('', 304)
+            resp.headers['ETag'] = etag
+            resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+            return resp
+        resp = jsonify({**resp_payload, 'version': etag})
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+        return resp
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {e}")
         return jsonify({'error':'Внутренняя ошибка сервера'}),500
