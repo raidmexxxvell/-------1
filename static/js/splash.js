@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const splash = document.getElementById('splash');
     const loadingProgress = document.getElementById('loading-progress');
+    const loadingProgressText = document.getElementById('loading-progress-text');
     const appContent = document.getElementById('app-content');
     info('Elements lookup', {
         splash: !!splash,
@@ -220,7 +221,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!isFinite(progress)) progress = 100;
         progress = Math.min(Math.max(progress, 0), 100);
-        if (loadingProgress) loadingProgress.style.width = `${progress}%`;
+    if (loadingProgress) loadingProgress.style.width = `${progress}%`;
+    if (loadingProgressText) loadingProgressText.textContent = `${Math.round(progress)}%`;
 
         if (progress - lastLogPct >= 10 || now - lastLogTime >= 500) {
             log('Progress', { progress: Math.round(progress), elapsed: Math.round(elapsed), ready, minElapsedReached });
@@ -260,6 +262,21 @@ document.addEventListener('DOMContentLoaded', () => {
         info('Received app:all-ready');
         ready = true;
     }, { once: true });
+
+    // Публичные помощники для поэтапной привязки загрузки к шкале
+    // Использование: window.splashStages.profile(); window.splashStages.data(); window.splashStages.finish();
+    window.splashStages = {
+        profile(){ if(!stageProfileReady){ stageProfileReady = true; info('Manual stage: profile'); } },
+        data(){ if(!stageDataReady){ stageDataReady = true; info('Manual stage: data'); } },
+        finish(){ if(!ready){ ready = true; info('Manual stage: finish'); } }
+    };
+    // Ручное инкрементирование (не поднимает выше дедуп цели текущего этапа)
+    window.setSplashProgress = function(extra){
+        try {
+            const val = Number(extra) || 0;
+            progress = Math.min(99, Math.max(progress, val));
+        } catch(_) {}
+    };
 
     // Проверка версии при входе (без фонового опроса)
     (function versionCheckOnLoad(){
