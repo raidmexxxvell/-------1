@@ -3026,13 +3026,14 @@ def _etag_for_payload(payload: dict) -> str:
 
 # ---------------------- ETag JSON Helper ----------------------
 _ETAG_HELPER_CACHE = {}
-def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: int = 30, swr: int = 30):
+def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: int = 30, swr: int = 30, core_filter=None):
     """Универсальный helper: строит или отдаёт из памяти JSON + ETag + SWR.
 
-    endpoint_key: уникальный ключ (включая user_id если ответ персональный)
+    endpoint_key: уникальный ключ (для персональных ответов включайте user_id)
     builder_func: callable -> dict (payload без поля version)
-    cache_ttl: seconds keep in memory
+    cache_ttl: seconds – держим в памяти результат builder_func
     max_age / swr: значения для Cache-Control
+    core_filter: optional callable(payload)->dict – ядро для расчёта ETag (например, исключить updated_at)
     """
     now = time.time()
     client_etag = request.headers.get('If-None-Match')
@@ -3049,7 +3050,8 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
         return resp
     payload = builder_func() or {}
     try:
-        etag = _etag_for_payload(payload)
+        core = core_filter(payload) if callable(core_filter) else payload
+        etag = _etag_for_payload(core)
     except Exception:
         etag = hashlib.md5(str(endpoint_key).encode()).hexdigest()
     _ETAG_HELPER_CACHE[endpoint_key] = {'ts': now, 'payload': payload, 'etag': etag}
@@ -4328,150 +4330,103 @@ def api_match_status_live():
 
 @app.route('/api/leaderboard/top-predictors')
 def api_leader_top_predictors():
-    """Топ-10 прогнозистов: имя, всего ставок, выигрышных, % выигрышных. Кэш 1 час."""
-    # Сначала пытаемся отдать предвычисленный снапшот
-    if SessionLocal is not None:
-        db = get_db()
-        try:
-            snap = _snapshot_get(db, 'leader-top-predictors')
+    """Топ-10 прогнозистов: имя, всего ставок, выигрышных, % выигрышных. ETag+SWR через etag_json."""
+    def _build():
+        # 1) DB snapshot (предвычисленный) приоритетнее
+        if SessionLocal is not None:
+            db = get_db(); snap=None
+            try:
+                snap = _snapshot_get(db, 'leader-top-predictors')
+            finally:
+                db.close()
             if snap and snap.get('payload'):
-                payload = snap['payload']
-                _core = {'items': payload.get('items')}
-                etag = _etag_for_payload(_core)
-                inm = request.headers.get('If-None-Match')
-                if inm and inm == etag:
-                    return ('', 304)
-                resp = jsonify({ **payload, 'version': etag })
-                resp.headers['ETag'] = etag
-                resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
-                return resp
+                return {**snap['payload']}
+        # 2) In-memory fast cache (старый формат) – если свежий, используем
+        global LEADER_PRED_CACHE
+        if _cache_fresh(LEADER_PRED_CACHE, LEADER_TTL):
+            return { 'items': LEADER_PRED_CACHE['data'], 'updated_at': datetime.fromtimestamp(LEADER_PRED_CACHE['ts']).isoformat() }
+        # 3) Строим заново
+        if SessionLocal is None:
+            return {'items': [], 'updated_at': None}
+        db: Session = get_db()
+        try:
+            won_case = case((Bet.status == 'won', 1), else_=0)
+            period_start = _week_period_start_msk_to_utc()
+            q = (
+                db.query(
+                    User.user_id.label('user_id'),
+                    (User.display_name).label('display_name'),
+                    (User.tg_username).label('tg_username'),
+                    func.count(Bet.id).label('bets_total'),
+                    func.sum(won_case).label('bets_won')
+                )
+                .join(Bet, Bet.user_id == User.user_id)
+                .filter(Bet.placed_at >= period_start)
+                .group_by(User.user_id, User.display_name, User.tg_username)
+                .having(func.count(Bet.id) > 0)
+            )
+            rows = []
+            for r in q:
+                total = int(r.bets_total or 0)
+                won = int(r.bets_won or 0)
+                pct = round((won / total) * 100, 1) if total > 0 else 0.0
+                rows.append({
+                    'user_id': int(r.user_id),
+                    'display_name': r.display_name or 'Игрок',
+                    'tg_username': r.tg_username or '',
+                    'bets_total': total,
+                    'bets_won': won,
+                    'winrate': pct
+                })
+            rows.sort(key=lambda x: (-x['winrate'], -x['bets_total'], x['display_name']))
+            rows = rows[:10]
+            # mirror into old cache to allow smooth transition / invalidation code reuse
+            LEADER_PRED_CACHE = { 'data': rows, 'ts': time.time(), 'etag': _etag_for_payload({'items': rows}) }
+            return {'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat()}
         finally:
             db.close()
-    global LEADER_PRED_CACHE
-    if _cache_fresh(LEADER_PRED_CACHE, LEADER_TTL):
-        client_etag = request.headers.get('If-None-Match')
-        if client_etag and client_etag == LEADER_PRED_CACHE.get('etag'):
-            return ('', 304)
-        return jsonify({
-            'items': LEADER_PRED_CACHE['data'],
-            'updated_at': datetime.fromtimestamp(LEADER_PRED_CACHE['ts']).isoformat(),
-            'version': LEADER_PRED_CACHE.get('etag')
-        })
-    if SessionLocal is None:
-        return jsonify({'items': [], 'updated_at': None}), 200
-    db: Session = get_db()
-    try:
-        # Посчитаем по таблице ставок
-        # won: status='won'
-        won_case = case((Bet.status == 'won', 1), else_=0)
-        period_start = _week_period_start_msk_to_utc()
-        q = (
-            db.query(
-                User.user_id.label('user_id'),
-                (User.display_name).label('display_name'),
-                (User.tg_username).label('tg_username'),
-                func.count(Bet.id).label('bets_total'),
-                func.sum(won_case).label('bets_won')
-            )
-            .join(Bet, Bet.user_id == User.user_id)
-            .filter(Bet.placed_at >= period_start)
-            .group_by(User.user_id, User.display_name, User.tg_username)
-            .having(func.count(Bet.id) > 0)
-        )
-        rows = []
-        for r in q:
-            total = int(r.bets_total or 0)
-            won = int(r.bets_won or 0)
-            pct = round((won / total) * 100, 1) if total > 0 else 0.0
-            rows.append({
-                'user_id': int(r.user_id),
-                'display_name': r.display_name or 'Игрок',
-                'tg_username': r.tg_username or '',
-                'bets_total': total,
-                'bets_won': won,
-                'winrate': pct
-            })
-        # Сортировка: по % выигрышных, затем по количеству ставок, затем по имени
-        rows.sort(key=lambda x: (-x['winrate'], -x['bets_total'], x['display_name']))
-        rows = rows[:10]
-        payload = {'items': rows}
-        etag = _etag_for_payload(payload)
-        LEADER_PRED_CACHE = { 'data': rows, 'ts': time.time(), 'etag': etag }
-        client_etag = request.headers.get('If-None-Match')
-        if client_etag and client_etag == etag:
-            return ('', 304)
-        resp = jsonify({ 'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag })
-        resp.headers['ETag'] = etag
-        resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
-        return resp
-    finally:
-        db.close()
+    return etag_json('leader-top-predictors', _build, cache_ttl=LEADER_TTL, max_age=3600, swr=600, core_filter=lambda p: {'items': p.get('items')})
 
 @app.route('/api/leaderboard/top-rich')
 def api_leader_top_rich():
     """Топ-10 по приросту кредитов за текущий месяц (с 1-го числа 03:00 МСК)."""
-    if SessionLocal is not None:
-        db = get_db()
-        try:
-            snap = _snapshot_get(db, 'leader-top-rich')
+    def _build():
+        if SessionLocal is not None:
+            db = get_db(); snap=None
+            try:
+                snap = _snapshot_get(db, 'leader-top-rich')
+            finally:
+                db.close()
             if snap and snap.get('payload'):
-                payload = snap['payload']
-                _core = {'items': payload.get('items')}
-                etag = _etag_for_payload(_core)
-                inm = request.headers.get('If-None-Match')
-                if inm and inm == etag:
-                    return ('', 304)
-                resp = jsonify({ **payload, 'version': etag })
-                resp.headers['ETag'] = etag
-                resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
-                return resp
+                return {**snap['payload']}
+        global LEADER_RICH_CACHE
+        if _cache_fresh(LEADER_RICH_CACHE, LEADER_TTL):
+            return { 'items': LEADER_RICH_CACHE['data'], 'updated_at': datetime.fromtimestamp(LEADER_RICH_CACHE['ts']).isoformat() }
+        if SessionLocal is None:
+            return {'items': [], 'updated_at': None}
+        db: Session = get_db()
+        try:
+            period_start = _month_period_start_msk_to_utc()
+            ensure_monthly_baselines(db, period_start)
+            users = db.query(User).all()
+            bases = {int(r.user_id): int(r.credits_base or 0) for r in db.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == period_start).all()}
+            rows = []
+            for u in users:
+                base = bases.get(int(u.user_id), int(u.credits or 0))
+                gain = int(u.credits or 0) - base
+                rows.append({
+                    'user_id': int(u.user_id),
+                    'display_name': u.display_name or 'Игрок',
+                    'tg_username': u.tg_username or '',
+                    'gain': int(gain),
+                })
+            rows.sort(key=lambda x: (-x['gain'], x['display_name']))
+            rows = rows[:10]
+            LEADER_RICH_CACHE = {'data': rows, 'ts': time.time(), 'etag': _etag_for_payload({'items': rows})}
+            return {'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat()}
         finally:
             db.close()
-    global LEADER_RICH_CACHE
-    if _cache_fresh(LEADER_RICH_CACHE, LEADER_TTL):
-        client_etag = request.headers.get('If-None-Match')
-        if client_etag and client_etag == LEADER_RICH_CACHE.get('etag'):
-            return ('', 304)
-        return jsonify({
-            'items': LEADER_RICH_CACHE['data'],
-            'updated_at': datetime.fromtimestamp(LEADER_RICH_CACHE['ts']).isoformat(),
-            'version': LEADER_RICH_CACHE.get('etag')
-        })
-    if SessionLocal is None:
-        return jsonify({'items': [], 'updated_at': None}), 200
-    db: Session = get_db()
-    try:
-        period_start = _month_period_start_msk_to_utc()
-        ensure_monthly_baselines(db, period_start)
-        # прирост = current_credits - baseline
-        users = db.query(User).all()
-        # получим baseline'ы пачкой
-        bases = {int(r.user_id): int(r.credits_base or 0) for r in db.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == period_start).all()}
-        rows = []
-        for u in users:
-            base = bases.get(int(u.user_id), int(u.credits or 0))
-            gain = int(u.credits or 0) - base
-            rows.append({
-                'user_id': int(u.user_id),
-                'display_name': u.display_name or 'Игрок',
-                'tg_username': u.tg_username or '',
-                'gain': int(gain),
-            })
-        # сортировка по gain убыв.
-        rows.sort(key=lambda x: (-x['gain'], x['display_name']))
-        rows = rows[:10]
-        payload = {'items': rows}
-        etag = _etag_for_payload(payload)
-        LEADER_RICH_CACHE = {'data': rows, 'ts': time.time(), 'etag': etag}
-        client_etag = request.headers.get('If-None-Match')
-        if client_etag and client_etag == etag:
-            return ('', 304)
-        resp = jsonify({'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag})
-        resp.headers['ETag'] = etag
-        resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
-        return resp
-    finally:
-        db.close()
+    return etag_json('leader-top-rich', _build, cache_ttl=LEADER_TTL, max_age=3600, swr=600, core_filter=lambda p: {'items': p.get('items')})
 
 @app.route('/api/leaderboard/server-leaders')
 def api_leader_server_leaders():
@@ -4479,163 +4434,113 @@ def api_leader_server_leaders():
     Можно настроить по-другому: например, активность (кол-во чек-инов за месяц) или приглашённые.
     Возвращаем топ-10 по score = xp + level*100 + consecutive_days*5.
     """
-    if SessionLocal is not None:
-        db = get_db()
-        try:
-            snap = _snapshot_get(db, 'leader-server-leaders')
+    def _build():
+        if SessionLocal is not None:
+            db = get_db(); snap=None
+            try:
+                snap = _snapshot_get(db, 'leader-server-leaders')
+            finally:
+                db.close()
             if snap and snap.get('payload'):
-                payload = snap['payload']
-                _core = {'items': payload.get('items')}
-                etag = _etag_for_payload(_core)
-                inm = request.headers.get('If-None-Match')
-                if inm and inm == etag:
-                    return ('', 304)
-                resp = jsonify({ **payload, 'version': etag })
-                resp.headers['ETag'] = etag
-                resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
-                return resp
+                return {**snap['payload']}
+        global LEADER_SERVER_CACHE
+        if _cache_fresh(LEADER_SERVER_CACHE, LEADER_TTL):
+            return { 'items': LEADER_SERVER_CACHE['data'], 'updated_at': datetime.fromtimestamp(LEADER_SERVER_CACHE['ts']).isoformat() }
+        if SessionLocal is None:
+            return {'items': [], 'updated_at': None}
+        db: Session = get_db()
+        try:
+            users = db.query(User).all()
+            rows = []
+            for u in users:
+                score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
+                rows.append({
+                    'user_id': int(u.user_id),
+                    'display_name': u.display_name or 'Игрок',
+                    'tg_username': u.tg_username or '',
+                    'xp': int(u.xp or 0),
+                    'level': int(u.level or 1),
+                    'streak': int(u.consecutive_days or 0),
+                    'score': score
+                })
+            rows.sort(key=lambda x: (-x['score'], -x['level'], -x['xp']))
+            rows = rows[:10]
+            LEADER_SERVER_CACHE = { 'data': rows, 'ts': time.time(), 'etag': _etag_for_payload({'items': rows}) }
+            return {'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat()}
         finally:
             db.close()
-    global LEADER_SERVER_CACHE
-    if _cache_fresh(LEADER_SERVER_CACHE, LEADER_TTL):
-        client_etag = request.headers.get('If-None-Match')
-        if client_etag and client_etag == LEADER_SERVER_CACHE.get('etag'):
-            return ('', 304)
-        return jsonify({
-            'items': LEADER_SERVER_CACHE['data'],
-            'updated_at': datetime.fromtimestamp(LEADER_SERVER_CACHE['ts']).isoformat(),
-            'version': LEADER_SERVER_CACHE.get('etag')
-        })
-    if SessionLocal is None:
-        return jsonify({'items': [], 'updated_at': None}), 200
-    db: Session = get_db()
-    try:
-        users = db.query(User).all()
-        rows = []
-        for u in users:
-            score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
-            rows.append({
-                'user_id': int(u.user_id),
-                'display_name': u.display_name or 'Игрок',
-                'tg_username': u.tg_username or '',
-                'xp': int(u.xp or 0),
-                'level': int(u.level or 1),
-                'streak': int(u.consecutive_days or 0),
-                'score': score
-            })
-        rows.sort(key=lambda x: (-x['score'], -x['level'], -x['xp']))
-        rows = rows[:10]
-        payload = {'items': rows}
-        etag = _etag_for_payload(payload)
-        LEADER_SERVER_CACHE = { 'data': rows, 'ts': time.time(), 'etag': etag }
-        client_etag = request.headers.get('If-None-Match')
-        if client_etag and client_etag == etag:
-            return ('', 304)
-        resp = jsonify({ 'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag })
-        resp.headers['ETag'] = etag
-        resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
-        return resp
-    finally:
-        db.close()
+    return etag_json('leader-server-leaders', _build, cache_ttl=LEADER_TTL, max_age=3600, swr=600, core_filter=lambda p: {'items': p.get('items')})
 
 @app.route('/api/leaderboard/prizes')
 def api_leader_prizes():
     """Возвращает пьедесталы по трем категориям: прогнозисты, богачи, лидеры сервера (по 3 места).
     Включаем только display_name и user_id (фото на фронте через Telegram).
     """
-    if SessionLocal is not None:
-        db = get_db()
-        try:
-            snap = _snapshot_get(db, 'leader-prizes')
+    def _build():
+        if SessionLocal is not None:
+            db = get_db(); snap=None
+            try:
+                snap = _snapshot_get(db, 'leader-prizes')
+            finally:
+                db.close()
             if snap and snap.get('payload'):
-                payload = snap['payload']
-                _core = {'data': payload.get('data')}
-                etag = _etag_for_payload(_core)
-                inm = request.headers.get('If-None-Match')
-                if inm and inm == etag:
-                    return ('', 304)
-                resp = jsonify({ **payload, 'version': etag })
-                resp.headers['ETag'] = etag
-                resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
-                return resp
+                return {**snap['payload']}
+        global LEADER_PRIZES_CACHE
+        if _cache_fresh(LEADER_PRIZES_CACHE, LEADER_TTL):
+            return { 'data': LEADER_PRIZES_CACHE['data'], 'updated_at': datetime.fromtimestamp(LEADER_PRIZES_CACHE['ts']).isoformat() }
+        # Собираем топы
+        preds = []; rich = []; serv = []
+        if SessionLocal is None:
+            return {'data': {'predictors': preds, 'rich': rich, 'server': serv}, 'updated_at': None}
+        db: Session = get_db()
+        try:
+            period_start = _week_period_start_msk_to_utc()
+            won_case = case((Bet.status == 'won', 1), else_=0)
+            q1 = (
+                db.query(
+                    User.user_id.label('user_id'),
+                    User.display_name.label('display_name'),
+                    User.tg_username.label('tg_username'),
+                    func.count(Bet.id).label('bets_total'),
+                    func.sum(won_case).label('bets_won')
+                )
+                .join(Bet, Bet.user_id == User.user_id)
+                .filter(Bet.placed_at >= period_start)
+                .group_by(User.user_id, User.display_name, User.tg_username)
+                .having(func.count(Bet.id) > 0)
+            )
+            tmp = []
+            for r in q1:
+                total = int(r.bets_total or 0); won = int(r.bets_won or 0)
+                pct = round((won / total) * 100, 1) if total > 0 else 0.0
+                tmp.append({'user_id': int(r.user_id), 'display_name': r.display_name or 'Игрок', 'tg_username': (r.tg_username or ''), 'winrate': pct, 'total': total})
+            tmp.sort(key=lambda x: (-x['winrate'], -x['total'], x['display_name']))
+            preds = tmp[:3]
+
+            period_start = _month_period_start_msk_to_utc()
+            ensure_monthly_baselines(db, period_start)
+            bases = { int(r.user_id): int(r.credits_base or 0) for r in db.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == period_start).all() }
+            tmp_rich = []
+            for u in db.query(User).all():
+                base = bases.get(int(u.user_id), int(u.credits or 0))
+                gain = int(u.credits or 0) - base
+                tmp_rich.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': (u.tg_username or ''), 'value': int(gain) })
+            tmp_rich.sort(key=lambda x: (-x['value'], x['display_name']))
+            rich = tmp_rich[:3]
+
+            users = db.query(User).all()
+            tmp2 = []
+            for u in users:
+                score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
+                tmp2.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': (u.tg_username or ''), 'score': score })
+            tmp2.sort(key=lambda x: -x['score'])
+            serv = tmp2[:3]
         finally:
             db.close()
-    global LEADER_PRIZES_CACHE
-    if _cache_fresh(LEADER_PRIZES_CACHE, LEADER_TTL):
-        client_etag = request.headers.get('If-None-Match')
-        if client_etag and client_etag == LEADER_PRIZES_CACHE.get('etag'):
-            return ('', 304)
-        return jsonify({
-            'data': LEADER_PRIZES_CACHE['data'],
-            'updated_at': datetime.fromtimestamp(LEADER_PRIZES_CACHE['ts']).isoformat(),
-            'version': LEADER_PRIZES_CACHE.get('etag')
-        })
-    # Собираем топы, как в отдельных эндпоинтах
-    preds = []
-    rich = []
-    serv = []
-    if SessionLocal is None:
-        payload = {'predictors': preds, 'rich': rich, 'server': serv}
-        return jsonify({'data': payload, 'updated_at': None})
-    db: Session = get_db()
-    try:
-        # predictors (только за период недели)
-        period_start = _week_period_start_msk_to_utc()
-        won_case = case((Bet.status == 'won', 1), else_=0)
-        q1 = (
-            db.query(
-                User.user_id.label('user_id'),
-                User.display_name.label('display_name'),
-                User.tg_username.label('tg_username'),
-                func.count(Bet.id).label('bets_total'),
-                func.sum(won_case).label('bets_won')
-            )
-            .join(Bet, Bet.user_id == User.user_id)
-            .filter(Bet.placed_at >= period_start)
-            .group_by(User.user_id, User.display_name, User.tg_username)
-            .having(func.count(Bet.id) > 0)
-        )
-        tmp = []
-        for r in q1:
-            total = int(r.bets_total or 0); won = int(r.bets_won or 0)
-            pct = round((won / total) * 100, 1) if total > 0 else 0.0
-            tmp.append({'user_id': int(r.user_id), 'display_name': r.display_name or 'Игрок', 'tg_username': (r.tg_username or ''), 'winrate': pct, 'total': total})
-        tmp.sort(key=lambda x: (-x['winrate'], -x['total'], x['display_name']))
-        preds = tmp[:3]
-
-        # rich — месячный прирост кредитов с 1-го числа 03:00 МСК
-        period_start = _month_period_start_msk_to_utc()
-        ensure_monthly_baselines(db, period_start)
-        bases = { int(r.user_id): int(r.credits_base or 0) for r in db.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == period_start).all() }
-        tmp_rich = []
-        for u in db.query(User).all():
-            base = bases.get(int(u.user_id), int(u.credits or 0))
-            gain = int(u.credits or 0) - base
-            tmp_rich.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': (u.tg_username or ''), 'value': int(gain) })
-        tmp_rich.sort(key=lambda x: (-x['value'], x['display_name']))
-        rich = tmp_rich[:3]
-
-        # server
-        users = db.query(User).all()
-        tmp2 = []
-        for u in users:
-            score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
-            tmp2.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': (u.tg_username or ''), 'score': score })
-        tmp2.sort(key=lambda x: -x['score'])
-        serv = tmp2[:3]
-    finally:
-        db.close()
-
-    payload = {'predictors': preds, 'rich': rich, 'server': serv}
-    etag = _etag_for_payload(payload)
-    LEADER_PRIZES_CACHE = { 'data': payload, 'ts': time.time(), 'etag': etag }
-    client_etag = request.headers.get('If-None-Match')
-    if client_etag and client_etag == etag:
-        return ('', 304)
-    resp = jsonify({ 'data': payload, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag })
-    resp.headers['ETag'] = etag
-    resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
-    return resp
+        data = {'predictors': preds, 'rich': rich, 'server': serv}
+        LEADER_PRIZES_CACHE = { 'data': data, 'ts': time.time(), 'etag': _etag_for_payload({'data': data}) }
+        return {'data': data, 'updated_at': datetime.now(timezone.utc).isoformat()}
+    return etag_json('leader-prizes', _build, cache_ttl=LEADER_TTL, max_age=3600, swr=600, core_filter=lambda p: {'data': p.get('data')})
 _BOT_TOKEN_WARNED = False
 def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 24*60*60):
     """Парсит и проверяет initData из Telegram WebApp.
@@ -5526,159 +5431,76 @@ def api_league_table():
 
 @app.route('/api/schedule', methods=['GET'])
 def api_schedule():
-    """Возвращает ближайшие 3 тура из снапшота БД; при отсутствии — bootstrap из Sheets. ETag/304 поддерживаются."""
-    try:
+    """Расписание (до 3 туров) через etag_json: snapshot -> sheet bootstrap, с match_of_week логикой."""
+    def _build():
+        payload = None
+        # 1) snapshot
         if SessionLocal is not None:
-            db: Session = get_db()
+            db: Session = get_db(); snap=None
             try:
                 snap = _snapshot_get(db, 'schedule')
-                if snap and snap.get('payload'):
-                    payload = snap['payload']
-                    # Если снапшот пустой (нет туров) — форсируем перестройку из Sheets
-                    tours_in_snap = (payload.get('tours') or []) if isinstance(payload, dict) else []
-                    total_matches = 0
-                    try:
-                        total_matches = sum(len(t.get('matches') or []) for t in tours_in_snap)
-                    except Exception:
-                        total_matches = 0
-                    if (not tours_in_snap) or total_matches == 0:
-                        try:
-                            payload = _build_schedule_payload_from_sheet()
-                            _snapshot_set(db, 'schedule', payload)
-                        except Exception:
-                            pass
-                    else:
-                        _core = {'tours': payload.get('tours')}
-                        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-                        inm = request.headers.get('If-None-Match')
-                        if inm and inm == _etag:
-                            resp = app.response_class(status=304)
-                            resp.headers['ETag'] = _etag
-                            resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
-                            return resp
-                    # «Матч недели»: сначала пытаемся взять ручной выбор админа из снапшота 'feature-match'
-                    try:
-                        manual = None
-                        if SessionLocal is not None:
-                            db2 = get_db()
-                            try:
-                                fm = _snapshot_get(db2, 'feature-match') or {}
-                                manual = (fm.get('payload') or {}).get('match') or None
-                            finally:
-                                db2.close()
-                        # если есть ручной выбор — проверим, не завершился ли матч
-                        use_manual = False
-                        if manual and isinstance(manual, dict):
-                            mh, ma = manual.get('home'), manual.get('away')
-                            if mh and ma:
-                                st = api_match_status_get.__wrapped__ if hasattr(api_match_status_get, '__wrapped__') else None
-                                # безопасная проверка статуса без HTTP-ответа: используем внутреннюю функцию времени матча
-                                try:
-                                    status = 'scheduled'
-                                    dt = _get_match_datetime(mh, ma)
-                                    now = datetime.now()
-                                    if dt:
-                                        if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                            status = 'live'
-                                        elif now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                            status = 'finished'
-                                    # показываем manual, если не finished
-                                    if status != 'finished':
-                                        use_manual = True
-                                except Exception:
-                                    use_manual = True
-                        if use_manual:
-                            payload = dict(payload)
-                            payload['match_of_week'] = manual
-                        else:
-                            # fallback: автоподбор по ближайшему туру ставок
-                            if SessionLocal is not None:
-                                db3 = get_db()
-                                try:
-                                    bt = _snapshot_get(db3, 'betting-tours')
-                                    tours_src = (bt or {}).get('payload', {}).get('tours') or payload.get('tours') or []
-                                finally:
-                                    db3.close()
-                            else:
-                                tours_src = payload.get('tours') or []
-                            best = _pick_match_of_week(tours_src)
-                            if best:
-                                payload = dict(payload)
-                                payload['match_of_week'] = best
-                    except Exception:
-                        pass
-                    # Пересчитаем ETag для (возможно) обновлённого payload
-                    _core2 = {'tours': payload.get('tours')}
-                    _etag2 = hashlib.md5(json.dumps(_core2, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-                    resp = jsonify({**payload, 'version': _etag2})
-                    resp.headers['ETag'] = _etag2
-                    resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
-                    return resp
             finally:
                 db.close()
-        # Bootstrap
-        payload = _build_schedule_payload_from_sheet()
-        try:
-            # При первом построении тоже используем ручной выбор, если есть и матч не завершён
-            manual = None
-            if SessionLocal is not None:
-                db2 = get_db()
+            if snap and snap.get('payload'):
+                payload = snap['payload']
+                tours_in_snap = (payload.get('tours') or []) if isinstance(payload, dict) else []
+                total_matches = 0
                 try:
-                    fm = _snapshot_get(db2, 'feature-match') or {}
-                    manual = (fm.get('payload') or {}).get('match') or None
+                    total_matches = sum(len(t.get('matches') or []) for t in tours_in_snap)
+                except Exception:
+                    total_matches = 0
+                if (not tours_in_snap) or total_matches == 0:
+                    payload = None  # форсируем rebuild
+        # 2) bootstrap при отсутствии или пустоте
+        if payload is None:
+            try:
+                payload = _build_schedule_payload_from_sheet()
+                if SessionLocal is not None:
+                    dbs = get_db();
+                    try: _snapshot_set(dbs, 'schedule', payload)
+                    finally: dbs.close()
+            except Exception:
+                payload = {'tours': []}
+        # 3) match_of_week
+        try:
+            manual=None
+            if SessionLocal is not None:
+                db2=get_db();
+                try:
+                    fm=_snapshot_get(db2,'feature-match') or {}
+                    manual=(fm.get('payload') or {}).get('match') or None
                 finally:
                     db2.close()
-            use_manual = False
+            use_manual=False
             if manual and isinstance(manual, dict):
-                mh, ma = manual.get('home'), manual.get('away')
+                mh,ma=manual.get('home'), manual.get('away')
                 if mh and ma:
                     try:
-                        status = 'scheduled'
-                        dt = _get_match_datetime(mh, ma)
-                        now = datetime.now()
+                        status='scheduled'
+                        dt=_get_match_datetime(mh,ma); now=datetime.now()
                         if dt:
-                            if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                status = 'live'
-                            elif now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                status = 'finished'
-                        if status != 'finished':
-                            use_manual = True
-                    except Exception:
-                        use_manual = True
+                            if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES): status='live'
+                            elif now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES): status='finished'
+                        if status!='finished': use_manual=True
+                    except Exception: use_manual=True
             if use_manual:
-                payload = dict(payload)
-                payload['match_of_week'] = manual
+                payload=dict(payload); payload['match_of_week']=manual
             else:
-                # автоподбор
-                tours_src = payload.get('tours') or []
+                tours_src=payload.get('tours') or []
                 if SessionLocal is not None:
-                    db3 = get_db()
+                    db3=get_db();
                     try:
-                        bt = _snapshot_get(db3, 'betting-tours')
-                        tours_src = (bt or {}).get('payload', {}).get('tours') or tours_src
-                    finally:
-                        db3.close()
-                best = _pick_match_of_week(tours_src)
+                        bt=_snapshot_get(db3,'betting-tours')
+                        tours_src=(bt or {}).get('payload', {}).get('tours') or tours_src
+                    finally: db3.close()
+                best=_pick_match_of_week(tours_src)
                 if best:
-                    payload = dict(payload)
-                    payload['match_of_week'] = best
+                    payload=dict(payload); payload['match_of_week']=best
         except Exception:
             pass
-        _core = {'tours': payload.get('tours')}
-        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        if SessionLocal is not None:
-            db = get_db()
-            try:
-                _snapshot_set(db, 'schedule', payload)
-            finally:
-                db.close()
-        resp = jsonify({**payload, 'version': _etag})
-        resp.headers['ETag'] = _etag
-        resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
-        return resp
-    except Exception as e:
-        app.logger.error(f"Ошибка загрузки расписания: {str(e)}")
-        return jsonify({'error': 'Не удалось загрузить расписание'}), 500
+        # enriched payload returned
+        return payload
+    return etag_json('schedule', _build, cache_ttl=900, max_age=900, swr=600, core_filter=lambda p: {'tours': p.get('tours')})
 
 @app.route('/api/vote/match', methods=['POST'])
 def api_vote_match():
@@ -6498,45 +6320,26 @@ def _settle_open_bets():
 
 @app.route('/api/results', methods=['GET'])
 def api_results():
-    """Возвращает прошедшие матчи из снапшота БД; при отсутствии — bootstrap из Sheets. ETag/304 поддерживаются."""
-    try:
+    """Результаты (прошедшие матчи) через etag_json: snapshot -> sheet bootstrap."""
+    def _build():
+        payload=None
         if SessionLocal is not None:
-            db: Session = get_db()
+            db=get_db(); snap=None
+            try: snap=_snapshot_get(db,'results')
+            finally: db.close()
+            if snap and snap.get('payload'):
+                payload=snap['payload']
+        if payload is None:
             try:
-                snap = _snapshot_get(db, 'results')
-                if snap and snap.get('payload'):
-                    payload = snap['payload']
-                    _core = {'results': (payload.get('results') or [])[:200]}
-                    _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-                    inm = request.headers.get('If-None-Match')
-                    if inm and inm == _etag:
-                        resp = app.response_class(status=304)
-                        resp.headers['ETag'] = _etag
-                        resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
-                        return resp
-                    resp = jsonify({**payload, 'version': _etag})
-                    resp.headers['ETag'] = _etag
-                    resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
-                    return resp
-            finally:
-                db.close()
-        # Bootstrap
-        payload = _build_results_payload_from_sheet()
-        _core = {'results': (payload.get('results') or [])[:200]}
-        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        if SessionLocal is not None:
-            db = get_db()
-            try:
-                _snapshot_set(db, 'results', payload)
-            finally:
-                db.close()
-        resp = jsonify({**payload, 'version': _etag})
-        resp.headers['ETag'] = _etag
-        resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
-        return resp
-    except Exception as e:
-        app.logger.error(f"Ошибка загрузки результатов: {str(e)}")
-        return jsonify({'error': 'Не удалось загрузить результаты'}), 500
+                payload=_build_results_payload_from_sheet()
+                if SessionLocal is not None:
+                    dbr=get_db();
+                    try: _snapshot_set(dbr,'results', payload)
+                    finally: dbr.close()
+            except Exception:
+                payload={'results': []}
+        return payload
+    return etag_json('results', _build, cache_ttl=900, max_age=900, swr=600, core_filter=lambda p: {'results': (p.get('results') or [])[:200]})
 
 @app.route('/api/match-details', methods=['GET'])
 def api_match_details():

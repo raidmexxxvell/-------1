@@ -69,16 +69,19 @@
 Внедряем набор паттернов для одновременного ускорения отклика и снижения нагрузки:
 1. Stale-While-Revalidate + ETag (универсально)
   - [x] Новости (/api/news)
-  - [x] Лидерборды (частично)
+  - [x] Лидерборды (все 4 эндпоинта через etag_json helper)
   - [x] Достижения (/api/achievements)
   - [x] Статус чек-ина (GET /api/checkin)
   - [ ] Match details (/api/match-details) унификация через helper
-  - [ ] Список результатов (/api/results) перевести на helper
+  - [ ] Список результатов (/api/results) перевести на helper (в процессе)
 2. Универсальный helper etag_json(endpoint_key, payload_builder)
   - [x] Реализован в app.py
   - [x] Применён к /api/checkin (GET)
-  - [ ] Применить к leaderboards (4 эндпоинта) для сокращения дублирования
-  - [ ] Применить к /api/schedule и /api/results
+  - [x] Применён к leaderboards (4 эндпоинта) — устранено дублирование и унифицированы заголовки
+  - [ ] Применить к /api/schedule (в процессе)
+  - [ ] Применить к /api/results (в процессе)
+  - [ ] Применить к /api/match-details (нужна нормализация core для ETag)
+  - [ ] Вынести core_filter паттерн в документацию (используется для исключения updated_at из ETag)
 3. Точечные push-обновления (WebSocket + версии полей)
   - [ ] Внедрить lightweight diff для score/markets (payload: {type:'patch', entity:'match', id, fields:{score:"1:0"}, version})
   - [ ] Версионность коэффициентов (odds_version) → клиент сверяет перед обновлением UI
