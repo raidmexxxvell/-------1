@@ -50,6 +50,7 @@
   border-radius: 999px;
   overflow: hidden;
   box-shadow: inset 0 1px 0 rgba(0,0,0,0.3);
+  position: relative;
 }
 
 .loading-progress {
@@ -58,6 +59,21 @@
   background: linear-gradient(90deg, var(--primary, #1e40af), var(--secondary, #f59e0b));
   border-radius: 999px;
   transition: width 0.15s linear;
+}
+
+/* Числовой процент */
+.loading-progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: .5px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  pointer-events: none;
+  user-select: none;
 }
 
 /* Когда заставка скрыта (класс .loaded на body) */

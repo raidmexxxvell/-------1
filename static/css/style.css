@@ -57,16 +57,34 @@ body {
 }
 
 .container { max-width: 600px; margin: 0 auto; padding: 0 12px; } /* внутренние отступы переносим в контейнер */
+
+/* Prevent horizontal scroll caused by full-bleed elements inside centered container */
+html, body { overflow-x: hidden; }
+
+/* When full-bleed blocks appear inside the centered .container (off-canvas panels etc.),
+   constrain them to the container width to avoid adding a horizontal scrollbar. */
+.container .profile-top-area,
+.container .referral-box.full {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+    /* ensure they align with container edges */
+    left: 0;
+    right: 0;
+}
 .nav {
     position: fixed;
     left: 50%;
     transform: translateX(-50%);
     bottom: 0;
-    width: min(600px, 100vw);
+    /* Отступ от краев приложения: уменьшаем ширину на 24px (12px слева/справа) */
+    width: min(600px, calc(100vw - 24px));
     background: rgba(10, 18, 40, 0.92);
     backdrop-filter: blur(12px);
     border-radius: 0; /* без закруглений */
-    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+    /* чуть больше внутренних отступов для визуального баланса */
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
     display: flex;
     justify-content: space-between;
     z-index: 1000;
@@ -1271,3 +1289,7 @@ body.theme-blb .share-btn {
 .news-loading, .news-empty, .news-error { color: var(--gray); font-size:13px; text-align:center; padding:10px 0; }
 .news-error { color: var(--danger); }
 @media (max-width:480px){ .news-item { padding:11px 12px 11px; } .news-title { font-size:13px; } .news-content { font-size:12.5px; } }
+
+/* Override: увеличенный заголовок блока Новостей */
+.news-title { font-size:18px !important; }
+@media (max-width:480px){ .news-title { font-size:15px !important; } }
