@@ -420,6 +420,17 @@
         }
     }
 
+    // Авто-загрузка новостей при первом входе в приложение (до выбора лиги)
+    document.addEventListener('DOMContentLoaded', () => {
+        // Если уже есть элементы новостей (например, подгрузили ранее) — не дублируем
+        try {
+            const list = document.getElementById('news-list');
+            if (list && !list.querySelector('.news-item') && !list.querySelector('.news-error')) {
+                loadNews();
+            }
+        } catch(_) {}
+    });
+
     function escapeHtml(s){
         return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
     }

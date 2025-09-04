@@ -47,6 +47,9 @@
           case 'invited': return `Друзей приглашено`;
           case 'betcount': return `Ставок сделано`;
           case 'betwins': return `Ставок выиграно`;
+          case 'bigodds': return `Макс. выигранный кэф`;
+          case 'markets': return `Разных рынков использовано`;
+          case 'weeks': return `Активных недель`;
           default: return a.description || a.desc || '';
         }
       } catch(_) { return a.description || ''; }
@@ -61,6 +64,9 @@
           case 'invited': return 'Приглашайте друзей по вашей реферальной ссылке. Прогресс растёт за каждого присоединившегося пользователя.';
           case 'betcount': return 'Совершайте ставки на матчи. Достижение повышается по мере роста количества совершённых ставок.';
           case 'betwins': return 'Выигрывайте ставки. Чем больше выигранных ставок, тем выше прогресс.';
+          case 'bigodds': return 'Побеждайте с высокими коэффициентами. Чем выше максимальный выигранный коэффициент вашей ставки, тем выше ранг достижения.';
+          case 'markets': return 'Используйте разные типы рынков (исход, тоталы, форы и др.) в ставках. Разнообразие рынков повышает прогресс.';
+          case 'weeks': return 'Оставайтесь активны из недели в неделю. Делайте хотя бы одну ставку в новые недели, чтобы повышать уровень.';
           default: {
             const txt = a.full_description || a.fullDesc || a.long_description || a.longDesc || a.description || a.desc;
             return txt || 'Описание недоступно.';
