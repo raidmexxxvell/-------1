@@ -862,14 +862,11 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     gap: 0;
     margin: 0 0 12px;
     border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 0; /* без скруглений слева и справа */
+    border-radius: 10px; /* легкое скругление внутри контейнера */
     overflow: hidden;
     background: rgba(255,255,255,0.04);
-    /* full-bleed во всю ширину экрана */
-    width: 100vw;
-    max-width: 100vw;
-    margin-left: calc(50% - 50vw);
-    margin-right: calc(50% - 50vw);
+    width: 100%;
+    max-width: 100%;
 }
 
 .subtab-item {
