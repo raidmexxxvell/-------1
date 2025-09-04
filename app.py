@@ -5876,8 +5876,40 @@ def api_betting_my_bets():
         if SessionLocal is None:
             return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
+        from sqlalchemy.exc import OperationalError, DisconnectionError
+        attempt = 0
+        rows = None
+        last_error = None
+        while attempt < 2:
+            try:
+                rows = db.query(Bet).filter(Bet.user_id == user_id).order_by(Bet.placed_at.desc()).limit(50).all()
+                break
+            except (OperationalError, DisconnectionError) as oe:
+                last_error = oe
+                app.logger.warning(f"My bets DB transient error (attempt {attempt+1}): {oe}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                # Полное освобождение соединений пула и повтор
+                try:
+                    if engine is not None:
+                        engine.dispose()
+                except Exception:
+                    pass
+                try:
+                    db.close()
+                except Exception:
+                    pass
+                db = SessionLocal() if SessionLocal else None
+                attempt += 1
+                continue
+            except Exception as e_any:
+                last_error = e_any
+                raise
+        if rows is None and last_error:
+            raise last_error
         try:
-            rows = db.query(Bet).filter(Bet.user_id == user_id).order_by(Bet.placed_at.desc()).limit(50).all()
             data = []
             # Соберём карту текущих дат матчей из снапшота betting-tours (фоллбэк к листу)
             match_dt_map = {}
@@ -5989,7 +6021,7 @@ def api_betting_my_bets():
                 })
             return jsonify({ 'bets': data })
         except Exception as _e:
-            app.logger.error(f"DB error (place bet): {_e}")
+            app.logger.error(f"DB error (my bets): {_e}")
             raise
         finally:
             db.close()
