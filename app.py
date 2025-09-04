@@ -3024,6 +3024,45 @@ def _etag_for_payload(payload: dict) -> str:
     except Exception:
         return str(int(time.time()))
 
+# ---------------------- ETag JSON Helper ----------------------
+_ETAG_HELPER_CACHE = {}
+def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: int = 30, swr: int = 30):
+    """Универсальный helper: строит или отдаёт из памяти JSON + ETag + SWR.
+
+    endpoint_key: уникальный ключ (включая user_id если ответ персональный)
+    builder_func: callable -> dict (payload без поля version)
+    cache_ttl: seconds keep in memory
+    max_age / swr: значения для Cache-Control
+    """
+    now = time.time()
+    client_etag = request.headers.get('If-None-Match')
+    ce = _ETAG_HELPER_CACHE.get(endpoint_key)
+    if ce and (now - ce['ts'] < cache_ttl):
+        if client_etag and client_etag == ce['etag']:
+            resp = flask.make_response('', 304)
+            resp.headers['ETag'] = ce['etag']
+            resp.headers['Cache-Control'] = f'public, max-age={max_age}, stale-while-revalidate={swr}'
+            return resp
+        resp = jsonify({**ce['payload'], 'version': ce['etag']})
+        resp.headers['ETag'] = ce['etag']
+        resp.headers['Cache-Control'] = f'public, max-age={max_age}, stale-while-revalidate={swr}'
+        return resp
+    payload = builder_func() or {}
+    try:
+        etag = _etag_for_payload(payload)
+    except Exception:
+        etag = hashlib.md5(str(endpoint_key).encode()).hexdigest()
+    _ETAG_HELPER_CACHE[endpoint_key] = {'ts': now, 'payload': payload, 'etag': etag}
+    if client_etag and client_etag == etag:
+        resp = flask.make_response('', 304)
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = f'public, max-age={max_age}, stale-while-revalidate={swr}'
+        return resp
+    resp = jsonify({**payload, 'version': etag})
+    resp.headers['ETag'] = etag
+    resp.headers['Cache-Control'] = f'public, max-age={max_age}, stale-while-revalidate={swr}'
+    return resp
+
 def _cache_fresh(cache_obj: dict, ttl: int) -> bool:
     return bool(cache_obj.get('data') is not None and (time.time() - (cache_obj.get('ts') or 0) < ttl))
 
@@ -4998,11 +5037,14 @@ def update_name():
         app.logger.error(f"Ошибка обновления имени: {str(e)}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
-@app.route('/api/checkin', methods=['POST'])
+@app.route('/api/checkin', methods=['GET','POST'])
 def daily_checkin():
-    """Обрабатывает ежедневный чекин"""
+    """GET: вернуть статус чек-ина (ETag/SWR)
+       POST: выполнить чек-ин (если не выполнен сегодня) и вернуть награду.
+    """
     try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        init_data = request.form.get('initData','') if request.method=='POST' else (request.args.get('initData','') or request.headers.get('X-Telegram-Init-Data',''))
+        parsed = parse_and_verify_telegram_init_data(init_data)
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = parsed['user'].get('id')
@@ -5038,11 +5080,23 @@ def daily_checkin():
         except Exception:
             last_checkin = None
 
+        # Если только статус (GET) — отдать через helper
+        if request.method == 'GET':
+            def build_status():
+                return {
+                    'status': 'already_checked' if last_checkin == today else 'available',
+                    'today': today.isoformat(),
+                    'last_checkin_date': user['last_checkin_date'] or '',
+                    'consecutive_days': user['consecutive_days'],
+                    'level': user['level'],
+                    'xp': user['xp'],
+                    'credits': user['credits']
+                }
+            return etag_json(f"checkin:{user_id}", build_status, cache_ttl=30, max_age=30, swr=30)
+
         if last_checkin == today:
-            return jsonify({
-                'status': 'already_checked',
-                'message': 'Вы уже получили награду сегодня'
-            })
+            # Повторный POST в тот же день — отдаём статус, не меняем данные
+            return jsonify({'status':'already_checked','message':'Уже получено сегодня'}), 200
 
         # Расчет дня цикла
         cycle_day = (user['consecutive_days'] % 7) + 1
@@ -5100,14 +5154,22 @@ def daily_checkin():
             except Exception as e:
                 app.logger.warning(f"Mirror checkin to sheets failed: {e}")
 
-        return jsonify({
+        # Инвалидируем кэш статуса чек-ина в helper
+        _ETAG_HELPER_CACHE.pop(f"checkin:{user_id}", None)
+        payload = {
             'status': 'success',
             'xp': xp_reward,
             'credits': credits_reward,
             'cycle_day': cycle_day,
             'new_consecutive': new_consecutive,
             'new_level': new_level
-        })
+        }
+        # Добавим version (etag) на основе payload чтобы клиент мог кэшировать ответ
+        etag = _etag_for_payload(payload)
+        resp = jsonify({**payload, 'version': etag})
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'no-cache'
+        return resp
 
     except Exception as e:
         app.logger.error(f"Ошибка чекина: {str(e)}")
