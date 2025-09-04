@@ -51,12 +51,53 @@
         }
       } catch(_) { return a.description || ''; }
     };
+    // Расширенное описание (для кнопки "Подробнее"). Всегда возвращает текст.
+    const longDescFor = (a) => {
+      try {
+        switch(a.group){
+          case 'streak': return 'Поддерживайте ежедневную активность без пропусков. Чем длиннее серия входов, тем выше ваш уровень достижения.';
+          case 'credits': return 'Накопите указанное количество кредитов. Кредиты зарабатываются за активность и другие достижения.';
+          case 'level': return 'Повышайте уровень, участвуя в активности платформы и выполняя задачи. Каждый новый уровень открывает больше возможностей.';
+          case 'invited': return 'Приглашайте друзей по вашей реферальной ссылке. Прогресс растёт за каждого присоединившегося пользователя.';
+          case 'betcount': return 'Совершайте ставки на матчи. Достижение повышается по мере роста количества совершённых ставок.';
+          case 'betwins': return 'Выигрывайте ставки. Чем больше выигранных ставок, тем выше прогресс.';
+          default: {
+            const txt = a.full_description || a.fullDesc || a.long_description || a.longDesc || a.description || a.desc;
+            return txt || 'Описание недоступно.';
+          }
+        }
+      } catch(_) { return a.description || a.desc || 'Описание недоступно.'; }
+    };
     achievements.forEach(a => {
       const card = document.createElement('div'); card.className='achievement-card';
       if(!a.unlocked) card.classList.add('locked');
       const img=document.createElement('img'); img.alt=a.name||''; setAchievementIcon(img,a);
       const name=document.createElement('div'); name.className='badge-name'; name.textContent=a.name||'';
       const req=document.createElement('div'); req.className='badge-requirements'; 
+      const fullDescText = longDescFor(a);
+      // Контейнер полного описания
+      const fullDescEl = document.createElement('div');
+      fullDescEl.className = 'achv-desc';
+      fullDescEl.textContent = fullDescText;
+      fullDescEl.setAttribute('data-open','0');
+      // Кнопка Подробнее
+      const toggleBtn = document.createElement('div');
+      toggleBtn.className = 'achv-desc-toggle';
+      toggleBtn.textContent = 'Подробнее';
+      toggleBtn.setAttribute('role','button');
+      toggleBtn.tabIndex = 0;
+      const toggle = () => {
+        const opened = fullDescEl.getAttribute('data-open') === '1';
+        if(opened){
+          fullDescEl.setAttribute('data-open','0');
+          toggleBtn.textContent = 'Подробнее';
+        } else {
+          fullDescEl.setAttribute('data-open','1');
+          toggleBtn.textContent = 'Скрыть';
+        }
+      };
+      toggleBtn.addEventListener('click', e=>{ e.stopPropagation(); toggle(); });
+      toggleBtn.addEventListener('keydown', e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggle(); } });
       
       // Улучшенное отображение прогресса и требований
       if(a.value !== undefined && (a.target !== undefined || a.next_target !== undefined)) {
@@ -163,10 +204,10 @@
         
         progressBar.style.width = progressPercent + '%';
         progressContainer.appendChild(progressBar);
-        card.append(img,name,req,progressContainer);
+  card.append(img,name,req,progressContainer,toggleBtn,fullDescEl);
       } else {
-        req.textContent = descFor(a);
-        card.append(img,name,req);
+  req.textContent = descFor(a);
+  card.append(img,name,req,toggleBtn,fullDescEl);
       }
       
       badgesContainer.appendChild(card);

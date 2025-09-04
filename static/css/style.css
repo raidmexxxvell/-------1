@@ -725,6 +725,20 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 .achv-desc-toggle:hover { background: rgba(255,255,255,0.16); }
 
+/* Скрытое описание достижения */
+.achv-desc {
+    display: none;
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.3;
+    color: var(--muted);
+    text-align: left;
+    width: 100%;
+    white-space: normal;
+    word-break: break-word;
+}
+.achv-desc[data-open="1"] { display: block; }
+
 /* прогресс в карточке достижения */
 .achv-progress-container {
     background: rgba(255, 255, 255, 0.12);
