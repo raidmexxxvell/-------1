@@ -5119,6 +5119,7 @@ def get_achievements():
         global ACHIEVEMENTS_CACHE
         if 'ACHIEVEMENTS_CACHE' not in globals():
             ACHIEVEMENTS_CACHE = {}
+    # Быстрый выход из кэша итогового ответа (30 сек)
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
@@ -5173,28 +5174,56 @@ def get_achievements():
                 db.close()
         invited_tier = compute_tier(invited_count, invited_thresholds)
 
-        bet_stats = {'total':0,'won':0,'max_win_odds':0.0,'markets_used':set(),'weeks_active':set()}
-        if SessionLocal is not None:
-            db = get_db();
-            try:
-                for b in db.query(Bet).filter(Bet.user_id==int(user_id)).all():
-                    bet_stats['total'] += 1
-                    try:
-                        if (b.status or '').lower()=='won':
-                            bet_stats['won'] += 1
-                            k=float((b.odds or '0').replace(',','.'))
-                            if k>bet_stats['max_win_odds']: bet_stats['max_win_odds']=k
-                    except Exception: pass
-                    mk=(b.market or '1x2').lower();
-                    if mk in ('penalty','redcard'): mk='specials'
-                    bet_stats['markets_used'].add(mk)
-                    if b.placed_at:
+        # Кэш статистики ставок отдельно (чтобы не пересчитывать при частых запросах достижений)
+        global _ACH_BET_STATS_CACHE
+        if '_ACH_BET_STATS_CACHE' not in globals():
+            _ACH_BET_STATS_CACHE = {}
+        bet_cache_key = f"bst:{user_id}"  # bet stats
+        bet_stats_entry = _ACH_BET_STATS_CACHE.get(bet_cache_key)
+        bet_stats = None
+        if bet_stats_entry and (now_ts - bet_stats_entry['ts'] < 120):  # 2 минуты кэширования расчёта ставок
+            bet_stats = bet_stats_entry['data']
+        else:
+            bet_stats = {'total':0,'won':0,'max_win_odds':0.0,'markets_used':set(),'weeks_active':set()}
+            if SessionLocal is not None:
+                db = get_db();
+                try:
+                    # Берём только нужные поля, чтобы не тащить всё
+                    for b in db.query(Bet.id, Bet.status, Bet.odds, Bet.market, Bet.placed_at, Bet.user_id).filter(Bet.user_id==int(user_id)).all():
+                        bet_stats['total'] += 1
                         try:
-                            start=_week_period_start_msk_to_utc(b.placed_at.astimezone(timezone.utc))
-                            bet_stats['weeks_active'].add(start.date().isoformat())
+                            if (b.status or '').lower()=='won':
+                                bet_stats['won'] += 1
+                                k=float((b.odds or '0').replace(',','.'))
+                                if k>bet_stats['max_win_odds']: bet_stats['max_win_odds']=k
                         except Exception: pass
-            finally:
-                db.close()
+                        mk=(b.market or '1x2').lower();
+                        if mk in ('penalty','redcard'): mk='specials'
+                        bet_stats['markets_used'].add(mk)
+                        if b.placed_at:
+                            try:
+                                start=_week_period_start_msk_to_utc(b.placed_at.astimezone(timezone.utc))
+                                bet_stats['weeks_active'].add(start.date().isoformat())
+                            except Exception: pass
+                finally:
+                    db.close()
+            # Сохраняем в кэш (копии изменяемых set -> list для сериализации безопасности)
+            _ACH_BET_STATS_CACHE[bet_cache_key] = {
+                'ts': now_ts,
+                'data': {
+                    'total': bet_stats['total'],
+                    'won': bet_stats['won'],
+                    'max_win_odds': bet_stats['max_win_odds'],
+                    'markets_used': set(bet_stats['markets_used']),
+                    'weeks_active': set(bet_stats['weeks_active'])
+                }
+            }
+
+        # Приводим обратно к set если восстановлено из кэша
+        if not isinstance(bet_stats['markets_used'], set):
+            bet_stats['markets_used'] = set(bet_stats['markets_used'])
+        if not isinstance(bet_stats['weeks_active'], set):
+            bet_stats['weeks_active'] = set(bet_stats['weeks_active'])
         betcount_tier=compute_tier(bet_stats['total'], betcount_thresholds); betwins_tier=compute_tier(bet_stats['won'], betwins_thresholds); bigodds_tier=compute_tier(bet_stats['max_win_odds'], bigodds_thresholds); markets_tier=compute_tier(len(bet_stats['markets_used']), markets_thresholds); weeks_tier=compute_tier(len(bet_stats['weeks_active']), weeks_thresholds)
 
         ach_row, ach = get_user_achievements_row(user_id); updates=[]; now_iso=datetime.now(timezone.utc).isoformat()
@@ -5231,57 +5260,6 @@ def get_achievements():
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {e}")
         return jsonify({'error':'Внутренняя ошибка сервера'}),500
-
-        # Кредиты: 10k/50k/500k
-        if credits_tier:
-            achievements.append({ 'group': 'credits', 'tier': credits_tier, 'name': {1:'Бедолага',2:'Мажор',3:'Олигарх'}[credits_tier], 'value': user['credits'], 'target': {1:10000,2:50000,3:500000}[credits_tier], 'next_target': _next_target_by_value(user['credits'], credits_targets), 'all_targets': credits_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[credits_tier], 'unlocked': True })
-        else:
-            achievements.append({ 'group': 'credits', 'tier': 1, 'name': 'Бедолага', 'value': user['credits'], 'target': 10000, 'next_target': _next_target_by_value(user['credits'], credits_targets), 'all_targets': credits_targets, 'icon': 'bronze', 'unlocked': False })
-
-        # Уровень: 25/50/100
-        if level_tier:
-            achievements.append({ 'group': 'level', 'tier': level_tier, 'name': {1:'Новобранец',2:'Ветеран',3:'Легенда'}[level_tier], 'value': user['level'], 'target': {1:25,2:50,3:100}[level_tier], 'next_target': _next_target_by_value(user['level'], level_targets), 'all_targets': level_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[level_tier], 'unlocked': True })
-        else:
-            achievements.append({ 'group': 'level', 'tier': 1, 'name': 'Новобранец', 'value': user['level'], 'target': 25, 'next_target': _next_target_by_value(user['level'], level_targets), 'all_targets': level_targets, 'icon': 'bronze', 'unlocked': False })
-
-        # Приглашённые: 10/50/150
-        if invited_tier:
-            achievements.append({ 'group': 'invited', 'tier': invited_tier, 'name': {1:'Рекрутер',2:'Посол',3:'Легенда'}[invited_tier], 'value': invited_count, 'target': {1:10,2:50,3:150}[invited_tier], 'next_target': _next_target_by_value(invited_count, invited_targets), 'all_targets': invited_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[invited_tier], 'unlocked': True })
-        else:
-            achievements.append({ 'group': 'invited', 'tier': 1, 'name': 'Рекрутер', 'value': invited_count, 'target': 10, 'next_target': _next_target_by_value(invited_count, invited_targets), 'all_targets': invited_targets, 'icon': 'bronze', 'unlocked': False })
-
-        # Количество ставок: 10/50/200
-        if betcount_tier:
-            achievements.append({ 'group': 'betcount', 'tier': betcount_tier, 'name': {1:'Новичок ставок',2:'Профи ставок',3:'Марафонец'}[betcount_tier], 'value': bet_stats['total'], 'target': {1:10,2:50,3:200}[betcount_tier], 'next_target': _next_target_by_value(bet_stats['total'], betcount_targets), 'all_targets': betcount_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[betcount_tier], 'unlocked': True })
-        else:
-            achievements.append({ 'group': 'betcount', 'tier': 1, 'name': 'Новичок ставок', 'value': bet_stats['total'], 'target': 10, 'next_target': _next_target_by_value(bet_stats['total'], betcount_targets), 'all_targets': betcount_targets, 'icon': 'bronze', 'unlocked': False })
-
-        # Победы в ставках: 5/20/75
-        if betwins_tier:
-            achievements.append({ 'group': 'betwins', 'tier': betwins_tier, 'name': {1:'Счастливчик',2:'Снайпер',3:'Чемпион'}[betwins_tier], 'value': bet_stats['won'], 'target': {1:5,2:20,3:75}[betwins_tier], 'next_target': _next_target_by_value(bet_stats['won'], betwins_targets), 'all_targets': betwins_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[betwins_tier], 'unlocked': True })
-        else:
-            achievements.append({ 'group': 'betwins', 'tier': 1, 'name': 'Счастливчик', 'value': bet_stats['won'], 'target': 5, 'next_target': _next_target_by_value(bet_stats['won'], betwins_targets), 'all_targets': betwins_targets, 'icon': 'bronze', 'unlocked': False })
-
-        # Крупный коэффициент: 3.0/4.5/6.0
-        if bigodds_tier:
-            achievements.append({ 'group': 'bigodds', 'tier': bigodds_tier, 'name': {1:'Рисковый',2:'Хайроллер',3:'Легенда кэфов'}[bigodds_tier], 'value': bet_stats['max_win_odds'], 'target': {1:3.0,2:4.5,3:6.0}[bigodds_tier], 'next_target': _next_target_by_value(bet_stats['max_win_odds'], bigodds_targets), 'all_targets': bigodds_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[bigodds_tier], 'unlocked': True })
-        else:
-            achievements.append({ 'group': 'bigodds', 'tier': 1, 'name': 'Рисковый', 'value': bet_stats['max_win_odds'], 'target': 3.0, 'next_target': _next_target_by_value(bet_stats['max_win_odds'], bigodds_targets), 'all_targets': bigodds_targets, 'icon': 'bronze', 'unlocked': False })
-
-        # Разнообразие рынков: 2/3/4
-        if markets_tier:
-            achievements.append({ 'group': 'markets', 'tier': markets_tier, 'name': {1:'Универсал I',2:'Универсал II',3:'Универсал III'}[markets_tier], 'value': len(bet_stats['markets_used']), 'target': {1:2,2:3,3:4}[markets_tier], 'next_target': _next_target_by_value(len(bet_stats['markets_used']), markets_targets), 'all_targets': markets_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[markets_tier], 'unlocked': True })
-        else:
-            achievements.append({ 'group': 'markets', 'tier': 1, 'name': 'Универсал I', 'value': len(bet_stats['markets_used']), 'target': 2, 'next_target': _next_target_by_value(len(bet_stats['markets_used']), markets_targets), 'all_targets': markets_targets, 'icon': 'bronze', 'unlocked': False })
-
-        # Регулярность по неделям: 2/5/10
-        if weeks_tier:
-            achievements.append({ 'group': 'weeks', 'tier': weeks_tier, 'name': {1:'Регуляр',2:'Постоянный',3:'Железный'}[weeks_tier], 'value': len(bet_stats['weeks_active']), 'target': {1:2,2:5,3:10}[weeks_tier], 'next_target': _next_target_by_value(len(bet_stats['weeks_active']), weeks_targets), 'all_targets': weeks_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[weeks_tier], 'unlocked': True })
-        else:
-            achievements.append({ 'group': 'weeks', 'tier': 1, 'name': 'Регуляр', 'value': len(bet_stats['weeks_active']), 'target': 2, 'next_target': _next_target_by_value(len(bet_stats['weeks_active']), weeks_targets), 'all_targets': weeks_targets, 'icon': 'bronze', 'unlocked': False })
-        resp = {'achievements': achievements}
-        ACHIEVEMENTS_CACHE[cache_key] = { 'ts': now_ts, 'data': resp }
-        return jsonify(resp)
 
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {str(e)}")
@@ -6138,6 +6116,9 @@ def _get_match_result(home: str, away: str):
 
 def _get_match_total_goals(home: str, away: str):
     # 1) Snapshot 'results'
+    global _INVALID_SCORE_WARNED
+    if '_INVALID_SCORE_WARNED' not in globals():
+        _INVALID_SCORE_WARNED = set()
     if SessionLocal is not None:
         db = get_db()
         try:
@@ -6149,9 +6130,12 @@ def _get_match_total_goals(home: str, away: str):
                     h = _parse_score(m.get('score_home',''))
                     a = _parse_score(m.get('score_away',''))
                     if h is None or a is None:
-                        try:
-                            app.logger.warning(f"_get_match_total_goals: Found match {home} vs {away} in results snapshot but invalid scores: {m.get('score_home','')} - {m.get('score_away','')}")
-                        except: pass
+                        key=(home,away,m.get('score_home',''),m.get('score_away',''),'snap')
+                        if key not in _INVALID_SCORE_WARNED:
+                            _INVALID_SCORE_WARNED.add(key)
+                            try:
+                                app.logger.warning(f"_get_match_total_goals: invalid scores (snapshot) {home} vs {away}: {m.get('score_home','')} - {m.get('score_away','')}")
+                            except: pass
                         return None
                     total = h + a
                     try:
@@ -6168,9 +6152,12 @@ def _get_match_total_goals(home: str, away: str):
                 h = _parse_score(m.get('score_home',''))
                 a = _parse_score(m.get('score_away',''))
                 if h is None or a is None:
-                    try:
-                        app.logger.warning(f"_get_match_total_goals: Found match {home} vs {away} in sheet but invalid scores: {m.get('score_home','')} - {m.get('score_away','')}")
-                    except: pass
+                    key=(home,away,m.get('score_home',''),m.get('score_away',''),'sheet')
+                    if key not in _INVALID_SCORE_WARNED:
+                        _INVALID_SCORE_WARNED.add(key)
+                        try:
+                            app.logger.warning(f"_get_match_total_goals: invalid scores (sheet) {home} vs {away}: {m.get('score_home','')} - {m.get('score_away','')}")
+                        except: pass
                     return None
                 total = h + a
                 try:

@@ -983,28 +983,23 @@
     if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
 
         // Хелпер: загрузка логотипа команды с фолбэками по названию
+        const __teamLogoCache = window.__TEAM_LOGO_CACHE__ = window.__TEAM_LOGO_CACHE__ || {};
         const loadTeamLogo = (imgEl, teamName) => {
+            if (!imgEl) return;
             const base = '/static/img/team-logos/';
             const name = (teamName || '').trim();
-            const candidates = [];
-            if (name) {
-        // 1) нормализованное: нижний регистр, без пробелов/ё->е
-        const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
-        const ver = `?v=${Date.now()}`;
-        candidates.push(base + encodeURIComponent(norm + '.png') + ver);
-        // 2) при желании можно попытаться точным именем (закомментировано для избежания 404-спама)
-        // candidates.push(base + encodeURIComponent(name + '.png'));
-            }
-            // 3) дефолт (с версией)
-            candidates.push(base + 'default.png' + `?v=${Date.now()}`);
-
-            let idx = 0;
-            const tryNext = () => {
-                if (idx >= candidates.length) return;
-                imgEl.onerror = () => { idx++; tryNext(); };
-                imgEl.src = candidates[idx];
-            };
-            tryNext();
+            if (!name){ imgEl.src = base + 'default.png'; return; }
+            const norm = name.toLowerCase().replace(/\s+/g,'').replace(/ё/g,'е');
+            const primary = base + encodeURIComponent(norm + '.png');
+            const fallback = base + 'default.png';
+            // Если уже кэшировано успешно — используем мгновенно
+            if (__teamLogoCache[primary] === 'ok'){ imgEl.src = primary; return; }
+            if (__teamLogoCache[primary] === 'fail'){ imgEl.src = fallback; return; }
+            // Настраиваем оптимистично: сначала пробуем primary
+            imgEl.onload = () => { __teamLogoCache[primary] = 'ok'; };
+            imgEl.onerror = () => { __teamLogoCache[primary] = 'fail'; imgEl.src = fallback; };
+            imgEl.decoding = 'async';
+            imgEl.src = primary;
         };
     const renderSchedule = (data) => {
             try { window.League?.renderSchedule?.(pane, data?.data || data); } catch(_) {
@@ -1055,19 +1050,22 @@
     const cached = readCache();
     if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';
 
+    const __teamLogoCache2 = window.__TEAM_LOGO_CACHE__ = window.__TEAM_LOGO_CACHE__ || {};
     const loadTeamLogo = (imgEl, teamName) => {
-            const base = '/static/img/team-logos/';
-            const name = (teamName || '').trim();
-            const candidates = [];
-            if (name) {
-                const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
-        candidates.push(base + encodeURIComponent(norm + '.png') + `?v=${Date.now()}`);
-            }
-        candidates.push(base + 'default.png' + `?v=${Date.now()}`);
-            let idx = 0;
-            const tryNext = () => { if (idx >= candidates.length) return; imgEl.onerror = () => { idx++; tryNext(); }; imgEl.src = candidates[idx]; };
-            tryNext();
-        };
+        if (!imgEl) return;
+        const base = '/static/img/team-logos/';
+        const name = (teamName || '').trim();
+        if (!name){ imgEl.src = base + 'default.png'; return; }
+        const norm = name.toLowerCase().replace(/\s+/g,'').replace(/ё/g,'е');
+        const primary = base + encodeURIComponent(norm + '.png');
+        const fallback = base + 'default.png';
+        if (__teamLogoCache2[primary] === 'ok'){ imgEl.src = primary; return; }
+        if (__teamLogoCache2[primary] === 'fail'){ imgEl.src = fallback; return; }
+        imgEl.onload = () => { __teamLogoCache2[primary] = 'ok'; };
+        imgEl.onerror = () => { __teamLogoCache2[primary] = 'fail'; imgEl.src = fallback; };
+        imgEl.decoding = 'async';
+        imgEl.src = primary;
+    };
 
         // ETag-кэш для /api/results
     const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
