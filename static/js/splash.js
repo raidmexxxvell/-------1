@@ -55,6 +55,22 @@ document.addEventListener('DOMContentLoaded', () => {
         appContent: !!appContent
     });
 
+    // Предварительная загрузка ключевых логотипов для устранения мерцания
+    (function preloadCoreImages(){
+        try {
+            const core = [
+                '/static/img/logo.png',
+                '/static/img/logo_liga.png',
+                '/static/img/placeholderlogo.png'
+            ];
+            core.forEach(u=>{ const im=new Image(); im.decoding='async'; im.src=u; });
+            // Через небольшой интервал попробуем захватить уже вставленные логотипы команд
+            setTimeout(()=>{
+                try { document.querySelectorAll('.match-card.home-feature img, .league-logo').forEach(el=>{ const im=new Image(); im.src=el.src; }); } catch(_) {}
+            }, 800);
+        } catch(_) {}
+    })();
+
     // Если шаблона нет — выходим
     if (!splash) {
         warn('No #splash element found. Skip splash flow.');
@@ -101,6 +117,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const ok = tryStart();
             if (ok || tries >= 6) clearInterval(pid);
         }, 300);
+    })();
+
+    // Предзагрузка новостей ещё на этапе заставки (без модификации DOM)
+    (function preloadNews(){
+        try {
+            fetch('/api/news?limit=5&_=' + Date.now(), { cache:'no-store' })
+              .then(r=> r.ok ? r.json() : null)
+              .then(data=>{ if(data){ window.__NEWS_PRELOADED_DATA__ = data; try { window.dispatchEvent(new CustomEvent('preload:news-ready')); } catch(_) {} } });
+        } catch(_) {}
     })();
     // мгновенно сдвинем прогресс с 0 чтобы избежать визуального залипания
     try {

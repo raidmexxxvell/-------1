@@ -386,38 +386,56 @@
         const list = document.getElementById('news-list');
         if (!list) return;
         list.classList.add('news-loading-state');
+        // Если есть предзагруженные данные — сразу рендерим без состояния загрузки
+        if (window.__NEWS_PRELOADED_DATA__ && Array.isArray(window.__NEWS_PRELOADED_DATA__.news)) {
+            renderNewsFromData(window.__NEWS_PRELOADED_DATA__.news, list);
+            return;
+        }
         list.innerHTML = '<div class="news-loading">Загрузка новостей...</div>';
+        // Короткое ожидание предзагрузки (если она почти завершена)
+        let waited = false;
+        const waitPromise = new Promise(res=>{
+            const h = setTimeout(()=>{ waited=true; clearTimeout(h); res(); }, 160);
+            window.addEventListener('preload:news-ready', ()=>{ if(!waited){ clearTimeout(h); res(); } }, { once:true });
+        });
+        await waitPromise;
+        if (window.__NEWS_PRELOADED_DATA__ && Array.isArray(window.__NEWS_PRELOADED_DATA__.news)) {
+            renderNewsFromData(window.__NEWS_PRELOADED_DATA__.news, list);
+            return;
+        }
         try {
             const res = await fetch('/api/news?limit=5&_=' + Date.now());
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
             const items = data?.news || [];
-            if (!items.length) {
-                list.innerHTML = '<div class="news-empty">Пока нет новостей</div>';
-                return;
-            }
-            list.innerHTML = '';
-            items.forEach(n => {
-                const div = document.createElement('div');
-                div.className = 'news-item';
-                const dt = n.created_at ? new Date(n.created_at) : null;
-                const dateText = dt ? dt.toLocaleString(undefined, {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
-                // Обрезаем контент
-                const content = (n.content || '').trim();
-                const short = content.length > 160 ? content.slice(0,160) + '…' : content;
-                div.innerHTML = `
-                    <div class="news-head">
-                        <div class="news-title">${escapeHtml(n.title || 'Без заголовка')}</div>
-                        <div class="news-date">${dateText}</div>
-                    </div>
-                    <div class="news-content">${escapeHtml(short)}</div>
-                `;
-                list.appendChild(div);
-            });
+            renderNewsFromData(items, list);
         } catch(e) {
             list.innerHTML = '<div class="news-error">Ошибка загрузки новостей</div>';
             console.error('[News] load error', e);
         }
+    }
+
+    function renderNewsFromData(items, list){
+        if (!list) list = document.getElementById('news-list');
+        if(!list) return;
+        if (!items.length) { list.innerHTML = '<div class="news-empty">Пока нет новостей</div>'; return; }
+        list.innerHTML = '';
+        items.forEach(n => {
+            const div = document.createElement('div');
+            div.className = 'news-item';
+            const dt = n.created_at ? new Date(n.created_at) : null;
+            const dateText = dt ? dt.toLocaleString(undefined, {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
+            const content = (n.content || '').trim();
+            const short = content.length > 160 ? content.slice(0,160) + '…' : content;
+            div.innerHTML = `
+                <div class="news-head">
+                    <div class="news-title">${escapeHtml(n.title || 'Без заголовка')}</div>
+                    <div class="news-date">${dateText}</div>
+                </div>
+                <div class="news-content">${escapeHtml(short)}</div>
+            `;
+            list.appendChild(div);
+        });
     }
 
     // Авто-загрузка новостей при первом входе в приложение (до выбора лиги)
