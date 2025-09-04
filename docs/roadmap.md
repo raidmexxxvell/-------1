@@ -102,6 +102,8 @@
     - [x] Базовая утилита `etag-fetch.js` добавлена
     - [x] Мигрирован /api/achievements на fetchEtag
     - [ ] Миграция schedule/results/profile (поэтапно)
+      - [x] /api/schedule (клиентская функция loadSchedule использует fetchEtag с fallback)
+  - [x] /api/results (loadResults переведён на fetchEtag с fallback)
 
 UI / UX мелкие правки (быстрый финиш)
   - [x] Стилизованная модалка подтверждения в стиле приложения (замена native confirm)

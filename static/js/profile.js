@@ -976,34 +976,14 @@
         const pane = document.getElementById('ufo-schedule');
         if (!pane) return;
         _scheduleLoading = true;
-    const CACHE_KEY = 'schedule:tours';
-    const FRESH_TTL = 10 * 60 * 1000; // 10 минут
-    const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
-    const cached = readCache();
-    if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
+        const CACHE_KEY = 'schedule:tours';
+        const FRESH_TTL = 10 * 60 * 1000; // 10 минут
+        const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
+        const cached = readCache();
+        if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
 
-        // Хелпер: загрузка логотипа команды с фолбэками по названию
-        const __teamLogoCache = window.__TEAM_LOGO_CACHE__ = window.__TEAM_LOGO_CACHE__ || {};
-        const loadTeamLogo = (imgEl, teamName) => {
-            if (!imgEl) return;
-            const base = '/static/img/team-logos/';
-            const name = (teamName || '').trim();
-            if (!name){ imgEl.src = base + 'default.png'; return; }
-            const norm = name.toLowerCase().replace(/\s+/g,'').replace(/ё/g,'е');
-            const primary = base + encodeURIComponent(norm + '.png');
-            const fallback = base + 'default.png';
-            // Если уже кэшировано успешно — используем мгновенно
-            if (__teamLogoCache[primary] === 'ok'){ imgEl.src = primary; return; }
-            if (__teamLogoCache[primary] === 'fail'){ imgEl.src = fallback; return; }
-            // Настраиваем оптимистично: сначала пробуем primary
-            imgEl.onload = () => { __teamLogoCache[primary] = 'ok'; };
-            imgEl.onerror = () => { __teamLogoCache[primary] = 'fail'; imgEl.src = fallback; };
-            imgEl.decoding = 'async';
-            imgEl.src = primary;
-        };
-    const renderSchedule = (data) => {
+        const renderSchedule = (data) => {
             try { window.League?.renderSchedule?.(pane, data?.data || data); } catch(_) {
-                // fall back: preserve existing empty state
                 const ds = data?.tours ? data : (data?.data || {});
                 const tours = ds.tours || [];
                 if (!tours.length && !(pane.childElementCount > 0 || pane.dataset.hasContent === '1')) {
@@ -1012,6 +992,42 @@
             }
         };
 
+        // Новая реализация через fetchEtag при наличии утилиты
+        if (window.fetchEtag) {
+            if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
+                renderSchedule(cached);
+            }
+            // Даже если кэш свежий — делаем условный запрос (forceRevalidate=true) для 304
+            window.fetchEtag('/api/schedule', {
+                cacheKey: 'schedule:etag-temp',
+                swrMs: FRESH_TTL,
+                forceRevalidate: true,
+                extract: j => j, // целиком объект расписания
+            }).then(res => {
+                // Преобразуем к старому формату store { data, version, ts }
+                const scheduleData = res.raw || res.data;
+                const incomingTours = Array.isArray(scheduleData?.tours) ? scheduleData.tours : Array.isArray(scheduleData?.data?.tours) ? scheduleData.data.tours : [];
+                const cachedTours = Array.isArray(cached?.data?.tours) ? cached.data.tours : [];
+                const shouldWrite = incomingTours.length > 0 || !cached || cachedTours.length === 0;
+                if (shouldWrite) {
+                    const store = { data: scheduleData, version: res.etag || null, ts: Date.now() };
+                    try { localStorage.setItem(CACHE_KEY, JSON.stringify(store)); } catch(_) {}
+                    renderSchedule(store);
+                } else if (!cached) {
+                    // Если кэша не было и пришёл пустой ответ — всё равно показать (пусто)
+                    renderSchedule({ data: scheduleData, version: res.etag || null, ts: Date.now() });
+                } else if (res.updated) {
+                    // Обновлён, хотя туров нет (например, очистка) — перерисуем
+                    renderSchedule({ data: scheduleData, version: res.etag || null, ts: Date.now() });
+                }
+            }).catch(err => {
+                console.error('schedule load error', err);
+                if (!cached && pane.childElementCount === 0) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>';
+            }).finally(() => { _scheduleLoading = false; });
+            return;
+        }
+
+        // Fallback: прежняя реализация (если fetchEtag не подключён)
         if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
             renderSchedule(cached);
         }
@@ -1021,20 +1037,16 @@
                 const data = await r.json();
                 const version = data.version || r.headers.get('ETag') || null;
                 const store = { data, version, ts: Date.now() };
-                // Не затираем кэш пустыми турами, если кэш уже есть и свежий
                 const incomingTours = Array.isArray(data?.tours) ? data.tours : Array.isArray(data?.data?.tours) ? data.data.tours : [];
-                const cachedTours = Array.isArray(cached?.data?.tours) ? cached.data.tours : [];
-                const shouldWrite = incomingTours.length > 0 || !cached || cachedTours.length === 0;
-                if (shouldWrite) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(store)); } catch(_) {} }
+                const cachedTours2 = Array.isArray(cached?.data?.tours) ? cached.data.tours : [];
+                const shouldWrite2 = incomingTours.length > 0 || !cached || cachedTours2.length === 0;
+                if (shouldWrite2) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(store)); } catch(_) {} }
                 return store;
             });
-        const startNetwork = () => {
-            const p = (cached && cached.version) ? fetchWithETag(cached.version) : fetchWithETag(null);
-            p.then(renderSchedule)
-             .catch(err => { console.error('schedule load error', err); if (!cached && pane.childElementCount === 0) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>'; })
-             .finally(() => { _scheduleLoading = false; });
-        };
-        startNetwork();
+        const p = (cached && cached.version) ? fetchWithETag(cached.version) : fetchWithETag(null);
+        p.then(renderSchedule)
+         .catch(err => { console.error('schedule load error', err); if (!cached && pane.childElementCount === 0) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>'; })
+         .finally(() => { _scheduleLoading = false; });
     }
 
     // --------- РЕЗУЛЬТАТЫ ---------
@@ -1043,48 +1055,14 @@
         if (_resultsLoading) return;
         const pane = document.getElementById('ufo-results');
         if (!pane) return;
-    _resultsLoading = true;
-    const CACHE_KEY = 'results:list';
-    const FRESH_TTL = 10 * 60 * 1000; // 10 минут
-    const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
-    const cached = readCache();
-    if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';
+        _resultsLoading = true;
+        const CACHE_KEY = 'results:list';
+        const FRESH_TTL = 10 * 60 * 1000; // 10 минут
+        const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
+        const cached = readCache();
+        if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';
 
-    const __teamLogoCache2 = window.__TEAM_LOGO_CACHE__ = window.__TEAM_LOGO_CACHE__ || {};
-    const loadTeamLogo = (imgEl, teamName) => {
-        if (!imgEl) return;
-        const base = '/static/img/team-logos/';
-        const name = (teamName || '').trim();
-        if (!name){ imgEl.src = base + 'default.png'; return; }
-        const norm = name.toLowerCase().replace(/\s+/g,'').replace(/ё/g,'е');
-        const primary = base + encodeURIComponent(norm + '.png');
-        const fallback = base + 'default.png';
-        if (__teamLogoCache2[primary] === 'ok'){ imgEl.src = primary; return; }
-        if (__teamLogoCache2[primary] === 'fail'){ imgEl.src = fallback; return; }
-        imgEl.onload = () => { __teamLogoCache2[primary] = 'ok'; };
-        imgEl.onerror = () => { __teamLogoCache2[primary] = 'fail'; imgEl.src = fallback; };
-        imgEl.decoding = 'async';
-        imgEl.src = primary;
-    };
-
-        // ETag-кэш для /api/results
-    const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
-
-    const fetchWithETag = (etag) => fetch('/api/results', { headers: etag ? { 'If-None-Match': etag } : {} })
-            .then(async r => {
-                if (r.status === 304 && cached) return cached; // валидный кэш
-                const data = await r.json();
-                const version = data.version || r.headers.get('ETag') || null;
-                const store = { data, version, ts: Date.now() };
-        // Не перезаписываем кэш пустыми результатами, если уже были
-        const incoming = Array.isArray(data?.results) ? data.results : Array.isArray(data?.data?.results) ? data.data.results : [];
-        const cachedList = Array.isArray(cached?.data?.results) ? cached.data.results : [];
-        const shouldWrite = incoming.length > 0 || !cached || cachedList.length === 0;
-        if (shouldWrite) writeCache(store);
-                return store;
-            });
-
-    const renderResults = (data) => {
+        const renderResults = (data) => {
             try { window.League?.renderResults?.(pane, data?.data || data); } catch(_) {
                 const all = data?.results || data?.data?.results || [];
                 if (!all.length && !(pane.childElementCount > 0 || pane.dataset.hasContent === '1')) {
@@ -1093,13 +1071,65 @@
             }
         };
 
-        const go = (store) => { renderResults(store?.data || store); _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); };
+        // Новая реализация через fetchEtag если доступна
+        if (window.fetchEtag) {
+            const isFresh = cached && (Date.now() - (cached.ts||0) < FRESH_TTL);
+            if (isFresh) {
+                renderResults(cached);
+                _resultsPreloaded = true; trySignalAllReady();
+            } else if (cached) {
+                // показать устаревшие, пока обновляем
+                renderResults(cached);
+                _resultsPreloaded = true; trySignalAllReady();
+            }
+            window.fetchEtag('/api/results', {
+                cacheKey: 'results:etag-temp',
+                swrMs: FRESH_TTL,
+                forceRevalidate: true,
+                extract: j => j,
+            }).then(res => {
+                const resultsData = res.raw || res.data;
+                const incoming = Array.isArray(resultsData?.results) ? resultsData.results : Array.isArray(resultsData?.data?.results) ? resultsData.data.results : [];
+                const cachedList = Array.isArray(cached?.data?.results) ? cached.data.results : [];
+                const shouldWrite = incoming.length > 0 || !cached || cachedList.length === 0;
+                const store = { data: resultsData, version: res.etag || null, ts: Date.now() };
+                if (shouldWrite) {
+                    try { localStorage.setItem(CACHE_KEY, JSON.stringify(store)); } catch(_) {}
+                    renderResults(store);
+                } else if (!cached) {
+                    renderResults(store);
+                } else if (res.updated) {
+                    renderResults(store);
+                }
+            }).catch(err => {
+                console.error('results load error', err);
+                if (!cached) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>';
+            }).finally(() => {
+                _resultsLoading = false;
+                _resultsPreloaded = true; trySignalAllReady();
+            });
+            return;
+        }
 
-    if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
-    else if (cached) { go(cached); }
-    // сеть — в любом случае валидируем/обновляем кэш
-    if (cached && cached.version) fetchWithETag(cached.version).then(go).catch(()=>{});
-    else fetchWithETag(null).then(go).catch(err => { console.error('results load error', err); if (!cached) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>'; _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); });
+        // Fallback: старая реализация
+        const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
+        const fetchWithETag = (etag) => fetch('/api/results', { headers: etag ? { 'If-None-Match': etag } : {} })
+            .then(async r => {
+                if (r.status === 304 && cached) return cached;
+                const data = await r.json();
+                const version = data.version || r.headers.get('ETag') || null;
+                const store = { data, version, ts: Date.now() };
+                const incoming = Array.isArray(data?.results) ? data.results : Array.isArray(data?.data?.results) ? data.data.results : [];
+                const cachedList2 = Array.isArray(cached?.data?.results) ? cached.data.results : [];
+                const shouldWrite2 = incoming.length > 0 || !cached || cachedList2.length === 0;
+                if (shouldWrite2) writeCache(store);
+                return store;
+            });
+        const go = (store) => { renderResults(store?.data || store); _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); };
+        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
+        else if (cached) { go(cached); }
+        if (cached && cached.version) fetchWithETag(cached.version).then(go).catch(()=>{});
+        else fetchWithETag(null).then(go).catch(err => { console.error('results load error', err); if (!cached) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>'; _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); });
     }
 
     ; // separator for parser safety
