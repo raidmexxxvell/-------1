@@ -14,6 +14,8 @@ class RealtimeUpdater {
         this.debug = localStorage.getItem('websocket_debug') === 'true';
     // Версионность коэффициентов по матчу: key = "home|away" → int
     this.oddsVersions = new Map();
+    // Feature flag for topic-based subscriptions (from template meta)
+    this.topicEnabled = !!window.__WS_TOPIC_SUBS__;
         
         this.initSocket();
     }
@@ -23,19 +25,26 @@ class RealtimeUpdater {
             if (!window.__WEBSOCKETS_ENABLED__) {  return; }
             // Проверяем поддержку Socket.IO
             if (typeof io === 'undefined') { return; }
-            // Пробный ping на /socket.io/ без апгрейда: если 4xx/5xx — отключаем
-            try {
-                fetch('/socket.io/?EIO=4&transport=polling&t=' + Date.now(), { method: 'GET' })
-                    .then(r => { if (!r.ok) {  window.__WEBSOCKETS_ENABLED__ = false; } });
-            } catch(_) {}
-            this.socket = io({
-                transports: ['websocket','polling'],
-                upgrade: true,
-                rememberUpgrade: true,
-                timeout: 20000,
-                forceNew: false
-            });
-            this.setupEventHandlers();
+            // Пробный ping на /socket.io/ без апгрейда: если 4xx/5xx — не подключаемся
+            const probeUrl = '/socket.io/?EIO=4&transport=polling&t=' + Date.now();
+            fetch(probeUrl, { method: 'GET', cache: 'no-store', redirect: 'manual' })
+                .then(r => {
+                    if (!r || !r.ok) {
+                        window.__WEBSOCKETS_ENABLED__ = false;
+                        return null;
+                    }
+                    // ok → инициализируем соединение
+                    this.socket = io({
+                        transports: ['websocket','polling'],
+                        upgrade: true,
+                        rememberUpgrade: true,
+                        timeout: 20000,
+                        forceNew: false
+                    });
+                    this.setupEventHandlers();
+                    return true;
+                })
+                .catch(() => { window.__WEBSOCKETS_ENABLED__ = false; });
         } catch (error) {
             
         }

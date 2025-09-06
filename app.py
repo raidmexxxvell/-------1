@@ -218,23 +218,27 @@ if OPTIMIZATIONS_AVAILABLE:
         # Менеджер фоновых задач
         task_manager = get_task_manager()
         
-        # WebSocket для real-time обновлений
-        try:
-            from flask_socketio import SocketIO
-            # Упрощенная инициализация для совместимости
-            socketio = SocketIO(app, cors_allowed_origins="*", logger=False, engineio_logger=False)
-            websocket_manager = WebSocketManager(socketio)
-            # Делаем доступным через current_app.config
-            app.config['websocket_manager'] = websocket_manager
-            # Фича-флаг для topic-based подписок (читаем из config/env, по умолчанию off)
-            app.config.setdefault('WS_TOPIC_SUBSCRIPTIONS_ENABLED', bool(app.config.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', False)))
-            print("[INFO] WebSocket system initialized successfully")
-        except ImportError:
-            print("[WARN] Flask-SocketIO not available, WebSocket disabled")
-            socketio = None
-            websocket_manager = None
-        except Exception as e:
-            print(f"[WARN] Failed to initialize WebSocket: {e}")
+        # WebSocket для real-time обновлений — включаем только по флагу
+        if app.config.get('WEBSOCKETS_ENABLED'):
+            try:
+                from flask_socketio import SocketIO
+                # Упрощенная инициализация для совместимости
+                socketio = SocketIO(app, cors_allowed_origins="*", logger=False, engineio_logger=False)
+                websocket_manager = WebSocketManager(socketio)
+                # Делаем доступным через current_app.config
+                app.config['websocket_manager'] = websocket_manager
+                # Фича-флаг для topic-based подписок (читаем из config/env, по умолчанию off)
+                app.config.setdefault('WS_TOPIC_SUBSCRIPTIONS_ENABLED', bool(app.config.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', False)))
+                print("[INFO] WebSocket system initialized successfully")
+            except ImportError:
+                print("[WARN] Flask-SocketIO not available, WebSocket disabled")
+                socketio = None
+                websocket_manager = None
+            except Exception as e:
+                print(f"[WARN] Failed to initialize WebSocket: {e}")
+                socketio = None
+                websocket_manager = None
+        else:
             socketio = None
             websocket_manager = None
         
@@ -6799,39 +6803,48 @@ def api_match_details():
             cached = MATCH_DETAILS_CACHE.get(cache_key)
             if cached and (now_ts - cached['ts'] < MATCH_DETAILS_TTL):
                 return cached['payload']
-            ws = get_rosters_sheet()
+            # Пытаемся получить лист составов; если не удаётся — работаем без Sheets
+            ws = None
+            try:
+                ws = get_rosters_sheet()
+            except Exception:
+                ws = None
             # Сначала попробуем получить фиксированный диапазон, чтобы сохранить реальные индексы колонок (A=1..ZZ)
             headers = []
-            try:
-                _metrics_inc('sheet_reads', 1)
-                arr = ws.get('A1:ZZ1') or [[]]
-                headers = (arr[0] if arr and len(arr) > 0 else []) or []
-            except Exception:
-                headers = []
-            # Фолбэк — row_values(1), если предыдущий способ не сработал
-            if not headers:
+            if ws is not None:
                 try:
                     _metrics_inc('sheet_reads', 1)
-                    headers = ws.row_values(1) or []
+                    arr = ws.get('A1:ZZ1') or [[]]
+                    headers = (arr[0] if arr and len(arr) > 0 else []) or []
                 except Exception:
                     headers = []
+                # Фолбэк — row_values(1), если предыдущий способ не сработал
+                if not headers:
+                    try:
+                        _metrics_inc('sheet_reads', 1)
+                        headers = ws.row_values(1) or []
+                    except Exception:
+                        headers = []
             # карта нормализованных заголовков -> индекс (1-based)
             idx_map = {}
-            for i, h in enumerate(headers, start=1):
-                key = norm(h)
-                if not key:
-                    continue
-                idx_map[key] = i
-                bk = base_key(key)
-                if bk and bk not in idx_map:
-                    idx_map[bk] = i
-                try:
-                    simple = key.split('(')[0].strip()
-                    if simple and simple not in idx_map:
-                        idx_map[simple] = i
-                except Exception:
-                    pass
+            if headers:
+                for i, h in enumerate(headers, start=1):
+                    key = norm(h)
+                    if not key:
+                        continue
+                    idx_map[key] = i
+                    bk = base_key(key)
+                    if bk and bk not in idx_map:
+                        idx_map[bk] = i
+                    try:
+                        simple = key.split('(')[0].strip()
+                        if simple and simple not in idx_map:
+                            idx_map[simple] = i
+                    except Exception:
+                        pass
             def extract(team_name: str):
+                if ws is None:
+                    return {'team': team_name, 'players': []}
                 key = norm(team_name)
                 col_idx = idx_map.get(key)
                 if col_idx is None:
@@ -6858,10 +6871,17 @@ def api_match_details():
                         pass
                 if col_idx is None:
                     return {'team': team_name, 'players': []}
-                _metrics_inc('sheet_reads', 1)
-                col_vals = ws.col_values(col_idx)
+                try:
+                    _metrics_inc('sheet_reads', 1)
+                    col_vals = ws.col_values(col_idx)
+                except Exception:
+                    col_vals = []
                 players = [v.strip() for v in col_vals[1:] if v and v.strip()]
-                return {'team': headers[col_idx-1] or team_name, 'players': players}
+                try:
+                    team_label = headers[col_idx-1] if (headers and len(headers) >= col_idx) else team_name
+                except Exception:
+                    team_label = team_name
+                return {'team': team_label or team_name, 'players': players}
             home_data = extract(home)
             away_data = extract(away)
             if not home_data['players'] and not away_data['players']:
@@ -9709,13 +9729,23 @@ def api_match_stats_get():
         away = (request.args.get('away') or '').strip()
         if not home or not away:
             return jsonify({'error': 'home/away обязательны'}), 400
+        # Бесшовный фолбэк: если БД недоступна — отдаём нули, чтобы UI не зависал
         if SessionLocal is None:
-            return jsonify({'error': 'БД недоступна'}), 500
+            return jsonify({
+                'shots_total': [0, 0],
+                'shots_on': [0, 0],
+                'corners': [0, 0],
+                'yellows': [0, 0],
+                'reds': [0, 0],
+                'updated_at': None
+            })
         db: Session = get_db()
         try:
-            row = db.query(MatchStats).filter(MatchStats.home==home, MatchStats.away==away).first()
-            # fallback: если нет записи, сконструируем карточки из событий
-            payload = {}
+            try:
+                row = db.query(MatchStats).filter(MatchStats.home==home, MatchStats.away==away).first()
+            except Exception:
+                row = None
+            # fallback: если нет записи, аккуратно попробуем извлечь карточки из событий; при ошибке → нули
             if row:
                 payload = {
                     'shots_total': [row.shots_total_home, row.shots_total_away],
@@ -9725,20 +9755,37 @@ def api_match_stats_get():
                     'reds': [row.reds_home, row.reds_away],
                     'updated_at': (row.updated_at.isoformat() if row.updated_at else None)
                 }
+                return jsonify(payload)
             else:
-                # derive from player events for cards only
-                ev = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).all()
-                yh = len([e for e in ev if e.team=='home' and e.type=='yellow'])
-                ya = len([e for e in ev if e.team=='away' and e.type=='yellow'])
-                rh = len([e for e in ev if e.team=='home' and e.type=='red'])
-                ra = len([e for e in ev if e.team=='away' and e.type=='red'])
-                payload = { 'yellows': [yh, ya], 'reds': [rh, ra], 'updated_at': None }
-            return jsonify(payload)
+                try:
+                    ev = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).all()
+                    yh = len([e for e in ev if e.team=='home' and e.type=='yellow'])
+                    ya = len([e for e in ev if e.team=='away' and e.type=='yellow'])
+                    rh = len([e for e in ev if e.team=='home' and e.type=='red'])
+                    ra = len([e for e in ev if e.team=='away' and e.type=='red'])
+                    payload = { 'shots_total':[0,0], 'shots_on':[0,0], 'corners':[0,0], 'yellows': [yh, ya], 'reds': [rh, ra], 'updated_at': None }
+                    return jsonify(payload)
+                except Exception:
+                    return jsonify({
+                        'shots_total': [0, 0],
+                        'shots_on': [0, 0],
+                        'corners': [0, 0],
+                        'yellows': [0, 0],
+                        'reds': [0, 0],
+                        'updated_at': None
+                    })
         finally:
             db.close()
     except Exception as e:
         app.logger.error(f"Ошибка match/stats/get: {e}")
-        return jsonify({'error': 'Не удалось получить статистику'}), 500
+        return jsonify({
+            'shots_total': [0, 0],
+            'shots_on': [0, 0],
+            'corners': [0, 0],
+            'yellows': [0, 0],
+            'reds': [0, 0],
+            'updated_at': None
+        })
 
 @app.route('/api/match/stats/set', methods=['POST'])
 def api_match_stats_set():
