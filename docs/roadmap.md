@@ -106,7 +106,7 @@
     - [x] /api/schedule мигрирован (loadSchedule + безопасный fallback)
     - [x] /api/results мигрирован (loadResults + безопасный fallback)
     - [~] /api/match-details частично (новые вызовы через `fetchMatchDetails`; часть старых прямых fetch ещё остаются)
-    - [ ] Leaderboards фронтенд: заменить локальные etagFetch на fetchEtag (сохранить ключи версий)
+  - [x] Leaderboards фронтенд: заменить локальные etagFetch на fetchEtag (сохранить ключи версий)
   - [x] Добавлена специализированная обёртка `match-details-fetch.js` (roster-aware cache write)
 
 9. Splash экран и UX прогресса (новое)
@@ -121,7 +121,9 @@
   - [x] Лёгкие метрики + логирование в helper (_DB_RETRY_METRICS + label)
   - [x] Применить к критическим чтениям leaderboards / achievements / lineups
 
-    - [ ] Защитить `/health/db-retry-metrics` (только для ADMIN_USER_ID через initData или секретного ключа) — план на внедрение защиты доступа в ближайшем релизе
+  - [x] Защитить `/health/db-retry-metrics` (только для ADMIN_USER_ID через initData или секретного ключа)
+    - Добавлен `METRICS_SECRET` (env) и заголовок `X-METRICS-KEY`
+    - Альтернатива: валидный Telegram `initData` с `user.id == ADMIN_USER_ID`
 
 **Короткое обновление — 2025-09-06**
 - Фронтенд: toggling `body.profile-mode` для корректного full-bleed фона профиля; смещение аватара в `.profile-header.profile-centered .profile-avatar`; ограничение ширины `.subtabs` чтобы убрать горизонтальный скролл.

@@ -225,7 +225,12 @@ class Tournament(Base):
     - Расширено покрытие retry на чтения в leaderboards, achievements и lineups (admin/public/extended) — безопасно, без изменения формата ответов.
     - Добавлены лёгкие метрики и логирование: `_DB_RETRY_METRICS` (calls/success/failures/retries) и label для атрибуции.
     - Убрано дублирование в leaderboards: введены helpers `_lb_weekly_predictor_rows`, `_lb_all_users`, `_lb_monthly_baseline_rows` (поведение без изменений).
-    - План: защитить `/health/db-retry-metrics` (только для `ADMIN_USER_ID` через initData или через секретный ключ в заголовке) — отметить как follow-up для безопасности метрик.
+    ✔ Защита `/health/db-retry-metrics`: доступ только для администратора или по секретному ключу
+
+    - Поддержаны 2 способа авторизации:
+        1) HTTP-заголовок `X-METRICS-KEY` со значением `METRICS_SECRET` (env)
+        2) Валидный Telegram `initData` и совпадение `user.id` с `ADMIN_USER_ID`
+    - Конфигурация: переменные окружения `ADMIN_USER_ID`, `METRICS_SECRET`
 
 ### 2025-09-03
 - Автозагрузка новостей при старте SPA: `profile.js` вызывает `loadNews()` на `DOMContentLoaded`.

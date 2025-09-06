@@ -771,69 +771,129 @@
         const table = document.querySelector('#lb-predictors tbody');
         const updated = document.getElementById('lb-predictors-updated');
         if (!table) return;
-        etagFetch('/api/leaderboard/top-predictors', 'lb:predictors')
-            .then(store => {
-                const items = store?.data?.items || [];
-                table.innerHTML = '';
-                items.forEach((it, idx) => {
-                    const tr = document.createElement('tr');
-                    if (idx === 0) tr.classList.add('rank-1');
-                    if (idx === 1) tr.classList.add('rank-2');
-                    if (idx === 2) tr.classList.add('rank-3');
-                    tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.bets_total}</td><td>${it.bets_won}</td><td>${it.winrate}%</td>`;
-                    table.appendChild(tr);
-                });
-                if (updated && store?.data?.updated_at) {
-                    try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
-                }
-            })
-            .catch(err => console.error('lb predictors err', err));
+        if (window.fetchEtag) {
+            window.fetchEtag('/api/leaderboard/top-predictors', { cacheKey: 'lb:predictors', swrMs: 30000, extract: j => j })
+                .then(({ data }) => {
+                    const items = data?.items || [];
+                    table.innerHTML = '';
+                    items.forEach((it, idx) => {
+                        const tr = document.createElement('tr');
+                        if (idx === 0) tr.classList.add('rank-1');
+                        if (idx === 1) tr.classList.add('rank-2');
+                        if (idx === 2) tr.classList.add('rank-3');
+                        tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.bets_total}</td><td>${it.bets_won}</td><td>${it.winrate}%</td>`;
+                        table.appendChild(tr);
+                    });
+                    if (updated && data?.updated_at) {
+                        try { updated.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {}
+                    }
+                })
+                .catch(err => console.error('lb predictors err', err));
+        } else {
+            etagFetch('/api/leaderboard/top-predictors', 'lb:predictors')
+                .then(store => {
+                    const items = store?.data?.items || [];
+                    table.innerHTML = '';
+                    items.forEach((it, idx) => {
+                        const tr = document.createElement('tr');
+                        if (idx === 0) tr.classList.add('rank-1');
+                        if (idx === 1) tr.classList.add('rank-2');
+                        if (idx === 2) tr.classList.add('rank-3');
+                        tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.bets_total}</td><td>${it.bets_won}</td><td>${it.winrate}%</td>`;
+                        table.appendChild(tr);
+                    });
+                    if (updated && store?.data?.updated_at) {
+                        try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
+                    }
+                })
+                .catch(err => console.error('lb predictors err', err));
+        }
     }
 
     function loadLBRich() {
         const table = document.querySelector('#lb-rich tbody');
         const updated = document.getElementById('lb-rich-updated');
         if (!table) return;
-        etagFetch('/api/leaderboard/top-rich', 'lb:rich')
-            .then(store => {
-                const items = store?.data?.items || [];
-                table.innerHTML = '';
-                items.forEach((it, idx) => {
-                    const tr = document.createElement('tr');
-                    if (idx === 0) tr.classList.add('rank-1');
-                    if (idx === 1) tr.classList.add('rank-2');
-                    if (idx === 2) tr.classList.add('rank-3');
-                    tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${Number(it.gain||0).toLocaleString()}</td>`;
-                    table.appendChild(tr);
-                });
-                if (updated && store?.data?.updated_at) {
-                    try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
-                }
-            })
-            .catch(err => console.error('lb rich err', err));
+        if (window.fetchEtag) {
+            window.fetchEtag('/api/leaderboard/top-rich', { cacheKey: 'lb:rich', swrMs: 30000, extract: j => j })
+                .then(({ data }) => {
+                    const items = data?.items || [];
+                    table.innerHTML = '';
+                    items.forEach((it, idx) => {
+                        const tr = document.createElement('tr');
+                        if (idx === 0) tr.classList.add('rank-1');
+                        if (idx === 1) tr.classList.add('rank-2');
+                        if (idx === 2) tr.classList.add('rank-3');
+                        tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${Number(it.gain||0).toLocaleString()}</td>`;
+                        table.appendChild(tr);
+                    });
+                    if (updated && data?.updated_at) {
+                        try { updated.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {}
+                    }
+                })
+                .catch(err => console.error('lb rich err', err));
+        } else {
+            etagFetch('/api/leaderboard/top-rich', 'lb:rich')
+                .then(store => {
+                    const items = store?.data?.items || [];
+                    table.innerHTML = '';
+                    items.forEach((it, idx) => {
+                        const tr = document.createElement('tr');
+                        if (idx === 0) tr.classList.add('rank-1');
+                        if (idx === 1) tr.classList.add('rank-2');
+                        if (idx === 2) tr.classList.add('rank-3');
+                        tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${Number(it.gain||0).toLocaleString()}</td>`;
+                        table.appendChild(tr);
+                    });
+                    if (updated && store?.data?.updated_at) {
+                        try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
+                    }
+                })
+                .catch(err => console.error('lb rich err', err));
+        }
     }
 
     function loadLBServer() {
         const table = document.querySelector('#lb-server tbody');
         const updated = document.getElementById('lb-server-updated');
         if (!table) return;
-        etagFetch('/api/leaderboard/server-leaders', 'lb:server')
-            .then(store => {
-                const items = store?.data?.items || [];
-                table.innerHTML = '';
-                items.forEach((it, idx) => {
-                    const tr = document.createElement('tr');
-                    if (idx === 0) tr.classList.add('rank-1');
-                    if (idx === 1) tr.classList.add('rank-2');
-                    if (idx === 2) tr.classList.add('rank-3');
-                    tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.level}</td><td>${it.xp}</td><td>${it.streak}</td><td>${it.score}</td>`;
-                    table.appendChild(tr);
-                });
-                if (updated && store?.data?.updated_at) {
-                    try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
-                }
-            })
-            .catch(err => console.error('lb server err', err));
+        if (window.fetchEtag) {
+            window.fetchEtag('/api/leaderboard/server-leaders', { cacheKey: 'lb:server', swrMs: 30000, extract: j => j })
+                .then(({ data }) => {
+                    const items = data?.items || [];
+                    table.innerHTML = '';
+                    items.forEach((it, idx) => {
+                        const tr = document.createElement('tr');
+                        if (idx === 0) tr.classList.add('rank-1');
+                        if (idx === 1) tr.classList.add('rank-2');
+                        if (idx === 2) tr.classList.add('rank-3');
+                        tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.level}</td><td>${it.xp}</td><td>${it.streak}</td><td>${it.score}</td>`;
+                        table.appendChild(tr);
+                    });
+                    if (updated && data?.updated_at) {
+                        try { updated.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {}
+                    }
+                })
+                .catch(err => console.error('lb server err', err));
+        } else {
+            etagFetch('/api/leaderboard/server-leaders', 'lb:server')
+                .then(store => {
+                    const items = store?.data?.items || [];
+                    table.innerHTML = '';
+                    items.forEach((it, idx) => {
+                        const tr = document.createElement('tr');
+                        if (idx === 0) tr.classList.add('rank-1');
+                        if (idx === 1) tr.classList.add('rank-2');
+                        if (idx === 2) tr.classList.add('rank-3');
+                        tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.level}</td><td>${it.xp}</td><td>${it.streak}</td><td>${it.score}</td>`;
+                        table.appendChild(tr);
+                    });
+                    if (updated && store?.data?.updated_at) {
+                        try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
+                    }
+                })
+                .catch(err => console.error('lb server err', err));
+        }
     }
 
     function loadLBPrizes() {
@@ -902,10 +962,11 @@
         cnt.appendChild(row);
             ov.style.display='';
         };
-        etagFetch('/api/leaderboard/prizes', 'lb:prizes')
-            .then(store => {
-                const data = store?.data?.data || {};
-                host.innerHTML = '';
+        if (window.fetchEtag) {
+            window.fetchEtag('/api/leaderboard/prizes', { cacheKey: 'lb:prizes', swrMs: 30000, extract: j => j })
+                .then(({ data }) => {
+                    const dataBlock = data?.data || {};
+                    host.innerHTML = '';
                 const blocks = [
                     { key: 'predictors', title: 'Топ прогнозистов' },
                     { key: 'rich', title: 'Лидеры месяца' },
@@ -913,14 +974,14 @@
                 ];
                 // загрузим аватарки победителей одним запросом
                 const allIds = new Set();
-                blocks.forEach(b => { (data[b.key]||[]).forEach(it => { if (it?.user_id) allIds.add(it.user_id); }); });
+                blocks.forEach(b => { (dataBlock[b.key]||[]).forEach(it => { if (it?.user_id) allIds.add(it.user_id); }); });
                 const idsParam = Array.from(allIds).join(',');
                 const render = (avatars) => {
                     blocks.forEach(b => {
                     const section = document.createElement('div'); section.className = 'prize-block';
                     const h = document.createElement('h3'); h.textContent = b.title; section.appendChild(h);
                     const podium = document.createElement('div'); podium.className = 'podium';
-                    const items = data[b.key] || [];
+                    const items = dataBlock[b.key] || [];
                     // порядок пьедестала: 2-е, 1-е, 3-е для симметрии
                     const order = [1, 0, 2];
                     order.forEach(i => {
@@ -964,8 +1025,63 @@
                 if (updated && store?.data?.updated_at) {
                     try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
                 }
-            })
-            .catch(err => console.error('lb prizes err', err));
+                })
+                .catch(err => console.error('lb prizes err', err));
+        } else {
+            etagFetch('/api/leaderboard/prizes', 'lb:prizes')
+                .then(store => {
+                    const data = store?.data?.data || {};
+                    host.innerHTML = '';
+                    const blocks = [
+                        { key: 'predictors', title: 'Топ прогнозистов' },
+                        { key: 'rich', title: 'Лидеры месяца' },
+                        { key: 'server', title: 'Лидеры сервера' },
+                    ];
+                    // загрузим аватарки победителей одним запросом
+                    const allIds = new Set();
+                    blocks.forEach(b => { (data[b.key]||[]).forEach(it => { if (it?.user_id) allIds.add(it.user_id); }); });
+                    const idsParam = Array.from(allIds).join(',');
+                    const render = (avatars) => {
+                        blocks.forEach(b => {
+                            const section = document.createElement('div'); section.className = 'prize-block';
+                            const h = document.createElement('h3'); h.textContent = b.title; section.appendChild(h);
+                            const podium = document.createElement('div'); podium.className = 'podium';
+                            const items = data[b.key] || [];
+                            // порядок пьедестала: 2-е, 1-е, 3-е для симметрии
+                            const order = [1, 0, 2];
+                            order.forEach(i => {
+                                const it = items[i];
+                                const pl = document.createElement('div'); pl.className = 'podium-place';
+                                if (i === 0) pl.classList.add('gold');
+                                if (i === 1) pl.classList.add('silver');
+                                if (i === 2) pl.classList.add('bronze');
+                                const avatarUrl = (it && avatars && avatars[String(it.user_id)] && avatars[String(it.user_id)].avatar_url) || '';
+                                pl.innerHTML = `
+                                    <div class="avatar"><img src="${avatarUrl || '/static/img/achievements/placeholder.png'}" alt=""></div>
+                                    <div class="name">${escapeHtml(it?.display_name||'—')}</div>
+                                `;
+                                // Клик для показа мини-профиля
+                                pl.addEventListener('click', () => {
+                                    const prof = avatars[String(it?.user_id)] || null;
+                                    renderProfileCard({ display_name: it?.display_name || 'Игрок', level: prof?.level, xp: prof?.xp, consecutive_days: prof?.consecutive_days }, avatarUrl);
+                                });
+                                podium.appendChild(pl);
+                            });
+                            section.appendChild(podium);
+                            host.appendChild(section);
+                        });
+                    };
+                    if (idsParam) {
+                        fetch(`/api/user/avatars?ids=${encodeURIComponent(idsParam)}`).then(r=>r.json()).then(d => { render(d.avatars||{}); }).catch(()=>{ render({}); });
+                    } else {
+                        render({});
+                    }
+                    if (updated && store?.data?.updated_at) {
+                        try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
+                    }
+                })
+                .catch(err => console.error('lb prizes err', err));
+        }
     }
 
     function escapeHtml(s) {

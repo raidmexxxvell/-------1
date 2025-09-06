@@ -55,6 +55,9 @@ class Config:
     CSP_DEFAULT_SRC = "'self'"
     CSP_SCRIPT_SRC = "'self' 'unsafe-inline' https://telegram.org"
     CSP_STYLE_SRC = "'self' 'unsafe-inline'"
+
+    # Ops/health protection
+    METRICS_SECRET = os.environ.get('METRICS_SECRET', '')
     
     @classmethod
     def validate(cls) -> tuple[bool, list[str]]:

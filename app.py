@@ -5455,6 +5455,29 @@ def health_db_retry_metrics():
     }
     """
     try:
+        # Access control: allow if (1) valid Telegram initData admin or (2) valid secret header
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        metrics_secret = os.environ.get('METRICS_SECRET', '')
+        allowed = False
+        # Try secret header first (simple for probes)
+        try:
+            hdr = request.headers.get('X-METRICS-KEY', '')
+            if metrics_secret and hdr and hmac.compare_digest(hdr, metrics_secret):
+                allowed = True
+        except Exception:
+            pass
+        # Fallback to Telegram initData admin check
+        if not allowed and admin_id:
+            try:
+                init_data = (request.args.get('initData') or request.headers.get('X-Telegram-Init-Data') or request.form.get('initData') or '')
+                if init_data:
+                    parsed = parse_and_verify_telegram_init_data(init_data)
+                    if parsed and parsed.get('user') and str(parsed['user'].get('id')) == str(admin_id):
+                        allowed = True
+            except Exception:
+                pass
+        if not allowed:
+            return jsonify({'error': 'unauthorized'}), 401
         metrics = globals().get('_DB_RETRY_METRICS', {
             'calls': 0,
             'success': 0,
