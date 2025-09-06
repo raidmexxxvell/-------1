@@ -452,6 +452,11 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 /* centered variant used on mobile profile screen */
 .profile-header.profile-centered { flex-direction: column; padding-top: 12px; }
 
+/* Опускаем аватар ниже декоративной «короны» в фоне */
+.profile-header.profile-centered .profile-avatar {
+    margin-top: 24px;
+}
+
 /* Background area behind avatar/name/stats (profile shade) */
 .profile-top-area {
     overflow: hidden;

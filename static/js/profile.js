@@ -1203,7 +1203,7 @@
         const act = getActiveLeague();
         const other = act === 'BLB' ? 'UFO' : 'BLB';
         const ico = other === 'UFO' ? '🛸' : '❔';
-        const title = other === 'UFO' ? 'НЛО' : 'ВАША ЛИГА';
+    const title = other === 'UFO' ? 'Чемпионат по футзалу г. Обнинск 25-26' : 'Ваша лига';
         // Рендерим одну иконку как продолжение нижнего меню
         overlay.innerHTML = `
             <div class="league-icons" style="display:flex; align-items:center; justify-content:center; background: rgba(10,18,40,0.96); padding:6px 0; border-radius: 10px 10px 0 0; box-shadow: 0 6px 18px rgba(0,0,0,0.4);">
@@ -1439,8 +1439,8 @@
             return tile;
         };
         inner.append(
-            mkTile('UFO', '🛸', 'НЛО'),
-            mkTile('BLB', '❔', 'ВАША ЛИГА')
+            mkTile('UFO', '🛸', 'Чемпионат по футзалу г. Обнинск 25-26'),
+            mkTile('BLB', '❔', 'Ваша лига')
         );
         shelf.appendChild(inner);
         document.body.appendChild(shelf);
@@ -1836,11 +1836,11 @@ if(!window.openMatchScreen){
             const act = getActiveLeague();
             if (act === 'BLB') {
                 if (iconEl) iconEl.textContent = '❔';
-                if (labelEl) labelEl.textContent = 'Лига';
             } else {
                 if (iconEl) iconEl.textContent = '🛸';
-                if (labelEl) labelEl.textContent = 'НЛО';
             }
+            // Для последовательности и компактности внизу навигации показываем одинаковую метку
+            if (labelEl) labelEl.textContent = 'Лига';
         } catch(_) {}
     }
 
