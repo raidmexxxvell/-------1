@@ -590,7 +590,7 @@ METRICS = {
 def _metrics_inc(key: str, delta: int = 1):
     try:
         with METRICS_LOCK:
-            METRICS[key] = int(METRICS.get(key, 0)) + delta
+            METRICS[key] = METRICS.get(key, 0) + delta
     except Exception:
         pass
 
@@ -972,7 +972,7 @@ def api_betting_place():
                 except Exception:
                     return sel_val
             return sel_val
-        return jsonify({
+        return _json_response({
             'status': 'success',
             'balance': int(db_user.credits or 0),
             'bet': {
@@ -1689,7 +1689,7 @@ def api_admin_matches_upcoming():
                 })
         # отсортируем по дате
         out.sort(key=lambda x: x.get('match_date') or '')
-        return jsonify({'matches': out})
+        return _json_response({'matches': out})
     except Exception as e:
         app.logger.error(f"admin matches upcoming error: {e}")
         return jsonify({'error': 'internal'}), 500
@@ -1752,7 +1752,7 @@ def api_admin_get_lineups(match_id: str):
                 pass
             finally:
                 db.close()
-        return jsonify({'lineups': result})
+        return _json_response({'lineups': result})
     except Exception as e:
         app.logger.error(f"admin get lineups error: {e}")
         return jsonify({'error': 'internal'}), 500
@@ -1905,7 +1905,7 @@ def api_public_match_lineups():
                             rosters[r.team].append(name)
             finally:
                 db.close()
-        return jsonify({'rosters': rosters, 'source': 'db', 'updated_at': datetime.utcnow().isoformat()})
+        return _json_response({'rosters': rosters, 'source': 'db', 'updated_at': datetime.utcnow().isoformat()})
     except Exception as e:
         app.logger.error(f"public match lineups error: {e}")
         return jsonify({'error': 'internal'}), 500
@@ -1940,7 +1940,7 @@ def api_shop_my_orders():
                 resp.headers['ETag'] = etag
                 resp.headers['Cache-Control'] = 'private, max-age=60'
                 return resp
-            resp = jsonify({'orders': out, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag})
+            resp = _json_response({'orders': out, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag})
             resp.headers['ETag'] = etag
             resp.headers['Cache-Control'] = 'private, max-age=60'
             return resp
@@ -2004,7 +2004,7 @@ def api_admin_orders():
                 resp.headers['ETag'] = etag
                 resp.headers['Cache-Control'] = 'private, max-age=60'
                 return resp
-            resp = jsonify({'orders': core, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag})
+            resp = _json_response({'orders': core, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag})
             resp.headers['ETag'] = etag
             resp.headers['Cache-Control'] = 'private, max-age=60'
             return resp
@@ -2042,7 +2042,7 @@ def api_admin_order_details(order_id: int):
                     'subtotal': int(it.subtotal or 0)
                 } for it in items
             ]
-            return jsonify({
+            return _json_response({
                 'order': {
                     'id': int(r.id),
                     'user_id': int(r.user_id),
@@ -3138,14 +3138,14 @@ def api_teams():
     Формат: { teams: [..], counts: { teamName: n }, updated_at: iso }
     """
     if SessionLocal is None:
-        return jsonify({'teams': [], 'counts': {}, 'updated_at': None})
+        return _json_response({'teams': [], 'counts': {}, 'updated_at': None})
     db: Session = get_db()
     try:
         teams = _get_teams_from_snapshot(db)
         # counts
         rows = db.query(UserPref.favorite_team, func.count(UserPref.user_id)).filter(UserPref.favorite_team.isnot(None)).group_by(UserPref.favorite_team).all()
         counts = { (t or ''): int(n or 0) for (t, n) in rows if t }
-        return jsonify({'teams': teams, 'counts': counts, 'updated_at': datetime.now(timezone.utc).isoformat()})
+        return _json_response({'teams': teams, 'counts': counts, 'updated_at': datetime.now(timezone.utc).isoformat()})
     finally:
         db.close()
 
@@ -3189,7 +3189,7 @@ def api_set_favorite_team():
                 lim.favorite_changes_left = max(0, (lim.favorite_changes_left or 0) - 1)
                 lim.updated_at = when
             db.commit()
-            return jsonify({'status': 'ok', 'favorite_team': (team or '')})
+            return _json_response({'status': 'ok', 'favorite_team': (team or '')})
         finally:
             db.close()
     except Exception as e:
@@ -4488,14 +4488,14 @@ def api_match_status_get():
         tz_m = tz_hh * 60
     now = datetime.now() + timedelta(minutes=tz_m)
     if not dt:
-        return jsonify({'status':'scheduled', 'soon': False, 'live_started_at': ''})
+        return _json_response({'status':'scheduled', 'soon': False, 'live_started_at': ''})
     if (dt - timedelta(minutes=10)) <= now < dt:
-        return jsonify({'status':'scheduled', 'soon': True, 'live_started_at': ''})
+        return _json_response({'status':'scheduled', 'soon': True, 'live_started_at': ''})
     if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-        return jsonify({'status':'live', 'soon': False, 'live_started_at': dt.isoformat()})
+        return _json_response({'status':'live', 'soon': False, 'live_started_at': dt.isoformat()})
     if now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-        return jsonify({'status':'finished', 'soon': False, 'live_started_at': dt.isoformat()})
-    return jsonify({'status':'scheduled', 'soon': False, 'live_started_at': ''})
+        return _json_response({'status':'finished', 'soon': False, 'live_started_at': dt.isoformat()})
+    return _json_response({'status':'scheduled', 'soon': False, 'live_started_at': ''})
 
 @app.route('/api/match/status/set-live', methods=['POST'])
 def api_match_status_set_live():
@@ -4530,7 +4530,7 @@ def api_match_status_set_live():
                     mirror_match_score_to_schedule(home, away, 0, 0)
                 except Exception:
                     pass
-            return jsonify({'status': 'ok', 'score_home': row.score_home, 'score_away': row.score_away})
+            return _json_response({'status': 'ok', 'score_home': row.score_home, 'score_away': row.score_away})
         finally:
             db.close()
     except Exception as e:
@@ -4561,7 +4561,7 @@ def api_match_status_live():
                         items.append({ 'home': m.get('home',''), 'away': m.get('away',''), 'live_started_at': dtm.isoformat() })
         finally:
             db.close()
-    return jsonify({'items': items, 'updated_at': datetime.now(timezone.utc).isoformat()})
+    return _json_response({'items': items, 'updated_at': datetime.now(timezone.utc).isoformat()})
 
 @app.route('/api/leaderboard/top-predictors')
 def api_leader_top_predictors():
@@ -4930,7 +4930,7 @@ def get_user():
             finally:
                 dbf.close()
         u=serialize_user(db_user); u['favorite_team']=fav
-        return jsonify(u)
+        return _json_response(u)
     except Exception as e:
         app.logger.error(f"Ошибка получения пользователя: {e}")
         return jsonify({'error':'Внутренняя ошибка сервера'}),500
@@ -4942,13 +4942,13 @@ def api_user_avatars():
     """
     ids_param = request.args.get('ids', '').strip()
     if not ids_param or SessionLocal is None:
-        return jsonify({'avatars': {}})
+        return _json_response({'avatars': {}})
     try:
         ids = [int(x) for x in ids_param.split(',') if x.strip().isdigit()]
     except Exception:
         ids = []
     if not ids:
-        return jsonify({'avatars': {}})
+        return _json_response({'avatars': {}})
     db: Session = get_db()
     try:
         rows = db.query(UserPhoto).filter(UserPhoto.user_id.in_(ids)).all()
@@ -4956,7 +4956,7 @@ def api_user_avatars():
         for r in rows:
             if r.photo_url:
                 out[str(int(r.user_id))] = r.photo_url
-        resp = jsonify({'avatars': out})
+        resp = _json_response({'avatars': out})
         resp.headers['Cache-Control'] = 'public, max-age=3600'
         return resp
     finally:
@@ -4995,7 +4995,7 @@ def api_referral():
             mirror_referral_to_sheets(user_id, ref.referral_code, ref.referrer_id, invited_count, (ref.created_at or datetime.now(timezone.utc)).isoformat())
         except Exception as e:
             app.logger.warning(f"Mirror referral to sheets failed: {e}")
-        return jsonify({
+        return _json_response({
             'code': ref.referral_code,
             'referral_link': link,
             'invited_count': invited_count
@@ -5104,7 +5104,7 @@ def api_achievements_catalog():
         for item in catalog:
             g = item.get('group')
             item['all_targets'] = ACHIEVEMENT_TARGETS.get(g, [t['target'] for t in item.get('tiers', [])])
-        return jsonify({'catalog': catalog})
+        return _json_response({'catalog': catalog})
     except Exception as e:
         app.logger.error(f"Ошибка achievements-catalog: {str(e)}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
@@ -5298,7 +5298,7 @@ def daily_checkin():
         }
         # Добавим version (etag) на основе payload чтобы клиент мог кэшировать ответ
         etag = _etag_for_payload(payload)
-        resp = jsonify({**payload, 'version': etag})
+        resp = _json_response({**payload, 'version': etag})
         resp.headers['ETag'] = etag
         resp.headers['Cache-Control'] = 'no-cache'
         return resp
@@ -5345,7 +5345,7 @@ def get_achievements():
                 resp.headers['ETag'] = ce.get('etag')
                 resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
                 return resp
-            resp = jsonify(ce['data'])
+            resp = _json_response(ce['data'])
             resp.headers['ETag'] = ce.get('etag','')
             resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
             return resp
@@ -5502,14 +5502,10 @@ def get_achievements():
             resp.headers['ETag'] = etag
             resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
             return resp
-        resp = jsonify({**resp_payload, 'version': etag})
+        resp = _json_response({**resp_payload, 'version': etag})
         resp.headers['ETag'] = etag
         resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
         return resp
-    except Exception as e:
-        app.logger.error(f"Ошибка получения достижений: {e}")
-        return jsonify({'error':'Внутренняя ошибка сервера'}),500
-
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {str(e)}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
@@ -5517,7 +5513,7 @@ def get_achievements():
 @app.route('/health')
 def health():
     """Healthcheck для Render.com"""
-    return jsonify(status="healthy"), 200
+    return _json_response({"status": "healthy"}, 200)
 
 @app.route('/health/sync')
 def health_sync():
@@ -5536,9 +5532,9 @@ def health_sync():
                 'sheet_rate_limit_hits': METRICS.get('sheet_rate_limit_hits', 0),
                 'sheet_last_error': METRICS.get('sheet_last_error', '')
             }
-        return jsonify(data), 200
+        return _json_response(data, 200)
     except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+        return _json_response({'status': 'error', 'error': str(e)}, 500)
 
 @app.route('/health/db-retry-metrics')
 def health_db_retry_metrics():
@@ -5595,7 +5591,7 @@ def health_db_retry_metrics():
                 'transient_errors': int(v.get('transient_errors',0)),
             } for k,v in dict(metrics.get('by_label', {})).items() }
         }
-        return jsonify(out), 200
+        return _json_response(out, 200)
     except Exception as e:
         app.logger.error(f"db-retry-metrics error: {e}")
         return jsonify({'error': 'internal'}), 500
@@ -5644,11 +5640,11 @@ def api_users_public_batch():
         if limited is not None:
             return limited
         if not request.is_json:
-            return jsonify({'items': []})
+            return _json_response({'items': []})
         body = request.get_json(silent=True) or {}
         raw_ids = body.get('user_ids') or []
         if not isinstance(raw_ids, list):
-            return jsonify({'items': []})
+            return _json_response({'items': []})
         # Нормализуем список ID и ограничим размер
         ids = []
         for x in raw_ids[:100]:
@@ -5658,7 +5654,7 @@ def api_users_public_batch():
                 continue
         ids = list({i for i in ids if i > 0})[:100]
         if not ids or SessionLocal is None:
-            return jsonify({'items': []})
+            return _json_response({'items': []})
         db: Session = get_db()
         try:
             users = db.query(User).filter(User.user_id.in_(ids)).all()
@@ -5677,12 +5673,12 @@ def api_users_public_batch():
                     'consecutive_days': int(u.consecutive_days or 0),
                     'photo_url': photos.get(int(u.user_id), '')
                 })
-            return jsonify({'items': out})
+            return _json_response({'items': out})
         finally:
             db.close()
     except Exception as e:
         app.logger.error(f"public-batch error: {e}")
-        return jsonify({'items': []}), 200
+    return _json_response({'items': []}, 200)
 
 @app.route('/api/league-table', methods=['GET'])
 def api_league_table():
@@ -5703,7 +5699,7 @@ def api_league_table():
                         resp.headers['ETag'] = _etag
                         resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
                         return resp
-                    resp = jsonify({**payload, 'version': _etag})
+                    resp = _json_response({**payload, 'version': _etag})
                     resp.headers['ETag'] = _etag
                     resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
                     return resp
@@ -5720,7 +5716,7 @@ def api_league_table():
                 _snapshot_set(db, 'league-table', payload)
             finally:
                 db.close()
-        resp = jsonify({**payload, 'version': _etag})
+        resp = _json_response({**payload, 'version': _etag})
         resp.headers['ETag'] = _etag
         resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
         return resp
@@ -5907,7 +5903,7 @@ def api_vote_match_aggregates():
                 pass
             if my_choice is not None:
                 agg['my_choice'] = my_choice
-            return jsonify(agg)
+            return _json_response(agg)
         finally:
             db.close()
     except Exception as e:
@@ -5963,7 +5959,7 @@ def api_vote_aggregates_batch():
 
         items = {}
         if not req or SessionLocal is None:
-            return jsonify({ 'items': items })
+            return _json_response({ 'items': items })
 
         db = get_db()
         try:
@@ -5984,7 +5980,7 @@ def api_vote_aggregates_batch():
                     if mine:
                         agg['my_choice'] = str(mine.choice)
                 items[k] = agg
-            return jsonify({ 'items': items })
+            return _json_response({ 'items': items })
         finally:
             db.close()
     except Exception as e:
@@ -6126,7 +6122,7 @@ def api_betting_tours():
                         resp.headers['ETag'] = etag
                         resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=300'
                         return resp
-                    resp = jsonify({ **payload, 'version': etag })
+                    resp = _json_response({ **payload, 'version': etag })
                     resp.headers['ETag'] = etag
                     resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=300'
                     return resp
@@ -6143,7 +6139,7 @@ def api_betting_tours():
                 _snapshot_set(db, 'betting-tours', payload)
             finally:
                 db.close()
-        resp = jsonify({ **payload, 'version': etag })
+        resp = _json_response({ **payload, 'version': etag })
         resp.headers['ETag'] = etag
         resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=300'
         return resp
