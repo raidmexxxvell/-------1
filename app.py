@@ -3896,6 +3896,7 @@ def _build_results_payload_from_sheet():
 
 # ---------------------- BACKGROUND SYNC ----------------------
 _BG_THREAD = None
+_LB_PRECOMP_THREAD = None
 
 def _should_start_bg() -> bool:
     # Avoid double-start under reloader; start in main runtime only in debug
@@ -3921,6 +3922,54 @@ def _bg_sync_once():
     else:
         # Fallback к старой синхронной логике
         _bg_sync_once_legacy()
+
+def _precompute_leaderboards_cache():
+    """Предрасчёт лидербордов и запись в Redis (MultiLevelCache) без изменения snapshot."""
+    if SessionLocal is None:
+        return
+    if not cache_manager:
+        return
+    db = get_db()
+    try:
+        t0 = time.time()
+        payloads = _build_leaderboards_payloads(db)
+        try:
+            cache_manager.set('leaderboards', payloads.get('top_predictors') or {'items': []}, 'top-predictors')
+            cache_manager.set('leaderboards', payloads.get('top_rich') or {'items': []}, 'top-rich')
+            cache_manager.set('leaderboards', payloads.get('server_leaders') or {'items': []}, 'server-leaders')
+            cache_manager.set('leaderboards', payloads.get('prizes') or {'data': {}}, 'prizes')
+        except Exception as e:
+            app.logger.warning(f"Leaderboards precompute cache set failed: {e}")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        _metrics_set('last_precompute', 'leaderboards', now_iso)
+        _metrics_set('last_precompute_status', 'leaderboards', 'ok')
+        _metrics_set('last_precompute_duration_ms', 'leaderboards', int((time.time()-t0)*1000))
+    except Exception as e:
+        app.logger.warning(f"Leaderboards precompute failed: {e}")
+        _metrics_set('last_precompute_status', 'leaderboards', 'error')
+    finally:
+        db.close()
+
+def _leaderboards_precompute_loop(interval_sec: int):
+    """Периодический прогрев лидербордов в Redis каждые interval_sec секунд."""
+    import random as _rnd
+    # небольшой джиттер при старте
+    try:
+        time.sleep(_rnd.random() * 2.0)
+    except Exception:
+        pass
+    while True:
+        try:
+            _precompute_leaderboards_cache()
+        except Exception as e:
+            try:
+                app.logger.warning(f"LB precompute loop error: {e}")
+            except Exception:
+                pass
+        try:
+            time.sleep(interval_sec)
+        except Exception:
+            pass
 
 def _sync_league_table():
     """Синхронизация таблицы лиги"""
@@ -4297,6 +4346,7 @@ def _bg_sync_loop(interval_sec: int):
 
 def start_background_sync():
     global _BG_THREAD
+    global _LB_PRECOMP_THREAD
     if _BG_THREAD is not None:
         return
     try:
@@ -4310,6 +4360,18 @@ def start_background_sync():
         t.start()
         _BG_THREAD = t
         app.logger.info(f"Background sync started, interval={interval}s")
+        # Leaderboards precompute loop (Redis JSON), отдельный короткий цикл
+        try:
+            if _LB_PRECOMP_THREAD is None:
+                lb_enabled = os.environ.get('LEADER_PRECOMPUTE_ENABLED', '1') in ('1','true','True')
+                if lb_enabled and cache_manager:
+                    lb_interval = int(os.environ.get('LEADER_PRECOMPUTE_SEC', '60'))
+                    lt = threading.Thread(target=_leaderboards_precompute_loop, args=(lb_interval,), daemon=True)
+                    lt.start()
+                    _LB_PRECOMP_THREAD = lt
+                    app.logger.info(f"Leaderboards precompute started, interval={lb_interval}s")
+        except Exception as e:
+            app.logger.warning(f"Failed to start LB precompute: {e}")
     except Exception as e:
         app.logger.warning(f"Failed to start background sync: {e}")
 
@@ -4677,6 +4739,14 @@ def api_match_status_live():
 def api_leader_top_predictors():
     """Топ-10 прогнозистов: имя, всего ставок, выигрышных, % выигрышных. ETag+SWR через etag_json."""
     def _build():
+        # 0) Redis precompute (быстро, если доступно)
+        try:
+            if cache_manager:
+                cached = cache_manager.get('leaderboards', 'top-predictors')
+                if cached and isinstance(cached, dict) and (cached.get('items') is not None):
+                    return {**cached}
+        except Exception:
+            pass
         # 1) DB snapshot (предвычисленный) приоритетнее
         if SessionLocal is not None:
             db = get_db(); snap=None
@@ -4722,6 +4792,14 @@ def api_leader_top_predictors():
 def api_leader_top_rich():
     """Топ-10 по приросту кредитов за текущий месяц (с 1-го числа 03:00 МСК)."""
     def _build():
+        # 0) Redis precompute
+        try:
+            if cache_manager:
+                cached = cache_manager.get('leaderboards', 'top-rich')
+                if cached and isinstance(cached, dict) and (cached.get('items') is not None):
+                    return {**cached}
+        except Exception:
+            pass
         if SessionLocal is not None:
             db = get_db(); snap=None
             try:
@@ -4767,6 +4845,14 @@ def api_leader_server_leaders():
     Возвращаем топ-10 по score = xp + level*100 + consecutive_days*5.
     """
     def _build():
+        # 0) Redis precompute
+        try:
+            if cache_manager:
+                cached = cache_manager.get('leaderboards', 'server-leaders')
+                if cached and isinstance(cached, dict) and (cached.get('items') is not None):
+                    return {**cached}
+        except Exception:
+            pass
         if SessionLocal is not None:
             db = get_db(); snap=None
             try:
@@ -4809,6 +4895,14 @@ def api_leader_prizes():
     Включаем только display_name и user_id (фото на фронте через Telegram).
     """
     def _build():
+        # 0) Redis precompute
+        try:
+            if cache_manager:
+                cached = cache_manager.get('leaderboards', 'prizes')
+                if cached and isinstance(cached, dict) and (cached.get('data') is not None):
+                    return {**cached}
+        except Exception:
+            pass
         if SessionLocal is not None:
             db = get_db(); snap=None
             try:

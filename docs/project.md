@@ -201,6 +201,13 @@ TTL примеры: league_table 300s/1800s, news 120s/300s.
 
 Публикация новостей вызывает: инвалидация `cache:news` + прогрев `limit:5:offset:0`.
 
+Предвычисление лидербордов (precompute):
+- Отдельный фоновый поток с интервалом `LEADER_PRECOMPUTE_SEC` (60с по умолчанию) строит JSON‑payload'ы для: `top-predictors`, `top-rich`, `server-leaders`, `prizes` и сохраняет их в Redis (тип кэша `leaderboards`).
+- Эндпоинты `/api/leaderboard/*` теперь сначала читают предвычисленные данные из Redis (быстрый путь), и только при отсутствии — используют DB snapshot/внутренние кэши.
+- Env‑флаги:
+    - `LEADER_PRECOMPUTE_ENABLED=1` — включить фоновый прогрев
+    - `LEADER_PRECOMPUTE_SEC=60` — период прогрева в секундах
+
 ### 3a. ETag поверх кэша
 Публичные ответы сериализуются (sorted keys, UTF-8) → MD5 → `ETag`. Клиент при совпадении отправляет `If-None-Match`, сервер отдаёт 304.
 
