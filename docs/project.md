@@ -59,6 +59,46 @@
 
 ### Принципы организации кода (актуально)
 
+## 🧭 Быстрая навигация по ключевым функциям (куда смотреть в коде)
+
+- Real-time и топики
+    - Server batching/patch: `optimizations/websocket_manager.py` → методы `emit_to_topic_batched`, `get_metrics`
+    - Публикация событий: `optimizations/smart_invalidator.py` → `publish_topic`, Redis канал `app:topic`
+    - Клиентский приём патчей: `static/js/realtime-updates.js` → обработчик `data_patch`
+    - Фичефлаги WS: чтение в `templates/index.html`, логика pre-probe в `static/js/profile.js`
+
+- Ставки и коэффициенты
+    - Размещение ставки: `app.py` → `/api/betting/place`
+    - Ленты туров/коэффициентов: `app.py` → `/api/betting/tours` (добавляет `odds_version`)
+    - Версии коэффициентов: `app.py` → `_get_odds_version`, `_bump_odds_version`
+    - Клиент (ставки): `static/js/predictions.js` (WS + ETag‑fallback пуллинг 3.5–4.7с)
+
+- Детали матча и статистика
+    - Серверный ETag: `app.py` → `/api/match-details` через `etag_json`
+    - Клиентский загрузчик: `static/js/match-details-fetch.js` → `window.fetchMatchDetails`
+    - Пуллинг статов: `static/js/profile-match-stats.js` (10–15с, ETag)
+    - Анти‑фликер после админских правок: `static/js/profile-match-advanced.js`
+
+- Лидерборды и достижения
+    - Серверные эндпоинты (ETag): `app.py` → `/api/leaderboard/*`, `/api/achievements`
+    - Клиентские вызовы: `static/js/profile.js` (leaderboards) и `static/js/profile-achievements.js`
+    - Универсальная утилита SWR/ETag: `static/js/etag-fetch.js`
+
+- Новости
+    - Публичный API: `app.py` → `GET /api/news`
+    - Админ CRUD: `app.py` → `/api/admin/news` (initData + ADMIN_USER_ID)
+    - Инвалидация и прогрев: `optimizations/multilevel_cache.py` → `invalidate_pattern`
+
+- Сезонный reset и составы команд
+    - Season rollover: `app.py` → `POST /api/admin/season/rollover`
+    - Persistent roster: `app.py` → сохранение составов, синхронизация с `team_roster`
+    - Публичные составы: `app.py` → `GET /api/match/lineups?match_id=...`
+
+- Кэширование и ETag
+    - Универсальный ответ: `app.py` → `_json_response`
+    - Обёртка с ETag: `app.py` → `etag_json`
+    - Многоуровневый кэш: `optimizations/multilevel_cache.py`
+
 Проект использует **многослойную архитектуру** с элементами **модульной организации**:
 - **API Layer**: Разделение эндпоинтов по доменам (betting, admin, monitoring)
 - **Business Logic Layer**: Основная логика в `app.py` с утилитами в `utils/`
