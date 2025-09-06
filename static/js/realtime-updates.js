@@ -135,17 +135,26 @@ class RealtimeUpdater {
                 return;
             }
             if (entity === 'odds') {
-                // версия кэфа: если у клиента есть локальная, сравнить при наличии detail.storage
-                const home = id?.home, away = id?.away;
+                // id может быть строкой (старый формат) или объектом {home, away, date}
+                let home, away, date;
+                if (typeof id === 'string') {
+                    [home, away, date] = id.split('_');
+                } else if (id && typeof id === 'object') {
+                    home = id.home;
+                    away = id.away;
+                    date = id.date;
+                }
+
+                if (!home || !away) return;
+
                 const incomingV = (fields && fields.odds_version != null) ? Number(fields.odds_version) : null;
-                if (home && away && incomingV != null) {
+                if (incomingV != null) {
                     const cur = this._getOddsVersion(home, away);
-                    // Игнорируем регресс версий
                     if (incomingV < cur) { return; }
                     if (incomingV > cur) { this._setOddsVersion(home, away, incomingV); }
                 }
                 // Пробрасываем событие вниз по UI
-                this.refreshBettingOdds({ ...(fields || {}), home, away, odds_version: incomingV });
+                this.refreshBettingOdds({ ...(fields || {}), home, away, date, odds_version: incomingV });
                 return;
             }
             // по умолчанию — общий refresh

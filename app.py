@@ -9,7 +9,7 @@ from datetime import datetime, date, timezone
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
-from flask import Flask, request, jsonify, render_template, send_from_directory, g, make_response
+from flask import Flask, request, jsonify, render_template, send_from_directory, g, make_response, current_app
 import flask
 
 # Импорты для системы безопасности и мониторинга (Фаза 3)
@@ -993,6 +993,30 @@ def api_betting_place():
         )
         db.add(bet)
         db.commit()
+
+        # --- НОВЫЙ КОД: Уведомление через WebSocket ---
+        try:
+            ws_manager = current_app.config.get('websocket_manager')
+            if ws_manager:
+                # Пересчитываем коэффициенты после ставки
+                recalculated_odds = _compute_match_odds(home, away, bet.match_datetime.date().isoformat() if bet.match_datetime else None)
+                
+                # Формируем уникальный ID матча
+                match_id_str = f"{home}_{away}_{bet.match_datetime.date().isoformat() if bet.match_datetime else ''}"
+                
+                payload = {
+                    'entity': 'odds',
+                    'id': match_id_str,
+                    'fields': recalculated_odds
+                }
+                
+                # Отправляем в комнату конкретного матча и в общую комнату прогнозов
+                # Используем emit_to_topic_batched для умной группировки
+                ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=3500)
+                ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=3500)
+        except Exception as e:
+            app.logger.error(f"WebSocket odds update failed: {e}")
+        # --- КОНЕЦ НОВОГО КОДА ---
         db.refresh(db_user)
         db.refresh(bet)
         try:

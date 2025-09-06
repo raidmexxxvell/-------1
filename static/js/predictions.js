@@ -33,6 +33,17 @@
   function loadTours() {
       if (!toursEl || _toursLoading) return;
       _toursLoading = true;
+
+      // --- НОВЫЙ КОД: Подписка на WebSocket ---
+      try {
+        if (window.realtimeUpdater && typeof window.realtimeUpdater.subscribeTopic === 'function') {
+          window.realtimeUpdater.subscribeTopic('predictions_page');
+        }
+      } catch (e) {
+        console.error('WS subscription failed', e);
+      }
+      // --- КОНЕЦ НОВОГО КОДА ---
+
       const CACHE_KEY = 'betting:tours';
       const FRESH_TTL = 5 * 60 * 1000; // 5 минут
       const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
@@ -56,6 +67,20 @@
           const tourMatches = (t.matches||[]).filter(m => !m.lock);
           tourMatches.forEach(m => {
             const card = document.createElement('div'); card.className = 'match-card';
+            
+            // --- НОВЫЙ КОД: Уникальный ID и подписка на комнату матча ---
+            const matchDate = (m.date || m.datetime || '').slice(0, 10);
+            const matchId = `${m.home}_${m.away}_${matchDate}`;
+            card.dataset.matchId = matchId;
+            try {
+              if (window.realtimeUpdater && typeof window.realtimeUpdater.subscribeTopic === 'function') {
+                window.realtimeUpdater.subscribeTopic(`match_odds_${matchId}`);
+              }
+            } catch (e) {
+              console.error(`WS match subscription failed for ${matchId}`, e);
+            }
+            // --- КОНЕЦ НОВОГО КОДА ---
+
             try { card.dataset.home = m.home || ''; card.dataset.away = m.away || ''; } catch(_) {}
             const header = document.createElement('div'); header.className = 'match-header';
             const dtText = formatDateTime(m.date, m.time);
@@ -219,8 +244,9 @@
     function mkOptions(tour, m, locked) {
       const box = document.createElement('div'); box.className = 'options-box';
       const odds = m.odds || {};
-  const mkBtn = (key, label) => {
+      const mkBtn = (key, label) => {
         const b = document.createElement('button'); b.className='bet-btn';
+        b.dataset.betKey = key; // Добавляем data-атрибут для легкого поиска
         const k = odds[key] != null ? ` (${Number(odds[key]).toFixed(2)})` : '';
         b.textContent = label + k; b.disabled = !!locked;
         b.addEventListener('click', ()=> {
@@ -382,5 +408,34 @@
       const item = e.target.closest('.nav-item[data-tab="predictions"]');
       if (item) { loadTours(); }
     }, { once: true });
+
+    // --- НОВЫЙ КОД: Обработчик обновлений коэффициентов от WebSocket ---
+    document.addEventListener('bettingOddsUpdate', (e) => {
+      const { detail } = e;
+      if (!detail || !detail.home || !detail.away) return;
+
+      const matchId = `${detail.home}_${detail.away}_${detail.date || ''}`;
+      const card = document.querySelector(`.match-card[data-match-id="${matchId}"]`);
+      if (!card) return;
+
+      const odds = detail; // home, draw, away keys
+      const buttons = card.querySelectorAll('.bet-btn[data-bet-key]');
+      
+      buttons.forEach(btn => {
+        const key = btn.dataset.betKey;
+        const label = { home: 'П1', draw: 'Х', away: 'П2' }[key];
+        if (label && odds[key] != null) {
+          const newText = `${label} (${Number(odds[key]).toFixed(2)})`;
+          if (btn.textContent !== newText) {
+            btn.textContent = newText;
+            // Анимация обновления
+            btn.classList.add('updated');
+            setTimeout(() => btn.classList.remove('updated'), 500);
+          }
+        }
+      });
+    });
+    // --- КОНЕЦ НОВОГО КОДА ---
+
   });
 })();
