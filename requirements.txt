@@ -10,6 +10,7 @@ requests==2.31.0
 redis==5.0.1
 flask-socketio==5.3.6
 python-socketio==5.11.0
+orjson==3.10.7  # Fast JSON serializer for Python
 
 # Database system dependencies
 psycopg[binary]==3.2.9  # PostgreSQL adapter for Python 3.13

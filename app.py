@@ -152,6 +152,12 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 import threading
+try:
+    import orjson  # faster JSON serializer
+    _ORJSON_AVAILABLE = True
+except Exception:
+    orjson = None  # type: ignore
+    _ORJSON_AVAILABLE = False
 
 # Flask app
 app = Flask(__name__, static_folder='static', template_folder='templates')
@@ -190,6 +196,18 @@ if OPTIMIZATIONS_AVAILABLE:
     try:
         # Многоуровневый кэш
         cache_manager = get_cache()
+        # Периодическая очистка просроченных записей из in-memory кэша (не блокирует запросы)
+        try:
+            def _cache_sweeper():
+                while True:
+                    try:
+                        cache_manager.cleanup_expired()
+                    except Exception:
+                        pass
+                    time.sleep(300)  # каждые 5 минут
+            threading.Thread(target=_cache_sweeper, name="cache-sweeper", daemon=True).start()
+        except Exception:
+            pass
         
         # Менеджер фоновых задач
         task_manager = get_task_manager()
@@ -276,6 +294,8 @@ def _add_static_cache_headers(resp):
         resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
         resp.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
         resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+        # При включенном сжатии корректируем кэширование у прокси/клиентов
+        resp.headers.setdefault('Vary', 'Accept-Encoding')
 
         p = request.path or ''
         if p.startswith('/static/'):
@@ -3184,8 +3204,22 @@ def _etag_for_payload(payload: dict) -> str:
     except Exception:
         return str(int(time.time()))
 
+# Fast JSON response helper (uses orjson when available)
+def _json_response(payload: dict, status: int = 200):
+    try:
+        if _ORJSON_AVAILABLE:
+            data = orjson.dumps(payload)
+        else:
+            data = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        resp = app.response_class(data, status=status, mimetype='application/json')
+        return resp
+    except Exception:
+        # Fallback to Flask jsonify on any unexpected error
+        return jsonify(payload), status
+
 # ---------------------- ETag JSON Helper ----------------------
 _ETAG_HELPER_CACHE = {}
+_ETAG_HELPER_SWEEP = {'count': 0}
 def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: int = 30, swr: int = 30, core_filter=None, cache_visibility: str = 'public'):
     """Универсальный helper: строит или отдаёт из памяти JSON + ETag + SWR.
 
@@ -3204,7 +3238,7 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
             resp.headers['ETag'] = ce['etag']
             resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
             return resp
-        resp = jsonify({**ce['payload'], 'version': ce['etag']})
+        resp = _json_response({**ce['payload'], 'version': ce['etag']})
         resp.headers['ETag'] = ce['etag']
         resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
         return resp
@@ -3214,13 +3248,27 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
         etag = _etag_for_payload(core)
     except Exception:
         etag = hashlib.md5(str(endpoint_key).encode()).hexdigest()
-    _ETAG_HELPER_CACHE[endpoint_key] = {'ts': now, 'payload': payload, 'etag': etag}
+    _ETAG_HELPER_CACHE[endpoint_key] = {'ts': now, 'payload': payload, 'etag': etag, 'ttl': cache_ttl}
+    # Periodic cleanup of stale cached entries to avoid unbounded growth
+    try:
+        _ETAG_HELPER_SWEEP['count'] = _ETAG_HELPER_SWEEP.get('count', 0) + 1
+        if _ETAG_HELPER_SWEEP['count'] % 200 == 0:
+            to_del = []
+            for k, v in list(_ETAG_HELPER_CACHE.items()):
+                v_ts = v.get('ts', 0)
+                v_ttl = v.get('ttl', 600)
+                if now - v_ts >= v_ttl:
+                    to_del.append(k)
+            for k in to_del:
+                _ETAG_HELPER_CACHE.pop(k, None)
+    except Exception:
+        pass
     if client_etag and client_etag == etag:
         resp = flask.make_response('', 304)
         resp.headers['ETag'] = etag
         resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
         return resp
-    resp = jsonify({**payload, 'version': etag})
+    resp = _json_response({**payload, 'version': etag})
     resp.headers['ETag'] = etag
     resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
     return resp
@@ -8814,12 +8862,12 @@ def api_news_public():
                 resp.headers['ETag'] = etag
                 resp.headers['Cache-Control'] = 'public, max-age=120, stale-while-revalidate=60'
                 return resp
-            resp = jsonify({'news': news_list, 'version': etag})
+            resp = _json_response({'news': news_list, 'version': etag})
             resp.headers['ETag'] = etag
             resp.headers['Cache-Control'] = 'public, max-age=120, stale-while-revalidate=60'
             return resp
         except Exception:
-            return jsonify({'news': news_list})
+            return _json_response({'news': news_list})
     except Exception as e:
         app.logger.error(f"public news error: {e}")
         return jsonify({'error': 'Ошибка при получении новостей'}), 500
@@ -8842,7 +8890,7 @@ def api_stats_table():
                         resp.headers['ETag'] = _etag
                         resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
                         return resp
-                    resp = jsonify({**payload, 'version': _etag})
+                    resp = _json_response({**payload, 'version': _etag})
                     resp.headers['ETag'] = _etag
                     resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
                     return resp
