@@ -30,25 +30,63 @@
     };
     return map[norm] || '#3b82f6';
   }
-  function setTeamLogo(imgEl, teamName){
+  // Кэш уже найденных валидных URL логотипов: key -> url
+  const _logoCache = new Map();
+  const _pending = new Map(); // key -> Promise<url>
+  function _abs(u){
+    try { const a = document.createElement('a'); a.href = u; return a.href; } catch(_) { return u; }
+  }
+  function _sameSrc(a,b){
+    try { return _abs(a||'') === _abs(b||'') || (a||'').endsWith(b||'') || (b||'').endsWith(a||''); } catch(_) { return a===b; }
+  }
+  function resolveLogoUrl(teamName){
     const name = (teamName||'').trim();
+    const norm = normalizeTeamName(name);
+    const key = norm || '__default__';
+    if (_logoCache.has(key)) return Promise.resolve(_logoCache.get(key));
+    if (_pending.has(key)) return _pending.get(key);
     const candidates = [];
-    try { imgEl.loading='lazy'; imgEl.decoding='async'; } catch(_) {}
-    if (name){
-      const norm = normalizeTeamName(name);
-      if (norm) {
-        // Сначала пробуем вариант с приставкой "фк" (чаще соответствует файлам в директории)
-        if (!norm.startsWith('фк')) candidates.push(LOGO_BASE + encodeURIComponent('фк' + norm + '.png'));
-        // Затем — основной нормализованный вариант
-        candidates.push(LOGO_BASE + encodeURIComponent(norm + '.png'));
-      }
+    if (norm){
+      // Пробуем вариант с приставкой "фк" (если исходное имя не начиналось с фк, добавим префикс)
+      if (!norm.startsWith('фк')) candidates.push(LOGO_BASE + encodeURIComponent('фк' + norm + '.png'));
+      // Затем — основной нормализованный вариант
+      candidates.push(LOGO_BASE + encodeURIComponent(norm + '.png'));
     }
     candidates.push(LOGO_BASE + 'default.png');
-    // Удаляем дубликаты (на случай совпадений)
+    // Уникализируем
     const uniq = [];
     const seen = new Set();
     candidates.forEach(c=>{ if(!seen.has(c)){ seen.add(c); uniq.push(c); }});
-    let i=0; const next=()=>{ if(i>=uniq.length) return; imgEl.onerror=()=>{ i++; next(); }; imgEl.src=uniq[i]; }; next();
+    const p = new Promise((resolve)=>{
+      let i=0;
+      const tryNext=()=>{
+        if (i>=uniq.length){ resolve(LOGO_BASE + 'default.png'); return; }
+        const url = uniq[i++];
+        const test = new Image();
+        test.onload = ()=>{ _logoCache.set(key, url); resolve(url); };
+        test.onerror = ()=>{ tryNext(); };
+        test.src = url;
+      };
+      tryNext();
+    }).finally(()=>{ _pending.delete(key); });
+    _pending.set(key, p);
+    return p;
+  }
+  function setTeamLogo(imgEl, teamName){
+    try { imgEl.loading='lazy'; imgEl.decoding='async'; } catch(_) {}
+    const norm = normalizeTeamName(teamName||'');
+    const key = norm || '__default__';
+    // Если уже устанавливали для этого ключа и src непустой — не трогаем (избегаем мерцания при повторных вызовах)
+    try {
+      if (imgEl.dataset && imgEl.dataset.teamLogoKey === key && imgEl.getAttribute('src')) return;
+    } catch(_) {}
+    // Если нет текущего src — сразу показываем default как placeholder (не будет пустого слота)
+    if (!imgEl.getAttribute('src')) imgEl.setAttribute('src', LOGO_BASE + 'default.png');
+    resolveLogoUrl(teamName).then((url)=>{
+      // Устанавливаем только если отличается, чтобы не перезагружать изображение
+      if (!_sameSrc(imgEl.getAttribute('src'), url)) imgEl.setAttribute('src', url);
+      try { if (imgEl.dataset) imgEl.dataset.teamLogoKey = key; } catch(_) {}
+    });
   }
   function createTeamWithLogo(teamName, options={}){
     const { showLogo=true, logoSize='20px', className='team-with-logo', textClassName='team-name', logoClassName='team-logo'} = options;
