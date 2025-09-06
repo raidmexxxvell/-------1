@@ -7,6 +7,7 @@ import threading
 from typing import Dict, Set
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import logging
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,30 @@ class WebSocketManager:
             self.socketio.emit('live_update', message, room=room, namespace='/')
         except Exception as e:
             logger.warning(f"Failed to send live match update: {e}")
+
+    def notify_patch(self, entity: str, entity_id, fields: dict, room: str | None = None):
+        """Отправляет компактный патч для частичного обновления клиентского состояния.
+        entity: 'match' | 'odds' | 'news' | ...
+        entity_id: идентификатор сущности (например, {'home':..., 'away':...} или числовой id)
+        fields: изменённые поля, например {'score_home': 1, 'score_away': 0} или {'odds': {...}, 'odds_version': 123}
+        room: необязательная комната для таргетированной доставки
+        """
+        if not self.socketio:
+            return
+        try:
+            message = {
+                'type': 'data_patch',
+                'entity': entity,
+                'id': entity_id,
+                'fields': fields,
+                'ts': datetime.now(timezone.utc).isoformat()
+            }
+            if room:
+                self.socketio.emit('data_patch', message, room=room, namespace='/')
+            else:
+                self.socketio.emit('data_patch', message, namespace='/')
+        except Exception as e:
+            logger.warning(f"Failed to send data_patch for {entity}: {e}")
 
     def get_connected_count(self) -> int:
         """Возвращает количество подключенных пользователей"""

@@ -494,6 +494,26 @@ def _load_team_strengths() -> dict[str, float]:
             app.logger.warning(f"BET_TEAM_STRENGTHS_JSON parse failed: {e}")
     return strengths
 
+# ---------------------- Odds versioning (in-memory) ----------------------
+# Простой счётчик версий коэффициентов по матчу. Инкрементится при админских изменениях,
+# влияющих на коэффициенты (будет расширено в следующих шагах roadmap).
+_ODDS_VERSION: dict[tuple[str, str], int] = {}
+
+def _ov_key(home: str, away: str) -> tuple[str, str]:
+    try:
+        return ((home or '').strip(), (away or '').strip())
+    except Exception:
+        return (str(home), str(away))
+
+def _get_odds_version(home: str, away: str) -> int:
+    return int(_ODDS_VERSION.get(_ov_key(home, away), 1))
+
+def _bump_odds_version(home: str, away: str) -> int:
+    k = _ov_key(home, away)
+    cur = int(_ODDS_VERSION.get(k, 1)) + 1
+    _ODDS_VERSION[k] = cur
+    return cur
+
 def _pick_match_of_week(tours: list[dict]) -> dict|None:
     """Выбирает ближайший по времени матч с максимальной суммарной силой команд.
     Возвращает {home, away, date, datetime} или None.
@@ -4255,6 +4275,8 @@ def _build_betting_tours_payload():
                         'redcard': { 'available': True, 'odds': sp_red }
                     }
                 }
+                # Версия коэффициентов на матч для сверки на клиенте
+                m['odds_version'] = _get_odds_version(m.get('home',''), m.get('away',''))
             except Exception:
                 m['lock'] = True
     return { 'tours': tours, 'updated_at': datetime.now(timezone.utc).isoformat() }
@@ -6357,6 +6379,19 @@ def api_match_score_set():
             row.score_away = sa
             row.updated_at = datetime.now(timezone.utc)
             db.commit()
+            # Отправляем компактный патч через WebSocket (если доступен)
+            try:
+                ws = app.config.get('websocket_manager')
+                if ws:
+                    # bump версию коэффициентов (на будущее - если логика будет зависеть от счёта)
+                    new_ver = _bump_odds_version(home, away)
+                    ws.notify_patch(
+                        entity='match',
+                        entity_id={'home': home, 'away': away},
+                        fields={'score_home': row.score_home, 'score_away': row.score_away, 'odds_version': new_ver}
+                    )
+            except Exception:
+                pass
             # Зеркалим счёт в Google Sheets (best-effort), как числовые значения
             try:
                 if (row.score_home is not None) and (row.score_away is not None):
@@ -8935,6 +8970,18 @@ def api_specials_set():
                 row.redcard_yes = r_yes
             row.updated_at = when
             db.commit()
+            # Отправляем компактный патч для UI через WebSocket
+            try:
+                ws = app.config.get('websocket_manager')
+                if ws:
+                    new_ver = _bump_odds_version(home, away)
+                    ws.notify_patch(
+                        entity='match',
+                        entity_id={'home': home, 'away': away},
+                        fields={'penalty_yes': row.penalty_yes, 'redcard_yes': row.redcard_yes, 'odds_version': new_ver}
+                    )
+            except Exception:
+                pass
             return jsonify({'status': 'ok', 'home': home, 'away': away, 'penalty_yes': row.penalty_yes, 'redcard_yes': row.redcard_yes, 'updated_at': when.isoformat()})
         finally:
             db.close()

@@ -78,6 +78,11 @@ class RealtimeUpdater {
             this.handleDataUpdate(message);
         });
         
+        // Компактные патчи данных
+        this.socket.on('data_patch', (patch) => {
+            this.handleDataPatch(patch);
+        });
+
         // Обработчик live обновлений матчей
         this.socket.on('live_update', (message) => {
             this.handleLiveUpdate(message);
@@ -90,6 +95,40 @@ class RealtimeUpdater {
         }
     }
     
+    handleDataPatch(patch) {
+        if (!patch || patch.type !== 'data_patch') return;
+        const { entity, id, fields } = patch;
+        try {
+            if (entity === 'match') {
+                // ожидаем id как {home, away}
+                if (id && id.home && id.away) {
+                    // локальное обновление счёта, если передан
+                    if (fields && (fields.score_home !== undefined || fields.score_away !== undefined)) {
+                        this.updateMatchScore(id.home, id.away, {
+                            score_home: fields.score_home,
+                            score_away: fields.score_away
+                        });
+                    }
+                    // если прилетели составы или статус — пробрасываем в matchDetailsUpdate
+                    const other = { ...fields };
+                    delete other.score_home; delete other.score_away;
+                    if (Object.keys(other).length) {
+                        this.refreshMatchDetails({ home: id.home, away: id.away, ...other });
+                    }
+                }
+                return;
+            }
+            if (entity === 'odds') {
+                // версия кэфа: если у клиента есть локальная, сравнить при наличии detail.storage
+                // Просто пробрасываем событие; потребители сами сравнят odds_version
+                this.refreshBettingOdds(fields || {});
+                return;
+            }
+            // по умолчанию — общий refresh
+            this.triggerDataRefresh(entity);
+        } catch (_) { }
+    }
+
     scheduleReconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             
