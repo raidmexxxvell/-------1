@@ -4281,6 +4281,31 @@ def _build_betting_tours_payload():
                 m['lock'] = True
     return { 'tours': tours, 'updated_at': datetime.now(timezone.utc).isoformat() }
 
+def _build_odds_fields(home: str, away: str) -> dict:
+    """Формирует компактный snapshot коэффициентов/рынков для одного матча.
+    Используется для отправки частичных обновлений через WebSocket (entity='odds').
+    """
+    try:
+        dk = None  # date_key для влияния голосования, если потребуется — вычислим по match meta
+        odds_main = _compute_match_odds(home, away, dk)
+        totals = []
+        for ln in (3.5, 4.5, 5.5):
+            totals.append({'line': ln, 'odds': _compute_totals_odds(home, away, ln)})
+        sp_pen = _compute_specials_odds(home, away, 'penalty')
+        sp_red = _compute_specials_odds(home, away, 'redcard')
+        return {
+            'odds': odds_main,
+            'markets': {
+                'totals': totals,
+                'specials': {
+                    'penalty': { 'available': True, 'odds': sp_pen },
+                    'redcard': { 'available': True, 'odds': sp_red }
+                }
+            }
+        }
+    except Exception:
+        return {}
+
 def _build_leaderboards_payloads(db: Session) -> dict:
     # predictors (неделя), rich (месяц)
     won_case = case((Bet.status == 'won', 1), else_=0)
@@ -6385,11 +6410,35 @@ def api_match_score_set():
                 if ws:
                     # bump версию коэффициентов (на будущее - если логика будет зависеть от счёта)
                     new_ver = _bump_odds_version(home, away)
-                    ws.notify_patch(
-                        entity='match',
-                        entity_id={'home': home, 'away': away},
-                        fields={'score_home': row.score_home, 'score_away': row.score_away, 'odds_version': new_ver}
-                    )
+                    # Патч состояния матча (счёт) — дебаунс
+                    if hasattr(ws, 'notify_patch_debounced'):
+                        ws.notify_patch_debounced(
+                            entity='match',
+                            entity_id={'home': home, 'away': away},
+                            fields={'score_home': row.score_home, 'score_away': row.score_away, 'odds_version': new_ver}
+                        )
+                    else:
+                        ws.notify_patch(
+                            entity='match',
+                            entity_id={'home': home, 'away': away},
+                            fields={'score_home': row.score_home, 'score_away': row.score_away, 'odds_version': new_ver}
+                        )
+                    # Патч коэффициентов/рынков (частичный snapshot) — дебаунс
+                    odds_fields = _build_odds_fields(home, away)
+                    if odds_fields:
+                        odds_fields['odds_version'] = new_ver
+                        if hasattr(ws, 'notify_patch_debounced'):
+                            ws.notify_patch_debounced(
+                                entity='odds',
+                                entity_id={'home': home, 'away': away},
+                                fields=odds_fields
+                            )
+                        else:
+                            ws.notify_patch(
+                                entity='odds',
+                                entity_id={'home': home, 'away': away},
+                                fields=odds_fields
+                            )
             except Exception:
                 pass
             # Зеркалим счёт в Google Sheets (best-effort), как числовые значения
@@ -8975,11 +9024,35 @@ def api_specials_set():
                 ws = app.config.get('websocket_manager')
                 if ws:
                     new_ver = _bump_odds_version(home, away)
-                    ws.notify_patch(
-                        entity='match',
-                        entity_id={'home': home, 'away': away},
-                        fields={'penalty_yes': row.penalty_yes, 'redcard_yes': row.redcard_yes, 'odds_version': new_ver}
-                    )
+                    # Патч состояния матча (спецрынки) — дебаунс
+                    if hasattr(ws, 'notify_patch_debounced'):
+                        ws.notify_patch_debounced(
+                            entity='match',
+                            entity_id={'home': home, 'away': away},
+                            fields={'penalty_yes': row.penalty_yes, 'redcard_yes': row.redcard_yes, 'odds_version': new_ver}
+                        )
+                    else:
+                        ws.notify_patch(
+                            entity='match',
+                            entity_id={'home': home, 'away': away},
+                            fields={'penalty_yes': row.penalty_yes, 'redcard_yes': row.redcard_yes, 'odds_version': new_ver}
+                        )
+                    # Патч коэффициентов/рынков (частичный snapshot) — дебаунс
+                    odds_fields = _build_odds_fields(home, away)
+                    if odds_fields:
+                        odds_fields['odds_version'] = new_ver
+                        if hasattr(ws, 'notify_patch_debounced'):
+                            ws.notify_patch_debounced(
+                                entity='odds',
+                                entity_id={'home': home, 'away': away},
+                                fields=odds_fields
+                            )
+                        else:
+                            ws.notify_patch(
+                                entity='odds',
+                                entity_id={'home': home, 'away': away},
+                                fields=odds_fields
+                            )
             except Exception:
                 pass
             return jsonify({'status': 'ok', 'home': home, 'away': away, 'penalty_yes': row.penalty_yes, 'redcard_yes': row.redcard_yes, 'updated_at': when.isoformat()})

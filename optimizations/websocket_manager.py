@@ -14,8 +14,12 @@ logger = logging.getLogger(__name__)
 class WebSocketManager:
     def __init__(self, socketio: SocketIO):
         self.socketio = socketio
-        self.connected_users: Dict[str, Set[str]] = {}  # user_id -> {session_ids}
+        # user_id -> {session_ids}
+        self.connected_users = {}  # type: Dict[str, Set[str]]
         self.lock = threading.Lock()
+        # Дебаунсер для патчей: ключ -> {timer, fields, entity, id, room}
+        self._patch_buffers = {}
+        self._patch_lock = threading.Lock()
 
     def add_connection(self, user_id: str, session_id: str):
         """Добавляет соединение пользователя"""
@@ -94,6 +98,62 @@ class WebSocketManager:
                 self.socketio.emit('data_patch', message, namespace='/')
         except Exception as e:
             logger.warning(f"Failed to send data_patch for {entity}: {e}")
+
+    def _make_patch_key(self, entity: str, entity_id, room: str | None) -> str:
+        try:
+            if isinstance(entity_id, dict):
+                key_part = json.dumps(entity_id, sort_keys=True, ensure_ascii=False)
+            else:
+                key_part = str(entity_id)
+        except Exception:
+            key_part = str(entity_id)
+        return f"{entity}|{room or '*'}|{key_part}"
+
+    def notify_patch_debounced(self, entity: str, entity_id, fields: dict, room: str | None = None, delay_ms: int = 250):
+        """Дебаунс-версия notify_patch: агрегирует поля и отправляет один пакет через delay_ms."""
+        if not self.socketio:
+            return
+        key = self._make_patch_key(entity, entity_id, room)
+
+        def _flush():
+            buf = None
+            with self._patch_lock:
+                buf = self._patch_buffers.pop(key, None)
+            if not buf:
+                return
+            try:
+                self.notify_patch(buf['entity'], buf['id'], buf['fields'], room=buf['room'])
+            except Exception as e:
+                try:
+                    ent = (buf or {}).get('entity')
+                except Exception:
+                    ent = None
+                logger.warning(f"Failed to flush debounced patch for {ent}: {e}")
+
+        with self._patch_lock:
+            entry = self._patch_buffers.get(key)
+            if entry is None:
+                # Создаём новую запись
+                self._patch_buffers[key] = {
+                    'entity': entity,
+                    'id': entity_id,
+                    'room': room,
+                    'fields': dict(fields),
+                    'timer': None,
+                }
+                t = threading.Timer(delay_ms / 1000.0, _flush)
+                self._patch_buffers[key]['timer'] = t
+                t.daemon = True
+                t.start()
+            else:
+                # Мержим поля, таймер уже тикает
+                try:
+                    entry['fields'].update(fields or {})
+                except Exception:
+                    # на всякий случай пересоздаём словарь
+                    merged = dict(entry.get('fields') or {})
+                    merged.update(fields or {})
+                    entry['fields'] = merged
 
     def get_connected_count(self) -> int:
         """Возвращает количество подключенных пользователей"""
