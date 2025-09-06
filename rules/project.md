@@ -178,6 +178,39 @@ class Tournament(Base):
     matches = relationship("Match", back_populates="tournament")
 ```
 
+### 4a. Real-time патчи и версионность коэффициентов (новое)
+
+Назначение: уменьшить трафик и задержки при live‑обновлениях через компактные WebSocket‑патчи, сохраняя согласованность коэффициентов.
+
+Канал и формат события
+- Событие: `data_patch`
+- Формат:
+    - `{ type: 'data_patch', entity: 'match'|'odds', id: { home, away }, fields: { ... } }`
+    - Идентификатор матча: `id = { home: string, away: string }`
+
+Что шлёт сервер сейчас
+- entity `match`: при изменении счёта и специальных рынков (penalty/redcard)
+    - `fields`: `score_home`, `score_away`, `penalty_yes`, `redcard_yes` (по ситуации)
+    - Всегда добавляется `odds_version` (инкрементируется при влияющих изменениях)
+- В payload туров (`/api/betting/tours`) для каждого матча присутствует `odds_version` (инициализация версии на клиенте)
+
+Как ведёт себя клиент (static/js/realtime-updates.js)
+- Поддерживает локальную карту версий коэффициентов per‑match (в памяти)
+- Если во входящем патче `fields.odds_version` меньше уже известной версии — изменения рынков/коэффициентов игнорируются (защита от регрессии)
+- Поля состояния матча (счёт, specials) применяются всегда для `entity: 'match'`
+- При более новой версии: обновляется локальная версия и рассылаются события UI:
+    - `matchDetailsUpdate` — для прочих полей матча
+    - `bettingOddsUpdate` — для рынков/коэффициентов (при `entity: 'odds'` — планируется)
+
+Мини‑контракт полей
+- `entity: 'match'`: `fields` могут содержать `score_home`, `score_away`, `penalty_yes`, `redcard_yes`, всегда допустим `odds_version`
+- `entity: 'odds'` (план): `fields` содержат частичные изменения рынков (`markets.*`) и `odds_version`
+
+Стабильность и будущее развитие
+- Версии поддерживаются в памяти на сервере (`_ODDS_VERSION`, `_get_odds_version`, `_bump_odds_version` в `app.py`)
+- Метод отправки патчей: `optimizations/websocket_manager.py: notify_patch`
+- Пакетирование частых изменений ≤250 мс — в плане (server‑side debounce перед broadcast)
+
 ### 5. Модульная JavaScript архитектура
 
 ```javascript

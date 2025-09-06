@@ -86,7 +86,7 @@
   - [ ] Вынести core_filter паттерн в документацию (используется для исключения updated_at из ETag)
 3. Точечные push-обновления (WebSocket + версии полей)
   - [ ] Внедрить lightweight diff для score/markets (payload: {type:'patch', entity:'match', id, fields:{score:"1:0"}, version})
-  - [ ] Версионность коэффициентов (odds_version) → клиент сверяет перед обновлением UI
+  - [x] Версионность коэффициентов (odds_version) → клиент сверяет перед обновлением UI
 4. Фоновые «снимки» (precompute)
   - [ ] Периодический прогрев leaderboards (каждые 60s) в Redis json
   - [ ] Предрасчёт weekly ROI для будущего достижения "Аналитик недели"
@@ -329,6 +329,7 @@ UI / UX мелкие правки (быстрый финиш)
 - [ ] Добавить версионное поле version/updated_at во все payload (стандартизировать)
 - [x] WebSocket событие data_patch (match — score, specials)
   - [ ] data_patch для odds (минимальные изменения рынков) с версией odds_version
+  - [x] Клиент: сверка odds_version (игнор регресса, обновление локальной версии)
 - [ ] Клиентский reconciler: применять только изменившиеся узлы DOM
  - [ ] Унифицированный формат diff: {type:'patch', entity, key, fields, v}
  - [ ] Бэтчинг событий матчей (score+odds) ≤1 пакет/250ms

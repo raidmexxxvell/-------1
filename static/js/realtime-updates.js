@@ -12,6 +12,8 @@ class RealtimeUpdater {
         this.isConnected = false;
         this.callbacks = new Map();
         this.debug = localStorage.getItem('websocket_debug') === 'true';
+    // Версионность коэффициентов по матчу: key = "home|away" → int
+    this.oddsVersions = new Map();
         
         this.initSocket();
     }
@@ -102,6 +104,10 @@ class RealtimeUpdater {
             if (entity === 'match') {
                 // ожидаем id как {home, away}
                 if (id && id.home && id.away) {
+                    // Версия коэффициентов (если есть) — сохраняем
+                    if (fields && fields.odds_version != null) {
+                        this._setOddsVersion(id.home, id.away, Number(fields.odds_version) || 0);
+                    }
                     // локальное обновление счёта, если передан
                     if (fields && (fields.score_home !== undefined || fields.score_away !== undefined)) {
                         this.updateMatchScore(id.home, id.away, {
@@ -112,6 +118,7 @@ class RealtimeUpdater {
                     // если прилетели составы или статус — пробрасываем в matchDetailsUpdate
                     const other = { ...fields };
                     delete other.score_home; delete other.score_away;
+                    delete other.odds_version;
                     if (Object.keys(other).length) {
                         this.refreshMatchDetails({ home: id.home, away: id.away, ...other });
                     }
@@ -120,13 +127,32 @@ class RealtimeUpdater {
             }
             if (entity === 'odds') {
                 // версия кэфа: если у клиента есть локальная, сравнить при наличии detail.storage
-                // Просто пробрасываем событие; потребители сами сравнят odds_version
-                this.refreshBettingOdds(fields || {});
+                const home = id?.home, away = id?.away;
+                const incomingV = (fields && fields.odds_version != null) ? Number(fields.odds_version) : null;
+                if (home && away && incomingV != null) {
+                    const cur = this._getOddsVersion(home, away);
+                    // Игнорируем регресс версий
+                    if (incomingV < cur) { return; }
+                    if (incomingV > cur) { this._setOddsVersion(home, away, incomingV); }
+                }
+                // Пробрасываем событие вниз по UI
+                this.refreshBettingOdds({ ...(fields || {}), home, away, odds_version: incomingV });
                 return;
             }
             // по умолчанию — общий refresh
             this.triggerDataRefresh(entity);
         } catch (_) { }
+    }
+
+    _ovKey(home, away) {
+        return `${(home||'').trim()}|${(away||'').trim()}`;
+    }
+    _getOddsVersion(home, away) {
+        const k = this._ovKey(home, away);
+        return Number(this.oddsVersions.get(k) || 0);
+    }
+    _setOddsVersion(home, away, v) {
+        try { this.oddsVersions.set(this._ovKey(home, away), Number(v)||0); } catch(_) {}
     }
 
     scheduleReconnect() {
