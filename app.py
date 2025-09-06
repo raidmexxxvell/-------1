@@ -6466,6 +6466,7 @@ def api_match_score_set():
                             fields={'score_home': row.score_home, 'score_away': row.score_away, 'odds_version': new_ver}
                         )
                     else:
+                        # fallback на прямую отправку
                         ws.notify_patch(
                             entity='match',
                             entity_id={'home': home, 'away': away},
@@ -6482,6 +6483,7 @@ def api_match_score_set():
                                 fields=odds_fields
                             )
                         else:
+                            # fallback на прямую отправку
                             ws.notify_patch(
                                 entity='odds',
                                 entity_id={'home': home, 'away': away},
@@ -9080,6 +9082,7 @@ def api_specials_set():
                             fields={'penalty_yes': row.penalty_yes, 'redcard_yes': row.redcard_yes, 'odds_version': new_ver}
                         )
                     else:
+                        # fallback на прямую отправку
                         ws.notify_patch(
                             entity='match',
                             entity_id={'home': home, 'away': away},
@@ -9096,6 +9099,7 @@ def api_specials_set():
                                 fields=odds_fields
                             )
                         else:
+                            # fallback на прямую отправку
                             ws.notify_patch(
                                 entity='odds',
                                 entity_id={'home': home, 'away': away},

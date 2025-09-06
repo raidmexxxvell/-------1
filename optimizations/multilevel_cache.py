@@ -23,7 +23,7 @@ class MultiLevelCache:
         self.ttl_config = {
             # Очень частые запросы - держим в памяти
             'league_table': {'memory': 300, 'redis': 1800},  # 5 мин в памяти, 30 мин в Redis
-            'schedule': {'memory': 300, 'redis': 1800},
+            'schedule': {'memory': 600, 'redis': 1800},  # Этап 2: memory +10 мин
             'user_profile': {'memory': 180, 'redis': 900},
             
             # Средние по частоте - преимущественно Redis
@@ -34,7 +34,7 @@ class MultiLevelCache:
             # Редкие но тяжелые запросы - только Redis
             'leaderboards': {'memory': 0, 'redis': 3600},
             'achievements': {'memory': 0, 'redis': 1800},
-            'results': {'memory': 60, 'redis': 3600},
+            'results': {'memory': 120, 'redis': 3600},  # Этап 2: memory +2 мин
             # Новости (легкие, можно держать в памяти коротко)
             'news': {'memory': 120, 'redis': 300},  # 2 мин в памяти, 5 мин в Redis
         }
