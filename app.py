@@ -166,6 +166,12 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 if SECURITY_SYSTEM_AVAILABLE:
     try:
         app.config.from_object(Config)
+        # Пробрасываем env-флаги (на случай если приложение переинициализирует config)
+        try:
+            app.config['WEBSOCKETS_ENABLED'] = bool(getattr(Config, 'WEBSOCKETS_ENABLED', False))
+            app.config['WS_TOPIC_SUBSCRIPTIONS_ENABLED'] = bool(getattr(Config, 'WS_TOPIC_SUBSCRIPTIONS_ENABLED', False))
+        except Exception:
+            pass
         input_validator = InputValidator()
         telegram_security = TelegramSecurity()
         rate_limiter = RateLimiter()
@@ -220,6 +226,8 @@ if OPTIMIZATIONS_AVAILABLE:
             websocket_manager = WebSocketManager(socketio)
             # Делаем доступным через current_app.config
             app.config['websocket_manager'] = websocket_manager
+            # Фича-флаг для topic-based подписок (читаем из config/env, по умолчанию off)
+            app.config.setdefault('WS_TOPIC_SUBSCRIPTIONS_ENABLED', bool(app.config.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', False)))
             print("[INFO] WebSocket system initialized successfully")
         except ImportError:
             print("[WARN] Flask-SocketIO not available, WebSocket disabled")
@@ -254,6 +262,45 @@ else:
     websocket_manager = None
     invalidator = None
     sheets_manager = None
+
+# --- Socket.IO handlers (минимальные hooks, за фиче-флагом) ---
+try:
+    _socketio_ref = globals().get('socketio')
+    _ws_manager_ref = app.config.get('websocket_manager') if isinstance(app, Flask) else None
+except Exception:
+    _socketio_ref = None
+    _ws_manager_ref = None
+
+if _socketio_ref is not None:
+    try:
+        from flask_socketio import join_room, leave_room
+
+        @_socketio_ref.on('subscribe', namespace='/')
+        def _ws_subscribe_handler(payload):  # noqa: ANN001
+            try:
+                if not app.config.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED'):
+                    return  # фича выключена
+                topic = (payload or {}).get('topic')
+                if not topic or not isinstance(topic, str):
+                    return
+                join_room(topic)
+            except Exception:
+                pass
+
+        @_socketio_ref.on('unsubscribe', namespace='/')
+        def _ws_unsubscribe_handler(payload):  # noqa: ANN001
+            try:
+                if not app.config.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED'):
+                    return
+                topic = (payload or {}).get('topic')
+                if not topic or not isinstance(topic, str):
+                    return
+                leave_room(topic)
+            except Exception:
+                pass
+    except Exception:
+        # Безопасный no-op если SocketIO недоступен
+        pass
 
 # Регистрация новой системы БД
 if DATABASE_SYSTEM_AVAILABLE:
@@ -4851,7 +4898,13 @@ def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 2
 @app.route('/')
 def index():
     """Главная страница приложения"""
-    return render_template('index.html', admin_user_id=os.environ.get('ADMIN_USER_ID', ''), static_version=STATIC_VERSION)
+    return render_template(
+        'index.html',
+        admin_user_id=os.environ.get('ADMIN_USER_ID', ''),
+        static_version=STATIC_VERSION,
+        websockets_enabled=bool(app.config.get('WEBSOCKETS_ENABLED', False)),
+        ws_topic_subs=bool(app.config.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', False)),
+    )
 
 @app.route('/api/user', methods=['POST'])
 @require_telegram_auth()

@@ -9,9 +9,21 @@
     <title>Лига Обнинска</title>
     <!-- ИСПРАВЛЕНО: Убраны лишние пробелы в URL Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- WebSocket отключён (можно вернуть, раскомментировав) -->
-    <!-- <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script> -->
-    <script>window.__WEBSOCKETS_ENABLED__ = false; // отключено для диагностики мобильной загрузки</script>
+                {% if websockets_enabled %}
+        <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+        {% endif %}
+                <meta name="ws-flags" data-ws-enabled="{{ '1' if websockets_enabled else '0' }}" data-topic-subs="{{ '1' if ws_topic_subs else '0' }}">
+                <script>
+                    (function(){
+                        try {
+                            var m = document.querySelector('meta[name="ws-flags"]');
+                            var enabled = m && m.dataset && m.dataset.wsEnabled === '1';
+                            var topics = m && m.dataset && m.dataset.topicSubs === '1';
+                            window.__WEBSOCKETS_ENABLED__ = !!enabled;
+                            window.__WS_TOPIC_SUBS__ = !!topics;
+                        } catch(_) { window.__WEBSOCKETS_ENABLED__ = false; window.__WS_TOPIC_SUBS__ = false; }
+                    })();
+                </script>
         {# Подключаем оверлей ошибок только администратору #}
         {% if admin_user_id %}
         <script>

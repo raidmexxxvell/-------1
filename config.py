@@ -32,6 +32,9 @@ class Config:
     # Application settings
     FLASK_DEBUG = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
     PORT = int(os.environ.get('PORT', '5000'))
+    # Realtime/WebSocket feature flags
+    WEBSOCKETS_ENABLED = os.environ.get('WEBSOCKETS_ENABLED', '').lower() in ('1', 'true', 'yes')
+    WS_TOPIC_SUBSCRIPTIONS_ENABLED = os.environ.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', '').lower() in ('1', 'true', 'yes')
     
     # Cache settings
     REDIS_URL = os.environ.get('REDIS_URL', '')

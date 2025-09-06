@@ -22,10 +22,7 @@ class RealtimeUpdater {
         try {
             if (!window.__WEBSOCKETS_ENABLED__) {  return; }
             // Проверяем поддержку Socket.IO
-            if (typeof io === 'undefined') {
-                
-                return;
-            }
+            if (typeof io === 'undefined') { return; }
             // Пробный ping на /socket.io/ без апгрейда: если 4xx/5xx — отключаем
             try {
                 fetch('/socket.io/?EIO=4&transport=polling&t=' + Date.now(), { method: 'GET' })
@@ -47,7 +44,7 @@ class RealtimeUpdater {
     setupEventHandlers() {
         if (!this.socket) return;
         
-        this.socket.on('connect', () => {
+    this.socket.on('connect', () => {
             
             this.isConnected = true;
             this.reconnectAttempts = 0;
@@ -59,7 +56,7 @@ class RealtimeUpdater {
             }
         });
         
-        this.socket.on('disconnect', (reason) => {
+    this.socket.on('disconnect', (reason) => {
             
             this.isConnected = false;
             
@@ -95,6 +92,9 @@ class RealtimeUpdater {
                 
             });
         }
+
+    // Если включены topic-подписки, экспонируем subscribe/unsubscribe
+    this.topicEnabled = !!window.__WS_TOPIC_SUBS__;
     }
     
     handleDataPatch(patch) {
@@ -365,6 +365,22 @@ class RealtimeUpdater {
         }
     }
     
+    // Новые topic-based подписки (за фиче-флагом)
+    subscribeTopic(topic){
+        try {
+            if(!this.socket || !this.isConnected || !this.topicEnabled) return;
+            if(!topic || typeof topic!== 'string') return;
+            this.socket.emit('subscribe', { topic });
+        } catch(_) {}
+    }
+    unsubscribeTopic(topic){
+        try {
+            if(!this.socket || !this.isConnected || !this.topicEnabled) return;
+            if(!topic || typeof topic!== 'string') return;
+            this.socket.emit('unsubscribe', { topic });
+        } catch(_) {}
+    }
+
     // Статус подключения
     getConnectionStatus() {
         return {

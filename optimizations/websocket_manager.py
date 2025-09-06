@@ -15,11 +15,13 @@ class WebSocketManager:
     def __init__(self, socketio: SocketIO):
         self.socketio = socketio
         # user_id -> {session_ids}
-        self.connected_users = {}  # type: Dict[str, Set[str]]
+        self.connected_users = {}
         self.lock = threading.Lock()
         # Дебаунсер для патчей: ключ -> {timer, fields, entity, id, room}
         self._patch_buffers = {}
         self._patch_lock = threading.Lock()
+        # Регистр тем (опционально для метрик): topic -> примерное число подписчиков
+        self._topics = {}
 
     def add_connection(self, user_id: str, session_id: str):
         """Добавляет соединение пользователя"""
@@ -35,6 +37,19 @@ class WebSocketManager:
                 self.connected_users[user_id].discard(session_id)
                 if not self.connected_users[user_id]:
                     del self.connected_users[user_id]
+
+    def emit_to_topic(self, topic: str, event: str, data: dict):
+        """Отправить событие в конкретную комнату (топик). Безопасная обёртка.
+        Не бросает исключения и не меняет существующее поведение broadcast.
+        """
+        if not self.socketio:
+            return
+        try:
+            if not topic or not isinstance(topic, str):
+                return
+            self.socketio.emit(event, data, room=topic, namespace='/')
+        except Exception as e:
+            logger.warning(f"Failed to emit '{event}' to topic '{topic}': {e}")
 
     def notify_data_change(self, data_type: str, data: dict = None):
         """

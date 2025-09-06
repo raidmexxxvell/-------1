@@ -163,6 +163,11 @@
 Краткий план:
 - Клиент при загрузке `match-details` подписывается на топик `match:{id}:details`.
 - При admin update сервер публикует событие в Redis pub/sub с topic `match:{id}:details` и payload (patch или full).
+
+PR-2a (готово к канареечному тесту):
+- Добавлены env-флаги: `WEBSOCKETS_ENABLED=1`, `WS_TOPIC_SUBSCRIPTIONS_ENABLED=1`.
+- Шаблон `index.html` читает флаги и подключает Socket.IO/включает автоподписку клиента на `match:{home}__{away}__{date}:details` при открытии экрана.
+- На выход из экрана — отписка. Базовая логика non-breaking: если флаг выключен, ничего не меняется.
 - Websocket manager агрегирует/буфферизует изменения (для частых мелких событий 100–250ms), но критичные события (гол) отправляются немедленно.
 - Клиент применяет `patch` к UI; при конфликте или пропуске пакетов делает resync через `etag_json` endpoint.
 
