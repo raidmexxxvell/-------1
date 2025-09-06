@@ -689,3 +689,27 @@ python app.py  # или gunicorn -w 1 -k geventwebsocket.gunicorn.workers.Gevent
 Документ обновлён и расширен в соответствии с текущим состоянием репозитория.
 
 Проект демонстрирует **enterprise-уровень** разработки с акцентом на производительность, безопасность и масштабируемость.
+
+## Быстрые приоритеты: Real-time efficiency & UX (краткое резюме)
+
+Цель: мгновенная отзывчивость клиента при минимальной нагрузке на сервер.
+
+Топ‑приоритеты (MVP, 1–3 недели):
+- Topic-based WS subscriptions (match:{id}, team:{id}, leaderboard:{type}) — селективный broadcast.
+- Redis pub/sub + per-topic routing — быстрая селективная инвалидация и нотификация.
+- Delta-encoding (patches) для WS + MessagePack (опционально) — отправлять только изменённые поля.
+- Server-side batching (100–250ms) для мелких frequent-ивентов + QoS (high/low).
+- Client optimistic updates + rollback для операций пользователя (ставки, чек-ин).
+- Observability: ETag hit ratio, WS msgs/min, median payload gen time, %304 — обязательные метрики для принятия решений.
+
+MVP шаги:
+1. Внедрить topic routing + Redis listener — минимальный набор серверных изменений.
+2. Реализовать patch format и клиентское применение/фоллбек (resync по ETag при reconnect).
+3. Добавить batching для match events и приоритизацию критичных событий.
+4. Включить метрики и сделать канареечный rollout новых механизмов.
+
+Критерии успеха (через 2 недели):
+- Снижение WS сообщений/мин на ≥30% при стабильном workload.
+- ETag cache hit ratio > 70% для основных GET.
+- Median generation time payload < 150ms для критичных endpoints.
+
