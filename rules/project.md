@@ -211,6 +211,10 @@ class Tournament(Base):
 - Метод отправки патчей: `optimizations/websocket_manager.py: notify_patch`
 - Пакетирование частых изменений ≤250 мс — в плане (server‑side debounce перед broadcast)
 
+#### Fallback без WebSockets (free tier Render)
+- Детали матча: модуль `static/js/profile-match-advanced.js` включает лёгкий опрос `fetchMatchDetails` каждые ~5 секунд с джиттером и ETag/304. При смене версии перерисовываются составы/события через `MatchRostersEvents.render`. Опрос автоматически прекращается при выходе со страницы.
+- Статистика матча: модуль `static/js/profile-match-stats.js` выполняет первичную загрузку, затем опрос каждые 10–15 секунд (джиттер). Используется `fetchEtag` при наличии или прямой `If-None-Match`. Обновляются только значения и ширины баров (без перестройки DOM). Опрос останавливается при выходе со страницы.
+
 ### 5. Модульная JavaScript архитектура
 
 ```javascript

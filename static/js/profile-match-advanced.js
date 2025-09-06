@@ -73,6 +73,40 @@
   // preload stats & specials (modular)
   try { if(window.MatchStats?.render) window.MatchStats.render(statsPane, match); } catch(e){ console.error('preload stats err', e); }
   try { if(window.MatchSpecials?.render) window.MatchSpecials.render(specialsPane, match); } catch(e){ console.error('preload specials err', e); }
+  // Lightweight polling fallback when WebSockets are disabled: refresh rosters/events via ETag every ~5s
+  try {
+    const wsEnabled = !!window.__WEBSOCKETS_ENABLED__;
+    // Запускаем только если WS отключены и есть утилита получения деталей
+    if(!wsEnabled && window.fetchMatchDetails){
+      // вычисляем дату в формате YYYY-MM-DD как в топике
+      const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):''));
+      const dateStr=raw?raw.slice(0,10):'';
+      let lastVersion = (details && (details.version||details.etag)) || null;
+      // защита от повторного запуска
+      try { if(mdPane.__detailsPollCancel){ mdPane.__detailsPollCancel(); } } catch(_){}
+      let cancelled=false; let busy=false; let timer=null;
+      mdPane.__detailsPollCancel = ()=>{ cancelled=true; try { if(timer) clearTimeout(timer); } catch(_){} };
+      const loop = async ()=>{
+        if(cancelled || mdPane.style.display==='none') return;
+        // Пропускаем цикл, когда вкладка в фоне
+        if(document.hidden){ schedule(); return; }
+        if(busy){ schedule(); return; }
+        busy=true;
+        try {
+          const store = await window.fetchMatchDetails({ home: match.home||'', away: match.away||'', date: dateStr, forceFresh: true }).catch(()=>null);
+          const ver = store?.version || store?.etag || null;
+          if(store && ver && ver !== lastVersion){
+            lastVersion = ver;
+            try { if(window.MatchRostersEvents?.render) window.MatchRostersEvents.render(match, store.data, mdPane, { homePane, awayPane }); } catch(_){}
+          }
+        } finally {
+          busy=false; schedule();
+        }
+      };
+      const schedule = ()=>{ if(cancelled) return; const base=5000; const jitter=1200; const delay = base + Math.floor(Math.random()*jitter); timer = setTimeout(loop, delay); };
+      schedule();
+    }
+  } catch(_){}
   mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach(btn=>{ btn.onclick=()=>{ mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach(x=>x.classList.remove('active')); btn.classList.add('active'); const key=btn.getAttribute('data-mdtab'); if(key!=='stream'){ try { document.body.classList.remove('allow-landscape'); } catch(_){ } try { if(window.MatchStream?.deactivate){ window.MatchStream.deactivate(streamPane); } } catch(_){ } }
       if(key==='home'){ homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display='none'; }
   else if(key==='away'){ homePane.style.display='none'; awayPane.style.display=''; specialsPane.style.display='none'; statsPane.style.display='none'; if(streamPane) streamPane.style.display='none'; }
@@ -133,7 +167,7 @@
         }; btn.addEventListener('click', async()=>{ const ok=await confirmFinish(); if(!ok) return; const tg=window.Telegram?.WebApp||null; btn.disabled=true; const old=btn.textContent; btn.textContent='Завершаю...'; try { const fd=new FormData(); fd.append('initData', tg?.initData||''); fd.append('home', match.home||''); fd.append('away', match.away||''); const r=await fetch('/api/match/settle',{ method:'POST', body:fd }); const d=await r.json().catch(()=>({})); if(!r.ok || d?.error) throw new Error(d?.error||'Ошибка завершения'); try { window.showAlert?.('Матч завершён','success'); } catch(_){} try { if(d && d.total_bets!==undefined){ const msg=`Ставки: всего ${d.total_bets}, открытых до расчёта ${d.open_before}, изменено ${d.changed||0}, выиграло ${d.won||0}, проиграло ${d.lost||0}`; window.showAlert?.(msg,'info'); } } catch(_){} try { const dateStr=(match?.datetime||match?.date||'').toString().slice(0,10); const key=`stream:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${dateStr}`; localStorage.removeItem(key); const sp=document.getElementById('md-pane-stream'); if(sp){ sp.style.display='none'; sp.innerHTML='<div class=\"stream-wrap\"><div class=\"stream-skeleton\">Трансляция недоступна</div></div>'; } } catch(_){} try { finStore[mKey]=true; } catch(_){} await fullRefresh(); try { btn.style.display='none'; const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) statusEl.textContent='Матч завершен'; } catch(_){} } catch(e){ console.error('finish match error', e); try { window.showAlert?.(e?.message||'Ошибка','error'); } catch(_){} } finally { btn.disabled=false; btn.textContent=old; } }); topbar.appendChild(btn); } } catch(_){}
   // finish button delegated
   let adminCtx=null; try { if(window.MatchAdmin?.setup){ adminCtx=window.MatchAdmin.setup(match,{ mdPane }); } } catch(_){}
-  const back=document.getElementById('match-back'); if(back) back.onclick=()=>{ try { if(__topic && window.__WS_TOPIC_SUBS__ && window.realtimeUpdater) window.realtimeUpdater.unsubscribeTopic(__topic); } catch(_){} homePane.innerHTML=''; awayPane.innerHTML=''; try { if(adminCtx) adminCtx.cleanup(); } catch(_){} try { if(liveScoreCtx) liveScoreCtx.cleanup(); } catch(_){} try { if(window.Streams?.resetOnLeave) window.Streams.resetOnLeave(mdPane); } catch(_){} try { const spLeak=document.getElementById('md-pane-stream'); if(spLeak) spLeak.classList.remove('fs-mode'); } catch(_){} try { document.body.classList.remove('allow-landscape'); } catch(_){} mdPane.style.display='none'; schedulePane.style.display=''; window.scrollTo({ top:0, behavior:'smooth' }); try { document.getElementById('ufo-subtabs').style.display=''; } catch(_){} };
+  const back=document.getElementById('match-back'); if(back) back.onclick=()=>{ try { if(__topic && window.__WS_TOPIC_SUBS__ && window.realtimeUpdater) window.realtimeUpdater.unsubscribeTopic(__topic); } catch(_){} try { if(mdPane.__detailsPollCancel) mdPane.__detailsPollCancel(); } catch(_){} try { const statsHost=document.getElementById('md-pane-stats'); if(statsHost && statsHost.__statsPollCancel) statsHost.__statsPollCancel(); } catch(_){} homePane.innerHTML=''; awayPane.innerHTML=''; try { if(adminCtx) adminCtx.cleanup(); } catch(_){} try { if(liveScoreCtx) liveScoreCtx.cleanup(); } catch(_){} try { if(window.Streams?.resetOnLeave) window.Streams.resetOnLeave(mdPane); } catch(_){} try { const spLeak=document.getElementById('md-pane-stream'); if(spLeak) spLeak.classList.remove('fs-mode'); } catch(_){} try { document.body.classList.remove('allow-landscape'); } catch(_){} mdPane.style.display='none'; schedulePane.style.display=''; window.scrollTo({ top:0, behavior:'smooth' }); try { document.getElementById('ufo-subtabs').style.display=''; } catch(_){} };
   }
   window.MatchAdvanced = { openMatchScreen };
   try { window.openMatchScreen = openMatchScreen; } catch(_) {}
