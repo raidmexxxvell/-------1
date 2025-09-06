@@ -68,8 +68,8 @@
                         const st = document.getElementById('ufo-subtabs'); if (st) st.style.display = '';
                     }
                 } catch(_) {}
-                // если уходим с профиля — вернуть верхнюю панель
-                try { const cont = document.querySelector('.container'); if (cont) cont.classList.remove('profile-hide-top'); const ph = document.querySelector('.profile-header'); if (ph) ph.classList.remove('profile-centered'); } catch(_) {}
+                // если уходим с профиля — вернуть верхнюю панель и общий отступ сверху
+                try { const cont = document.querySelector('.container'); if (cont) cont.classList.remove('profile-hide-top'); const ph = document.querySelector('.profile-header'); if (ph) ph.classList.remove('profile-centered'); document.body.classList.remove('profile-mode'); } catch(_) {}
                 // Обработка двойного тапа для НЛО
         if (tab === 'ufo') {
                     const now = Date.now();
@@ -93,13 +93,15 @@
     const admin = document.getElementById('tab-admin');
     [home, prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
     if (tab === 'home' && home) home.style.display = '';
-                if (tab === 'profile' && prof) {
+        if (tab === 'profile' && prof) {
                     prof.style.display = '';
                     try {
                         // спрячем общую шапку лиги и центрируем профиль для мобильного вида
                         const cont = document.querySelector('.container');
                         if (cont) cont.classList.add('profile-hide-top');
                         const ph = document.querySelector('.profile-header'); if (ph) ph.classList.add('profile-centered');
+            // убираем верхний внутренний отступ у body для бесшовного фона
+            document.body.classList.add('profile-mode');
                     } catch(_) {}
                 }
     if (tab === 'ufo' && ufo) {

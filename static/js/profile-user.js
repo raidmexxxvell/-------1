@@ -173,11 +173,11 @@
   try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) applyShade(saved); else { try { applyShade(PRESETS[0]); } catch(_){} } } catch(_){}
 
     if (!btn || !modal) return;
-    // preset shades (png). Add your files to /static/img/profile-shades/ and they will appear here.
+    // preset shades (jpg). Add your files to /static/img/profile-shades/ and they will appear here.
     const PRESETS = [
-      '/static/img/profile-shades/shade1.png',
-      '/static/img/profile-shades/shade2.png',
-      '/static/img/profile-shades/shade3.webp'
+      '/static/img/profile-shades/shade1.jpg',
+      '/static/img/profile-shades/shade2.jpg',
+      '/static/img/profile-shades/shade3.jpg'
     ];
 
     function populateShadeList(){
