@@ -721,6 +721,38 @@
         badge.textContent = `Месяц: ${fmt(periodStartUtc)} — ${fmt(periodEndUtc)}`;
             }
         } catch(_) {}
+        // Пуллинг лидербордов (ETag, 60с) с учётом видимости
+        let lbPollTimer = null;
+        let lbActiveTab = 'predictors';
+        const LB_POLL_MS = 60000; // 60s
+        const LB_JITTER_MS = 4000; // небольшой джиттер
+        function isPaneVisible(key){
+            const pane = panes[key];
+            if (!pane) return false;
+            if (document.hidden) return false;
+            const cs = window.getComputedStyle(pane);
+            return cs && cs.display !== 'none' && cs.visibility !== 'hidden';
+        }
+        function stopLbPolling(){ if (lbPollTimer) { clearTimeout(lbPollTimer); lbPollTimer = null; } }
+        function startLbPolling(key){
+            stopLbPolling();
+            lbActiveTab = key;
+            const tick = async () => {
+                try {
+                    if (isPaneVisible(lbActiveTab)) {
+                        if (lbActiveTab === 'predictors') loadLBPredictors({ forceRevalidate: true, skipIfNotUpdated: true });
+                        else if (lbActiveTab === 'rich') loadLBRich({ forceRevalidate: true, skipIfNotUpdated: true });
+                        else if (lbActiveTab === 'server') loadLBServer({ forceRevalidate: true, skipIfNotUpdated: true });
+                        // prizes не требует частого обновления
+                    }
+                } catch(_) {}
+                const delay = LB_POLL_MS + Math.floor(Math.random() * LB_JITTER_MS);
+                lbPollTimer = setTimeout(tick, delay);
+            };
+            // первый запуск с лёгкой задержкой, чтобы не мешать первичной загрузке
+            lbPollTimer = setTimeout(tick, 1200);
+        }
+
         tabs.forEach(btn => {
             btn.setAttribute('data-throttle', '600');
             btn.addEventListener('click', () => {
@@ -733,10 +765,22 @@
                 else if (key === 'rich') loadLBRich();
                 else if (key === 'server') loadLBServer();
                 else if (key === 'prizes') loadLBPrizes();
+                // перезапускаем пуллинг под активную вкладку
+                if (key === 'predictors' || key === 'rich' || key === 'server') startLbPolling(key); else stopLbPolling();
             });
         });
         // первичная загрузка
         loadLBPredictors();
+        startLbPolling('predictors');
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopLbPolling();
+            } else {
+                // возобновляем только если панель лидеров видима
+                const visibleKey = lbActiveTab;
+                if (visibleKey === 'predictors' || visibleKey === 'rich' || visibleKey === 'server') startLbPolling(visibleKey);
+            }
+        });
     }
 
     function etagFetch(url, cacheKey) {
@@ -754,13 +798,16 @@
             .catch(err => { if (cached) return cached; throw err; });
     }
 
-    function loadLBPredictors() {
+    function loadLBPredictors(opts) {
+        const forceRevalidate = !!(opts && opts.forceRevalidate);
+        const skipIfNotUpdated = !!(opts && opts.skipIfNotUpdated);
         const table = document.querySelector('#lb-predictors tbody');
         const updated = document.getElementById('lb-predictors-updated');
         if (!table) return;
         if (window.fetchEtag) {
-            window.fetchEtag('/api/leaderboard/top-predictors', { cacheKey: 'lb:predictors', swrMs: 30000, extract: j => j })
-                .then(({ data }) => {
+            window.fetchEtag('/api/leaderboard/top-predictors', { cacheKey: 'lb:predictors', swrMs: 60000, extract: j => j, forceRevalidate })
+                .then(({ data, updated: isUpdated }) => {
+                    if (skipIfNotUpdated && !isUpdated) return; // ничего не меняем
                     const items = data?.items || [];
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
@@ -776,7 +823,7 @@
                     }
                 })
                 .catch(err => console.error('lb predictors err', err));
-        } else {
+    } else {
             etagFetch('/api/leaderboard/top-predictors', 'lb:predictors')
                 .then(store => {
                     const items = store?.data?.items || [];
@@ -797,13 +844,16 @@
         }
     }
 
-    function loadLBRich() {
+    function loadLBRich(opts) {
+        const forceRevalidate = !!(opts && opts.forceRevalidate);
+        const skipIfNotUpdated = !!(opts && opts.skipIfNotUpdated);
         const table = document.querySelector('#lb-rich tbody');
         const updated = document.getElementById('lb-rich-updated');
         if (!table) return;
         if (window.fetchEtag) {
-            window.fetchEtag('/api/leaderboard/top-rich', { cacheKey: 'lb:rich', swrMs: 30000, extract: j => j })
-                .then(({ data }) => {
+            window.fetchEtag('/api/leaderboard/top-rich', { cacheKey: 'lb:rich', swrMs: 60000, extract: j => j, forceRevalidate })
+                .then(({ data, updated: isUpdated }) => {
+                    if (skipIfNotUpdated && !isUpdated) return;
                     const items = data?.items || [];
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
@@ -819,7 +869,7 @@
                     }
                 })
                 .catch(err => console.error('lb rich err', err));
-        } else {
+    } else {
             etagFetch('/api/leaderboard/top-rich', 'lb:rich')
                 .then(store => {
                     const items = store?.data?.items || [];
@@ -840,13 +890,16 @@
         }
     }
 
-    function loadLBServer() {
+    function loadLBServer(opts) {
+        const forceRevalidate = !!(opts && opts.forceRevalidate);
+        const skipIfNotUpdated = !!(opts && opts.skipIfNotUpdated);
         const table = document.querySelector('#lb-server tbody');
         const updated = document.getElementById('lb-server-updated');
         if (!table) return;
         if (window.fetchEtag) {
-            window.fetchEtag('/api/leaderboard/server-leaders', { cacheKey: 'lb:server', swrMs: 30000, extract: j => j })
-                .then(({ data }) => {
+            window.fetchEtag('/api/leaderboard/server-leaders', { cacheKey: 'lb:server', swrMs: 60000, extract: j => j, forceRevalidate })
+                .then(({ data, updated: isUpdated }) => {
+                    if (skipIfNotUpdated && !isUpdated) return;
                     const items = data?.items || [];
                     table.innerHTML = '';
                     items.forEach((it, idx) => {

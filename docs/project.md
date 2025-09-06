@@ -83,6 +83,7 @@
     - Серверные эндпоинты (ETag): `app.py` → `/api/leaderboard/*`, `/api/achievements`
     - Клиентские вызовы: `static/js/profile.js` (leaderboards) и `static/js/profile-achievements.js`
     - Универсальная утилита SWR/ETag: `static/js/etag-fetch.js`
+    - Поведение обновления: лидерборды обновляются через ETag‑пуллинг каждые ~60с с джиттером, отменяется при скрытии вкладки и при переходе на другие сабвкладки (реализовано в `static/js/profile.js`).
 
 - Новости
     - Публичный API: `app.py` → `GET /api/news`
