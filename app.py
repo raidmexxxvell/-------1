@@ -999,19 +999,22 @@ def api_betting_place():
             ws_manager = current_app.config.get('websocket_manager')
             if ws_manager:
                 # Пересчитываем коэффициенты после ставки
-                recalculated_odds = _compute_match_odds(home, away, bet.match_datetime.date().isoformat() if bet.match_datetime else None)
-                
-                # Формируем уникальный ID матча
-                match_id_str = f"{home}_{away}_{bet.match_datetime.date().isoformat() if bet.match_datetime else ''}"
-                
+                date_key = bet.match_datetime.date().isoformat() if bet.match_datetime else None
+                recalculated_odds = _compute_match_odds(home, away, date_key)
+                # Текущая версия коэффициентов; при ставке можем не повышать версию, но отправим её в payload
+                try:
+                    cur_ver = _get_odds_version(home, away)
+                except Exception:
+                    cur_ver = 0
                 payload = {
                     'entity': 'odds',
-                    'id': match_id_str,
-                    'fields': recalculated_odds
+                    'id': { 'home': home, 'away': away, 'date': (date_key or '') },
+                    'fields': { **recalculated_odds, 'odds_version': cur_ver }
                 }
-                
+
                 # Отправляем в комнату конкретного матча и в общую комнату прогнозов
                 # Используем emit_to_topic_batched для умной группировки
+                match_id_str = f"{home}_{away}_{date_key or ''}"
                 ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=3500)
                 ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=3500)
         except Exception as e:
@@ -5920,6 +5923,23 @@ def api_vote_match():
             try:
                 db.add(MatchVote(home=home, away=away, date_key=date_key, user_id=uid, choice=choice))
                 db.commit()
+                # --- НОВОЕ: после успешного голоса — пересчёт и WS оповещение коэффициентов ---
+                try:
+                    ws_manager = current_app.config.get('websocket_manager')
+                    if ws_manager:
+                        # bump версии коэффициентов (голос влияет на odds)
+                        new_ver = _bump_odds_version(home, away)
+                        recalculated_odds = _compute_match_odds(home, away, date_key)
+                        payload = {
+                            'entity': 'odds',
+                            'id': { 'home': home, 'away': away, 'date': (date_key or '') },
+                            'fields': { **recalculated_odds, 'odds_version': new_ver }
+                        }
+                        match_id_str = f"{home}_{away}_{date_key or ''}"
+                        ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=3500)
+                        ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=3500)
+                except Exception as _e:
+                    app.logger.error(f"vote ws error: {_e}")
                 return jsonify({'status': 'ok'})
             except IntegrityError:
                 db.rollback()

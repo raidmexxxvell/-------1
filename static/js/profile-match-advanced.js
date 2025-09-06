@@ -97,7 +97,14 @@
           const ver = store?.version || store?.etag || null;
           if(store && ver && ver !== lastVersion){
             lastVersion = ver;
-            try { if(window.MatchRostersEvents?.render) window.MatchRostersEvents.render(match, store.data, mdPane, { homePane, awayPane }); } catch(_){}
+            try {
+              // Если недавно были админские изменения карточек (желт/красн/гол/ассист), не перерисовываем составы мгновенно, чтобы избежать фликера селектов.
+              const ts = Number(mdPane.getAttribute('data-admin-last-change-ts')||'0')||0;
+              const justChanged = ts && (Date.now() - ts < 8000); // 8с грейс
+              if (!justChanged) {
+                if(window.MatchRostersEvents?.render) window.MatchRostersEvents.render(match, store.data, mdPane, { homePane, awayPane });
+              }
+            } catch(_){}
           }
         } finally {
           busy=false; schedule();

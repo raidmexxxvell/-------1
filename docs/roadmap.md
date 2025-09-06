@@ -86,7 +86,7 @@
   - [x] PR-2: Внедрён topic-based publishing pipeline — `smart_invalidator.publish_topic(topic,event,payload,priority)` публикует локально и в Redis `app:topic`.
   - [x] PR-2a: Флаги `WEBSOCKETS_ENABLED` и `WS_TOPIC_SUBSCRIPTIONS_ENABLED` добавлены; клиент выполняет pre-probe перед подключением Socket.IO и автоподписку на `match:{home}__{away}__{date}:details`.
   - [x] PR-3: Server-side batching/debounce реализован в `optimizations/websocket_manager.py` с per-topic buffers и priority bypass для критичных событий; дефолтный debounce — 180ms.
-  - [x] Polling fallbacks добавлены: match details — 5s + ETag; match stats — 10–15s + ETag.
+  - [x] Polling fallbacks добавлены: match details — 5s + ETag; match stats — 10–15s + ETag; predictions odds — ~3.5–4.7s + ETag (видимые карточки, минимальные DOM‑патчи, остановка при «Мои ставки»/скрытии вкладки).
 
   Короткие заметки по дальнейшим шагам (next steps):
   - [ ] Добавить admin-only endpoint для метрик WS (`/health/perf`) и экспонировать `WebSocketManager.get_metrics()`.
@@ -286,6 +286,9 @@ Fallback при отключённых WebSockets (free tier Render):
 - UI: унифицирован текст нижней навигации на «Лига», согласованы подписи лиг в drawer/shelf и шаблонах.
 - Кэширование/ETag: серверный `etag_json` применён к `/api/schedule`, `/api/results`, `/api/match-details` (private), клиент использует `fetchEtag`/`fetchMatchDetails`.
 - Надёжность: внедрён централизованный DB retry helper; `my-bets` + лидеры/достижения/составы покрыты retry для чтений (OperationalError/SSL EOF), без изменения ответа.
+
+- Прогнозы: добавлен fallback ETag‑пуллинг коэффициентов (3.5–4.7с) при выключенных WS; обновляются только подписи П1/Х/П2, цикл останавливается при переключении на «Мои ставки» и при скрытии вкладки.
+- Детали матча (админ): добавлен анти‑фликер перерисовки составов/событий — в течение ~8с после локального админского изменения подавляется автообновление от опроса, чтобы устранить мерцание UI.
 
 UI / UX мелкие правки (быстрый финиш)
   - [x] Стилизованная модалка подтверждения в стиле приложения (замена native confirm)

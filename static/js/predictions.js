@@ -24,7 +24,7 @@
         if (pMap[key]) {
           pMap[key].style.display = '';
           if (key === 'place') loadTours();
-          if (key === 'mybets') loadMyBets();
+          if (key === 'mybets') { try { if (wrap.__oddsPollCancel) wrap.__oddsPollCancel(); } catch(_){} loadMyBets(); }
         }
       });
     });
@@ -214,10 +214,66 @@
           if (shouldWrite) writeCache(store);
           return store;
         });
+
+      // Fallback-пуллинг коэффициентов при отключённых WebSocket: обновляем кнопки П1/Х/П2 по ETag каждые ~5-6.5с
+      const startOddsPolling = (initialVersion) => {
+        try { if (wrap.__oddsPollCancel) wrap.__oddsPollCancel(); } catch(_){}
+        if (window.__WEBSOCKETS_ENABLED__) return; // используем только без WS
+        let cancelled = false, busy = false, timer = null;
+        let lastVersion = initialVersion || (cached && cached.version) || null;
+        wrap.__oddsPollCancel = () => { cancelled = true; try { if (timer) clearTimeout(timer); } catch(_){} };
+        const applyOddsFromStore = (store) => {
+          try {
+            const tours = store?.data?.tours || store?.tours || [];
+            if (!Array.isArray(tours) || tours.length === 0) return;
+            const map = new Map();
+            tours.forEach(t => (t.matches||[]).forEach(m => {
+              const matchDate = (m.date || m.datetime || '').slice(0,10);
+              const id = `${m.home}_${m.away}_${matchDate}`;
+              map.set(id, m.odds || {});
+            }));
+            const cards = toursEl.querySelectorAll('.pred-tours-container .match-card[data-match-id]');
+            cards.forEach(card => {
+              const id = card.getAttribute('data-match-id');
+              const odds = map.get(id);
+              if (!odds) return;
+              const buttons = card.querySelectorAll('.bet-btn[data-bet-key]');
+              buttons.forEach(btn => {
+                const key = btn.dataset.betKey;
+                const label = { home: 'П1', draw: 'Х', away: 'П2' }[key];
+                if (label && odds[key] != null) {
+                  const newText = `${label} (${Number(odds[key]).toFixed(2)})`;
+                  if (btn.textContent !== newText) {
+                    btn.textContent = newText;
+                    btn.classList.add('updated');
+                    setTimeout(() => btn.classList.remove('updated'), 500);
+                  }
+                }
+              });
+            });
+          } catch(_) {}
+        };
+  const schedule = () => { if (cancelled) return; const base=3500, jitter=1200; timer = setTimeout(loop, base + Math.floor(Math.random()*jitter)); };
+        const loop = async () => {
+          if (cancelled) return;
+          const placeVisible = pMap.place && pMap.place.style.display !== 'none' && wrap.style.display !== 'none';
+          if (document.hidden || !placeVisible) { schedule(); return; }
+          if (busy) { schedule(); return; }
+          busy = true;
+          try {
+            const store = await fetchWithETag(lastVersion).catch(()=>null);
+            if (store && store.version && store.version !== lastVersion) {
+              lastVersion = store.version;
+              applyOddsFromStore(store);
+            }
+          } finally { busy = false; schedule(); }
+        };
+        schedule();
+      };
   if (cached && cached.version) {
-        fetchWithETag(cached.version).then(renderTours).catch(()=>{}).finally(()=>{ _toursLoading = false; });
+        fetchWithETag(cached.version).then((store)=>{ renderTours(store); startOddsPolling(store?.version); }).catch(()=>{}).finally(()=>{ _toursLoading = false; });
       } else {
-        fetchWithETag(null).then(renderTours).catch(err => {
+        fetchWithETag(null).then((store)=>{ renderTours(store); startOddsPolling(store?.version); }).catch(err => {
           
           if (!cached) toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
         }).finally(()=>{ _toursLoading = false; });
