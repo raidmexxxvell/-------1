@@ -494,21 +494,8 @@
             })();
             if (dtText) { sub.textContent = dtText; card.appendChild(sub); }
             const center = document.createElement('div'); center.className = 'match-center';
-            // Локальный загрузчик логотипов (не зависит от других модулей)
-            const loadLogo = (imgEl, teamName) => {
-                const base = '/static/img/team-logos/';
-                const name = (teamName || '').trim();
-                const candidates = [];
-                try { imgEl.loading = 'lazy'; imgEl.decoding = 'async'; } catch(_) {}
-                if (name) {
-                    const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
-                    candidates.push(base + encodeURIComponent(norm + '.png'));
-                }
-                candidates.push(base + 'default.png');
-                let idx = 0;
-                const tryNext = () => { if (idx >= candidates.length) return; imgEl.onerror = () => { idx++; tryNext(); }; imgEl.src = candidates[idx]; };
-                tryNext();
-            };
+            // Единый загрузчик логотипов
+            const loadLogo = (imgEl, teamName) => { try { (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(imgEl, teamName||''); } catch(_) {} };
             const L = (name) => { const t = document.createElement('div'); t.className = 'team'; const i = document.createElement('img'); i.className='logo'; loadLogo(i, name||''); const n = document.createElement('div'); n.className='team-name'; n.textContent = name||''; t.append(i, n); return t; };
             const scoreEl = document.createElement('div'); scoreEl.className='score'; scoreEl.textContent='VS';
             center.append(L(m.home), scoreEl, L(m.away));

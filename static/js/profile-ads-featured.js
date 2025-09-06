@@ -94,7 +94,7 @@
       const dtText = (()=>{ try { if(m.datetime){ const dt=new Date(m.datetime); return dt.toLocaleString(undefined,{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});} if(m.date){ return m.time?`${m.date} ${m.time}`:String(m.date);} } catch(_){} return ''; })();
       if (dtText) { sub.textContent=dtText; card.appendChild(sub); }
       const center = document.createElement('div'); center.className='match-center';
-      const loadLogo = (imgEl, teamName) => { const base='/static/img/team-logos/'; const name=(teamName||'').trim(); const candidates=[]; try { imgEl.loading='lazy'; imgEl.decoding='async'; } catch(_){} if(name){ const norm=name.toLowerCase().replace(/\s+/g,'').replace(/ё/g,'е'); candidates.push(base+encodeURIComponent(norm+'.png')); } candidates.push(base+'default.png'); let idx=0; const tryNext=()=>{ if(idx>=candidates.length)return; imgEl.onerror=()=>{ idx++; tryNext(); }; imgEl.src=candidates[idx]; }; tryNext(); };
+  const loadLogo = (imgEl, teamName) => { try { (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(imgEl, teamName||''); } catch(_) {} };
       const L = (name)=>{ const t=document.createElement('div'); t.className='team'; const i=document.createElement('img'); i.className='logo'; loadLogo(i,name||''); const n=document.createElement('div'); n.className='team-name'; n.textContent=name||''; t.append(i,n); return t; };
       const scoreEl=document.createElement('div'); scoreEl.className='score'; scoreEl.textContent='VS';
       center.append(L(m.home), scoreEl, L(m.away)); card.appendChild(center);

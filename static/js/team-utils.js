@@ -19,10 +19,12 @@
       'полет': '#fdfdfc',
       'дождь': '#292929',
       'киборги': '#f4f3fb',
-      'фкобнинск': '#eb0000',
+  'фкобнинск': '#eb0000',
+  'обнинск': '#eb0000',
       'ювелиры': '#333333',
       'звезда': '#a01818',
-      'фкsetka4real': '#000000',
+  'фкsetka4real': '#000000',
+  'setka4real': '#000000',
       'серпантин': '#141098',
       'креатив': '#98108c'
     };
@@ -35,10 +37,10 @@
     if (name){
       const norm = normalizeTeamName(name);
       if (norm) {
-        // Основной нормализованный вариант
-        candidates.push(LOGO_BASE + encodeURIComponent(norm + '.png'));
-        // Вариант с приставкой "фк" (в директории сейчас файлы вида фкобнинск.png, фкsetka4real.png)
+        // Сначала пробуем вариант с приставкой "фк" (чаще соответствует файлам в директории)
         if (!norm.startsWith('фк')) candidates.push(LOGO_BASE + encodeURIComponent('фк' + norm + '.png'));
+        // Затем — основной нормализованный вариант
+        candidates.push(LOGO_BASE + encodeURIComponent(norm + '.png'));
       }
     }
     candidates.push(LOGO_BASE + 'default.png');

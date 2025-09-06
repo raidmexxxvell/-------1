@@ -18,6 +18,23 @@
 - Error modes: недоставленные сообщения (client offline) — клиенты должны при reconnect запрашивать full state с If-None-Match.
 - Success: клиент применил patch и версия согласована (v полей >= локальной).
 
+## Статус реализации (2025-09-06)
+
+- [x] PR-2 выполнен: `optimizations/smart_invalidator.py` публикует topic-сообщения в Redis канал `app:topic` и вызывает локально `websocket_manager.emit_to_topic`.
+- [x] PR-2a выполнен: клиентские флаги `WEBSOCKETS_ENABLED` и `WS_TOPIC_SUBSCRIPTIONS_ENABLED` добавлены, frontend делает pre-probe и автоподписывается на топик `match:{home}__{away}__{date}:details` при открытии match-details.
+- [x] PR-3 выполнен: `optimizations/websocket_manager.py` содержит per-topic буферы и `emit_to_topic_batched` с агрегацией `data_patch` полей, deep-merge для полей patch, и priority bypass (priority>0 отправляется немедленно). Дефолтный debounce: 180ms.
+
+Изменённые файлы (локально):
+- `optimizations/smart_invalidator.py` — publish_topic, Redis `app:topic` handling.
+- `optimizations/websocket_manager.py` — emit_to_topic_batched, topic buffers, metrics.
+- `app.py` — админ-эндпоинты (score/events/stats) вызывают `publish_topic(...)` после коммита.
+- `static/js/profile-match-advanced.js`, `static/js/profile-match-stats.js` — polling fallbacks (5s / 10-15s) и lifecycle cancellation; `static/js/team-utils.js` — унифицированный загрузчик логотипов.
+
+Next steps (recommended):
+- Добавить админ‑эндпоинт `/health/perf` (admin-only) для экспорта `ws_messages_sent/ws_messages_batched/ws_messages_bypass` и других метрик.
+- Подготовить unit-тесты для батчинга и интеграционные тесты для Redis pub/sub (CI run).
+- Планировать канареечный rollout MessagePack/delta (5% клиентов) после валидации метрик.
+
 ## Критерии приёмки
 - Снижение количества WS сообщений/min ≥ 30% в пилотных матчах (после batching). (метрика)
 - Корректность UI: нет регрессий при reconnect и при race conditions (optimistic updates rollback работает).

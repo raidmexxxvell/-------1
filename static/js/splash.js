@@ -64,12 +64,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 '/static/img/logo_liga.png',
                 '/static/img/placeholderlogo.png'
             ];
+            // Дополнительно прогреваем только существующие варианты логотипов (по соглашению файлов)
             core.concat([
-                // Специально прогреваем часто мерцающие командные логотипы
                 '/static/img/team-logos/фкобнинск.png',
-                '/static/img/team-logos/фкsetka4real.png',
-                '/static/img/team-logos/setka4real.png',
-                '/static/img/team-logos/обнинск.png'
+                '/static/img/team-logos/фкsetka4real.png'
             ]).forEach(u=>{ const im=new Image(); im.decoding='async'; im.src=u; });
             // Через небольшой интервал попробуем захватить уже вставленные логотипы команд
             setTimeout(()=>{

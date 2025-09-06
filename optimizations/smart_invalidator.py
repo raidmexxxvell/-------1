@@ -18,6 +18,7 @@ class InvalidationRule:
 
 class SmartCacheInvalidator:
     REDIS_CHANNEL = 'app:invalidation'
+    REDIS_TOPIC_CHANNEL = 'app:topic'
 
     def __init__(self, cache_manager, websocket_manager=None):
         self.cache_manager = cache_manager
@@ -94,6 +95,36 @@ class SmartCacheInvalidator:
                 self.subscriber_thread.start()
             except Exception:
                 self.subscriber_thread = None
+
+    def publish_topic(self, topic: str, event: str, payload: Dict, priority: int = 0) -> None:
+        """Публикует сообщение для конкретного топика (room) и локально эмитит через WS.
+        Формат для Redis: {event, topic, payload, priority} на канале REDIS_TOPIC_CHANNEL.
+        """
+        try:
+            # Локальная доставка (если есть WS менеджер)
+            if self.websocket_manager and topic and event:
+                try:
+                    # Используем батчированный эмит (PR-3) с приоритетом
+                    # data_patch/topic_update — совместимо с клиентским обработчиком
+                    if hasattr(self.websocket_manager, 'emit_to_topic_batched'):
+                        self.websocket_manager.emit_to_topic_batched(topic, event, payload or {}, priority=int(priority or 0))
+                    else:
+                        self.websocket_manager.emit_to_topic(topic, event, payload or {})
+                except Exception:
+                    pass
+            # Публикация для других инстансов
+            if self.redis_client and topic and event:
+                try:
+                    self.redis_client.publish(self.REDIS_TOPIC_CHANNEL, json.dumps({
+                        'event': event,
+                        'topic': topic,
+                        'payload': payload or {},
+                        'priority': int(priority or 0)
+                    }))
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def invalidate_for_change(self, change_type: str, context: Dict = None) -> bool:
         """
@@ -190,7 +221,7 @@ class SmartCacheInvalidator:
     def _redis_subscribe_loop(self):
         try:
             pubsub = self.redis_client.pubsub(ignore_subscribe_messages=True)
-            pubsub.subscribe(self.REDIS_CHANNEL)
+            pubsub.subscribe(self.REDIS_CHANNEL, self.REDIS_TOPIC_CHANNEL)
             for message in pubsub.listen():
                 try:
                     if not message or message.get('type') != 'message':
@@ -199,31 +230,51 @@ class SmartCacheInvalidator:
                     if isinstance(data, bytes):
                         data = data.decode('utf-8')
                     payload = json.loads(data)
-                    change_type = payload.get('change_type')
-                    context = payload.get('context') or {}
-                    # локальная инвалидация и отправка уведомления (не публикуем обратно)
-                    try:
-                        with self.lock:
-                            rule = self.invalidation_rules.get(change_type)
-                            if rule:
-                                for cache_type in rule.affected_caches:
+                    channel = message.get('channel')
+                    # redis-py returns channel as bytes sometimes
+                    if isinstance(channel, bytes):
+                        channel = channel.decode('utf-8')
+                    if channel == self.REDIS_CHANNEL:
+                        change_type = payload.get('change_type')
+                        context = payload.get('context') or {}
+                        # локальная инвалидация и отправка уведомления (не публикуем обратно)
+                        try:
+                            with self.lock:
+                                rule = self.invalidation_rules.get(change_type)
+                                if rule:
+                                    for cache_type in rule.affected_caches:
+                                        try:
+                                            if rule.identifier_pattern and context:
+                                                identifier = rule.identifier_pattern.format(**context)
+                                                self.cache_manager.invalidate(cache_type, identifier)
+                                                self.cache_manager.invalidate(cache_type)
+                                            else:
+                                                self.cache_manager.invalidate(cache_type)
+                                        except Exception:
+                                            pass
+                                if rule and rule.broadcast_update and self.websocket_manager:
                                     try:
-                                        if rule.identifier_pattern and context:
-                                            identifier = rule.identifier_pattern.format(**context)
-                                            self.cache_manager.invalidate(cache_type, identifier)
-                                            self.cache_manager.invalidate(cache_type)
-                                        else:
-                                            self.cache_manager.invalidate(cache_type)
+                                        # отправляем уведомление локально
+                                        self._send_update_notification(change_type, context, payload)
                                     except Exception:
                                         pass
-                            if rule and rule.broadcast_update and self.websocket_manager:
+                        except Exception:
+                            pass
+                    elif channel == self.REDIS_TOPIC_CHANNEL:
+                        try:
+                            topic = payload.get('topic')
+                            event = payload.get('event') or 'topic_update'
+                            body = payload.get('payload') or {}
+                            if self.websocket_manager and topic:
                                 try:
-                                    # отправляем уведомление локально
-                                    self._send_update_notification(change_type, context, payload)
+                                    if hasattr(self.websocket_manager, 'emit_to_topic_batched'):
+                                        self.websocket_manager.emit_to_topic_batched(topic, event, body, priority=int(payload.get('priority') or 0))
+                                    else:
+                                        self.websocket_manager.emit_to_topic(topic, event, body)
                                 except Exception:
                                     pass
-                    except Exception:
-                        pass
+                        except Exception:
+                            pass
                 except Exception:
                     continue
         except Exception as e:

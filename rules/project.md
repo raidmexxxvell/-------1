@@ -285,6 +285,19 @@ class Tournament(Base):
 - Включена фоновая очистка протухших записей in-memory кэша (`MultiLevelCache.cleanup_expired()`) каждые 5 минут — снижает риск роста памяти.
 - В `etag_json` добавлена периодическая зачистка устаревших записей (sweep) — контролируемый размер локального ETag-кэша.
 
+### 2025-09-06 (PR-2 / PR-3 статус)
+
+- [x] PR-2: topic-based publish pipeline — реализована публикация topic-сообщений из `optimizations/smart_invalidator.py` в канал Redis `app:topic` и локальная отправка в `optimizations/websocket_manager.py`.
+- [x] PR-2a: frontend flags и autosubscribe — добавлены env-флаги `WEBSOCKETS_ENABLED` и `WS_TOPIC_SUBSCRIPTIONS_ENABLED`, клиент делает pre-probe перед подключением Socket.IO и автоподписывается на `match:{home}__{away}__{date}:details` при открытии экрана.
+- [x] PR-3: server-side per-topic batching/debounce — `optimizations/websocket_manager.py` получил буферизацию по топикам, агрегацию `data_patch` полей и приоритетный bypass для критичных событий (гол/красная карточка). По умолчанию debounce ≈180ms; priority>0 отправляет немедленно.
+
+Короткие ссылки на код (локально в репозитории):
+- `optimizations/smart_invalidator.py` — `publish_topic(topic,event,payload,priority=0)` и подписчик Redis теперь слушает `app:topic`.
+- `optimizations/websocket_manager.py` — `emit_to_topic_batched(topic,event,data,priority,delay_ms)` и метрики `ws_messages_sent/ws_messages_batched/ws_messages_bypass`.
+- `static/js/profile-match-advanced.js`, `static/js/profile-match-stats.js` — polling fallback (details 5s + ETag, stats 10-15s + ETag) и lifecycle cancellation.
+
+Примечание: Реализация безопасна для бесплатного Render-слоя — WebSocket включается через флаги, а при выключенном WS используется ETag-подход с опросом.
+
 План Этап 2 (безопасные улучшения):
 - Подстроить TTL в `optimizations/multilevel_cache.py` для `schedule`/`results` с акцентом на снижение холодных загрузок — выполнено.
 - Мягкий debounce (~250мс) на стороне сервера перед широковещательными WebSocket-патчами — реализовано (с безопасным fallback на прямую отправку).

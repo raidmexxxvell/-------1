@@ -19,11 +19,11 @@
     const hName=document.getElementById('md-home-name'); const aName=document.getElementById('md-away-name');
     const score=document.getElementById('md-score'); const dt=document.getElementById('md-datetime');
     const homePane=document.getElementById('md-pane-home'); const awayPane=document.getElementById('md-pane-away');
-    const setLogo=(imgEl,name)=>{ const base='/static/img/team-logos/'; const candidates=[]; if(name){ const norm=name.toLowerCase().replace(/\s+/g,'').replace(/ё/g,'е'); candidates.push(base+encodeURIComponent(norm+'.png')+`?v=${Date.now()}`);} candidates.push(base+'default.png'+`?v=${Date.now()}`); let i=0; const next=()=>{ if(i>=candidates.length)return; imgEl.onerror=()=>{ i++; next(); }; imgEl.src=candidates[i]; }; next(); };
+  const setLogo=(imgEl,name)=>{ try { (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(imgEl, name||''); } catch(_) {} };
     hName.setAttribute('data-team-name', match.home || ''); aName.setAttribute('data-team-name', match.away || '');
     hName.textContent = (window.withTeamCount?window.withTeamCount(match.home||''):(match.home||''));
     aName.textContent = (window.withTeamCount?window.withTeamCount(match.away||''):(match.away||''));
-    setLogo(hLogo, match.home||''); setLogo(aLogo, match.away||''); score.textContent='— : —';
+  setLogo(hLogo, match.home||''); setLogo(aLogo, match.away||''); score.textContent='— : —';
     try { if (match.date || match.time){ const d=match.date? new Date(match.date):null; const ds=d?d.toLocaleDateString():''; dt.textContent = `${ds}${match.time? ' '+match.time:''}`; } else dt.textContent=''; } catch(_) { dt.textContent = match.time||''; }
     const subtabs = mdPane.querySelector('.modal-subtabs');
     // PR-2a: topic-based автоподписка на детали матча (если включено)

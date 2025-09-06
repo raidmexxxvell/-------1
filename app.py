@@ -6508,6 +6508,7 @@ def api_match_score_set():
             # Отправляем компактный патч через WebSocket (если доступен)
             try:
                 ws = app.config.get('websocket_manager')
+                inv = globals().get('invalidator')
                 if ws:
                     # bump версию коэффициентов (на будущее - если логика будет зависеть от счёта)
                     new_ver = _bump_odds_version(home, away)
@@ -6542,6 +6543,20 @@ def api_match_score_set():
                                 entity_id={'home': home, 'away': away},
                                 fields=odds_fields
                             )
+                # Таргетированный topic-update для деталей матча (если включено в клиенте)
+                try:
+                    if inv:
+                        dt = _get_match_datetime(home, away)
+                        date_str = dt.isoformat()[:10] if dt else ''
+                        topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
+                        inv.publish_topic(topic, 'data_patch', {
+                            'type': 'data_patch',
+                            'entity': 'match',
+                            'id': {'home': home, 'away': away},
+                            'fields': {'score_home': row.score_home, 'score_away': row.score_away, 'odds_version': new_ver}
+                        }, priority=1)
+                except Exception:
+                    pass
             except Exception:
                 pass
             # Зеркалим счёт в Google Sheets (best-effort), как числовые значения
@@ -6999,6 +7014,23 @@ def api_match_events_add():
             db.commit()
             # Попытка синхронизации в расширенную схему (не критично при ошибке)
             _maybe_sync_event_to_adv_schema(home, away, player, etype)
+            # Таргетированное уведомление в топик деталей матча (events изменились)
+            try:
+                inv = globals().get('invalidator')
+                if inv:
+                    dt = _get_match_datetime(home, away)
+                    date_str = dt.isoformat()[:10] if dt else ''
+                    topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
+                    inv.publish_topic(topic, 'topic_update', {
+                        'entity': 'match_events',
+                        'home': home,
+                        'away': away,
+                        'team': team,
+                        'type': etype,
+                        'player': player
+                    }, priority=1)
+            except Exception:
+                pass
             return jsonify({'status': 'ok', 'id': int(row.id)})
         finally:
             db.close()
@@ -7044,6 +7076,23 @@ def api_match_events_remove():
             rid = int(row.id)
             db.delete(row)
             db.commit()
+            # Уведомление в топик деталей матча об изменении событий
+            try:
+                inv = globals().get('invalidator')
+                if inv:
+                    dt = _get_match_datetime(home, away)
+                    date_str = dt.isoformat()[:10] if dt else ''
+                    topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
+                    inv.publish_topic(topic, 'topic_update', {
+                        'entity': 'match_events_removed',
+                        'home': home,
+                        'away': away,
+                        'team': team,
+                        'type': etype,
+                        'player': player
+                    }, priority=1)
+            except Exception:
+                pass
             return jsonify({'status': 'ok', 'removed': 1, 'id': rid})
         finally:
             db.close()
@@ -9831,6 +9880,21 @@ def api_match_stats_set():
                 setattr(row, k, v)
             row.updated_at = datetime.now(timezone.utc)
             db.commit()
+            # Публикуем topic‑сообщение о статистике матча (неблокирующе)
+            try:
+                inv = globals().get('invalidator')
+                if inv:
+                    dt = _get_match_datetime(home, away)
+                    date_str = dt.isoformat()[:10] if dt else ''
+                    topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
+                    inv.publish_topic(topic, 'topic_update', {
+                        'entity': 'match_stats',
+                        'home': home,
+                        'away': away,
+                        'updated_at': row.updated_at.isoformat() if getattr(row, 'updated_at', None) else None
+                    }, priority=0)
+            except Exception:
+                pass
             return jsonify({'status':'ok'})
         finally:
             db.close()

@@ -20,7 +20,7 @@
     const dt = document.getElementById('md-datetime');
     const homePane = document.getElementById('md-pane-home');
     const awayPane = document.getElementById('md-pane-away');
-    const setLogo = (imgEl,name)=>{ const base='/static/img/team-logos/'; const candidates=[]; if(name){ const norm=name.toLowerCase().replace(/\s+/g,'').replace(/ё/g,'е'); candidates.push(base+encodeURIComponent(norm+'.png')+`?v=${Date.now()}`);} candidates.push(base+'default.png'+`?v=${Date.now()}`); let i=0; const next=()=>{ if(i>=candidates.length) return; imgEl.onerror=()=>{ i++; next(); }; imgEl.src=candidates[i]; }; next(); };
+  const setLogo = (imgEl,name)=>{ try { (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(imgEl, name||''); } catch(_) {} };
     hName.setAttribute('data-team-name', match.home||''); aName.setAttribute('data-team-name', match.away||'');
     hName.textContent = withTeamCount(match.home||''); aName.textContent = withTeamCount(match.away||'');
     setLogo(hLogo, match.home||''); setLogo(aLogo, match.away||'');

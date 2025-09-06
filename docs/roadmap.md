@@ -81,6 +81,18 @@
   - [x] Все крупные публичные и админские эндпоинты, возвращающие большие JSON, переведены на быстрый рендер через orjson (_json_response). Ошибки и мелкие ответы оставлены на jsonify для совместимости.
   - [x] Исправлены синтаксические ошибки и выравнивание try/except/finally после рефакторинга.
 
+  ### 2025-09-06 (Realtime: PR-2 / PR-3 внедрено)
+
+  - [x] PR-2: Внедрён topic-based publishing pipeline — `smart_invalidator.publish_topic(topic,event,payload,priority)` публикует локально и в Redis `app:topic`.
+  - [x] PR-2a: Флаги `WEBSOCKETS_ENABLED` и `WS_TOPIC_SUBSCRIPTIONS_ENABLED` добавлены; клиент выполняет pre-probe перед подключением Socket.IO и автоподписку на `match:{home}__{away}__{date}:details`.
+  - [x] PR-3: Server-side batching/debounce реализован в `optimizations/websocket_manager.py` с per-topic buffers и priority bypass для критичных событий; дефолтный debounce — 180ms.
+  - [x] Polling fallbacks добавлены: match details — 5s + ETag; match stats — 10–15s + ETag.
+
+  Короткие заметки по дальнейшим шагам (next steps):
+  - Добавить admin-only endpoint для метрик WS (`/health/perf`) и экспонировать `WebSocketManager.get_metrics()`.
+  - Написать unit-тесты на агрегацию вызовов `emit_to_topic_batched` и интеграционные тесты Redis pub/sub.
+  - Канареечный rollout MessagePack/delta в следующем спринте (5% клиентов).
+
 ### ⚡ Стратегия мгновенной синхронизации данных (новое)
 Внедряем набор паттернов для одновременного ускорения отклика и снижения нагрузки:
 1. Stale-While-Revalidate + ETag (универсально)
