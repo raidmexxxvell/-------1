@@ -977,6 +977,13 @@ def api_betting_place():
         # списываем кредиты
         db_user.credits = int(db_user.credits or 0) - stake
         db_user.updated_at = datetime.now(timezone.utc)
+        # Единый формат хранения коэффициента: строка с 2 знаками, ROUND_HALF_UP
+        from decimal import Decimal, ROUND_HALF_UP
+        try:
+            _k_str = str(Decimal(str(k)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+        except Exception:
+            _k_str = f"{k:.2f}"
+
         bet = Bet(
             user_id=user_id,
             tour=tour,
@@ -985,7 +992,7 @@ def api_betting_place():
             match_datetime=match_dt,
             market=market_to_store,
             selection=selection_to_store,
-            odds=f"{k:.2f}",
+            odds=_k_str,
             stake=stake,
             status='open',
             payout=0,
@@ -2645,6 +2652,15 @@ def _dc_outcome_probs(lam: float, mu: float, rho: float, max_goals: int = 8) -> 
 
 def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict:
     """Коэффициенты 1X2 по Dixon–Coles (Поассоны с коррекцией)."""
+    # Единое округление коэффициентов: 2 знака, ROUND_HALF_UP (как в ставках/отображении)
+    from decimal import Decimal, ROUND_HALF_UP
+    def _round_odd(n: float) -> float:
+        try:
+            d = Decimal(str(max(1.10, float(n))))
+            q = d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            return float(q)
+        except Exception:
+            return float(n)
     try:
         rho = float(os.environ.get('BET_DC_RHO', '-0.05'))
     except Exception:
@@ -2819,7 +2835,7 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
         pass
     def to_odds(p):
         try:
-            return round(max(1.10, 1.0 / (p * overround)), 2)
+            return _round_odd(1.0 / (p * overround))
         except Exception:
             return 1.10
     return {
@@ -2830,6 +2846,14 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
 
 def _compute_totals_odds(home: str, away: str, line: float) -> dict:
     """Коэффициенты тотала (Over/Under) по Dixon–Coles. Возвращает {'over': k, 'under': k}."""
+    from decimal import Decimal, ROUND_HALF_UP
+    def _round_odd(n: float) -> float:
+        try:
+            d = Decimal(str(max(1.10, float(n))))
+            q = d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            return float(q)
+        except Exception:
+            return float(n)
     try:
         rho = float(os.environ.get('BET_DC_RHO', '-0.05'))
     except Exception:
@@ -2860,13 +2884,21 @@ def _compute_totals_odds(home: str, away: str, line: float) -> dict:
     overround = 1.0 + BET_MARGIN
     def to_odds(p):
         try:
-            return round(max(1.10, 1.0 / (p * overround)), 2)
+            return _round_odd(1.0 / (p * overround))
         except Exception:
             return 1.10
     return {'over': to_odds(p_over), 'under': to_odds(p_under) }
 
 def _compute_specials_odds(home: str, away: str, market: str) -> dict:
     """Да/Нет события: биномиальная модель с базовой вероятностью и лёгкой поправкой по разнице сил."""
+    from decimal import Decimal, ROUND_HALF_UP
+    def _round_odd(n: float) -> float:
+        try:
+            d = Decimal(str(max(1.10, float(n))))
+            q = d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            return float(q)
+        except Exception:
+            return float(n)
     base_yes = 0.30
     if market == 'penalty':
         base_yes = float(os.environ.get('BET_BASE_PENALTY', '0.35'))
@@ -2908,7 +2940,7 @@ def _compute_specials_odds(home: str, away: str, market: str) -> dict:
     overround = 1.0 + BET_MARGIN
     def to_odds(p):
         try:
-            return round(max(1.10, 1.0 / (p * overround)), 2)
+            return _round_odd(1.0 / (p * overround))
         except Exception:
             return 1.10
     return { 'yes': to_odds(p_yes), 'no': to_odds(p_no) }
