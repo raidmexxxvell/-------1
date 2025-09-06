@@ -1619,9 +1619,13 @@ def api_admin_matches_upcoming():
                 if SessionLocal is not None:
                     db: Session = get_db()
                     try:
-                        rows = db.query(MatchLineupPlayer).filter(
-                            MatchLineupPlayer.home==home, MatchLineupPlayer.away==away
-                        ).all()
+                        rows, db = _db_retry_read(
+                            db,
+                            lambda s: s.query(MatchLineupPlayer).filter(
+                                MatchLineupPlayer.home==home, MatchLineupPlayer.away==away
+                            ).all(),
+                            attempts=2, backoff_base=0.1, label='lineups:admin:upcoming'
+                        )
                         if rows:
                             def pack(team, pos):
                                 return [
@@ -1685,7 +1689,11 @@ def api_admin_get_lineups(match_id: str):
         if SessionLocal is not None:
             db: Session = get_db()
             try:
-                rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
+                rows, db = _db_retry_read(
+                    db,
+                    lambda s: s.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all(),
+                    attempts=2, backoff_base=0.1, label='lineups:admin:get'
+                )
                 for r in rows:
                     entry = { 'name': r.player, 'number': r.jersey_number, 'position': None if r.position=='starting_eleven' else r.position }
                     bucket = 'main' if r.position=='starting_eleven' else 'sub'
@@ -1694,8 +1702,8 @@ def api_admin_get_lineups(match_id: str):
                 if not rows:
                     try:
                         from sqlalchemy import text as _sa_text
-                        home_rows = db.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': home}).fetchall()
-                        away_rows = db.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': away}).fetchall()
+                        home_rows, db = _db_retry_read(db, lambda s: s.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': home}).fetchall(), attempts=2, backoff_base=0.1, label='lineups:admin:get:roster-home')
+                        away_rows, db = _db_retry_read(db, lambda s: s.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': away}).fetchall(), attempts=2, backoff_base=0.1, label='lineups:admin:get:roster-away')
                         result['home']['main'] = [ { 'name': r.player, 'number': None, 'position': None } for r in home_rows ]
                         result['away']['main'] = [ { 'name': r.player, 'number': None, 'position': None } for r in away_rows ]
                     except Exception as _fe:
@@ -1844,7 +1852,11 @@ def api_public_match_lineups():
         if SessionLocal is not None:
             db: Session = get_db()
             try:
-                rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).order_by(MatchLineupPlayer.id.asc()).all()
+                rows, db = _db_retry_read(
+                    db,
+                    lambda s: s.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).order_by(MatchLineupPlayer.id.asc()).all(),
+                    attempts=2, backoff_base=0.1, label='lineups:public:get'
+                )
                 for r in rows:
                     # сохраняем порядок вставки и только имя игрока
                     if r.team in ('home','away'):
@@ -2067,6 +2079,134 @@ def get_db() -> Session:
     # Интеграция с системой мониторинга БД (Фаза 3)
     # Упрощено: просто возвращаем сессию; мониторинг запросов делается через SQLAlchemy events в DatabaseMiddleware
     return SessionLocal()
+
+# ---------------------- DB RETRY HELPER (централизованный) ----------------------
+# --- Lightweight DB retry metrics (process-local) ---
+if '_DB_RETRY_METRICS' not in globals():
+    _DB_RETRY_METRICS = {
+        'calls': 0,
+        'success': 0,
+        'failures': 0,
+        'retries': 0,
+        'transient_errors': 0,
+        'by_label': {}
+    }
+
+def _db_retry_read(session: Session, query_callable, *, attempts: int = 2, backoff_base: float = 0.1, label: str | None = None):
+    """Выполняет чтение из БД с ретраями на транзиентные ошибки.
+
+    Возвращает кортеж (result, session), где session — актуальная сессия после возможной переинициализации.
+    Не закрывает сессию — управление временем жизни остаётся на вызывающей стороне.
+    """
+    from sqlalchemy.exc import OperationalError, DisconnectionError
+    # метрики: регистрация вызова
+    try:
+        _DB_RETRY_METRICS['calls'] += 1
+        if label:
+            lab = _DB_RETRY_METRICS['by_label'].setdefault(label, {'calls':0,'success':0,'failures':0,'retries':0,'transient_errors':0})
+            lab['calls'] += 1
+    except Exception:
+        pass
+    attempt = 0
+    last_error = None
+    db = session
+    while attempt < attempts:
+        try:
+            res = query_callable(db)
+            # если были ретраи — запишем информационный лог
+            if attempt > 0:
+                try:
+                    app.logger.info(f"DB retry succeeded after {attempt} retries{(' ['+label+']') if label else ''}")
+                except Exception:
+                    pass
+            # метрики успеха
+            try:
+                _DB_RETRY_METRICS['success'] += 1
+                if label:
+                    _DB_RETRY_METRICS['by_label'][label]['success'] += 1
+            except Exception:
+                pass
+            return res, db
+        except (OperationalError, DisconnectionError) as oe:
+            last_error = oe
+            try:
+                app.logger.warning(f"DB transient error (attempt {attempt+1}){(' ['+label+']') if label else ''}: {oe}")
+            except Exception:
+                pass
+            # метрики транзиентных ошибок/ретраев
+            try:
+                _DB_RETRY_METRICS['transient_errors'] += 1
+                _DB_RETRY_METRICS['retries'] += 1
+                if label:
+                    lab = _DB_RETRY_METRICS['by_label'].setdefault(label, {'calls':0,'success':0,'failures':0,'retries':0,'transient_errors':0})
+                    lab['transient_errors'] += 1
+                    lab['retries'] += 1
+            except Exception:
+                pass
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            # Полное освобождение соединений пула и повтор
+            try:
+                if engine is not None:
+                    engine.dispose()
+            except Exception:
+                pass
+            try:
+                db.close()
+            except Exception:
+                pass
+            # Небольшой backoff
+            try:
+                time.sleep(backoff_base * (attempt + 1))
+            except Exception:
+                pass
+            db = SessionLocal() if SessionLocal else None
+            attempt += 1
+            continue
+        except Exception as e_any:
+            last_error = e_any
+            # метрики не-транзиентных ошибок
+            try:
+                _DB_RETRY_METRICS['failures'] += 1
+                if label:
+                    _DB_RETRY_METRICS['by_label'][label]['failures'] += 1
+            except Exception:
+                pass
+            # лог финального фейла
+            try:
+                app.logger.error(f"DB read failed without retryable error{(' ['+label+']') if label else ''}: {e_any}")
+            except Exception:
+                pass
+            raise
+
+# ------- Leaderboard small query helpers (no behavior change) -------
+def _lb_weekly_predictor_rows(ses: Session):
+    won_case = case((Bet.status == 'won', 1), else_=0)
+    period_start = _week_period_start_msk_to_utc()
+    q = (
+        ses.query(
+            User.user_id.label('user_id'),
+            (User.display_name).label('display_name'),
+            (User.tg_username).label('tg_username'),
+            func.count(Bet.id).label('bets_total'),
+            func.sum(won_case).label('bets_won')
+        )
+        .join(Bet, Bet.user_id == User.user_id)
+        .filter(Bet.placed_at >= period_start)
+        .group_by(User.user_id, User.display_name, User.tg_username)
+        .having(func.count(Bet.id) > 0)
+    )
+    return list(q)
+
+def _lb_monthly_baseline_rows(ses: Session, period_start):
+    return ses.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == period_start).all()
+
+def _lb_all_users(ses: Session):
+    return ses.query(User).all()
+    if last_error:
+        raise last_error
 
 def _generate_ref_code(uid: int) -> str:
     """Детерминированно генерирует короткий реф-код по user_id и BOT_TOKEN в качестве соли."""
@@ -3026,7 +3166,7 @@ def _etag_for_payload(payload: dict) -> str:
 
 # ---------------------- ETag JSON Helper ----------------------
 _ETAG_HELPER_CACHE = {}
-def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: int = 30, swr: int = 30, core_filter=None):
+def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: int = 30, swr: int = 30, core_filter=None, cache_visibility: str = 'public'):
     """Универсальный helper: строит или отдаёт из памяти JSON + ETag + SWR.
 
     endpoint_key: уникальный ключ (для персональных ответов включайте user_id)
@@ -3042,11 +3182,11 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
         if client_etag and client_etag == ce['etag']:
             resp = flask.make_response('', 304)
             resp.headers['ETag'] = ce['etag']
-            resp.headers['Cache-Control'] = f'public, max-age={max_age}, stale-while-revalidate={swr}'
+            resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
             return resp
         resp = jsonify({**ce['payload'], 'version': ce['etag']})
         resp.headers['ETag'] = ce['etag']
-        resp.headers['Cache-Control'] = f'public, max-age={max_age}, stale-while-revalidate={swr}'
+        resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
         return resp
     payload = builder_func() or {}
     try:
@@ -3058,11 +3198,11 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
     if client_etag and client_etag == etag:
         resp = flask.make_response('', 304)
         resp.headers['ETag'] = etag
-        resp.headers['Cache-Control'] = f'public, max-age={max_age}, stale-while-revalidate={swr}'
+        resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
         return resp
     resp = jsonify({**payload, 'version': etag})
     resp.headers['ETag'] = etag
-    resp.headers['Cache-Control'] = f'public, max-age={max_age}, stale-while-revalidate={swr}'
+    resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
     return resp
 
 def _cache_fresh(cache_obj: dict, ttl: int) -> bool:
@@ -4350,23 +4490,9 @@ def api_leader_top_predictors():
             return {'items': [], 'updated_at': None}
         db: Session = get_db()
         try:
-            won_case = case((Bet.status == 'won', 1), else_=0)
-            period_start = _week_period_start_msk_to_utc()
-            q = (
-                db.query(
-                    User.user_id.label('user_id'),
-                    (User.display_name).label('display_name'),
-                    (User.tg_username).label('tg_username'),
-                    func.count(Bet.id).label('bets_total'),
-                    func.sum(won_case).label('bets_won')
-                )
-                .join(Bet, Bet.user_id == User.user_id)
-                .filter(Bet.placed_at >= period_start)
-                .group_by(User.user_id, User.display_name, User.tg_username)
-                .having(func.count(Bet.id) > 0)
-            )
+            raw_rows, db = _db_retry_read(db, _lb_weekly_predictor_rows, attempts=2, backoff_base=0.1, label='lb:top-predictors')
             rows = []
-            for r in q:
+            for r in raw_rows:
                 total = int(r.bets_total or 0)
                 won = int(r.bets_won or 0)
                 pct = round((won / total) * 100, 1) if total > 0 else 0.0
@@ -4408,8 +4534,9 @@ def api_leader_top_rich():
         try:
             period_start = _month_period_start_msk_to_utc()
             ensure_monthly_baselines(db, period_start)
-            users = db.query(User).all()
-            bases = {int(r.user_id): int(r.credits_base or 0) for r in db.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == period_start).all()}
+            users, db = _db_retry_read(db, _lb_all_users, attempts=2, backoff_base=0.1, label='lb:top-rich:users')
+            base_rows, db = _db_retry_read(db, lambda s: _lb_monthly_baseline_rows(s, period_start), attempts=2, backoff_base=0.1, label='lb:top-rich:baselines')
+            bases = {int(r.user_id): int(r.credits_base or 0) for r in base_rows}
             rows = []
             for u in users:
                 base = bases.get(int(u.user_id), int(u.credits or 0))
@@ -4450,7 +4577,7 @@ def api_leader_server_leaders():
             return {'items': [], 'updated_at': None}
         db: Session = get_db()
         try:
-            users = db.query(User).all()
+            users, db = _db_retry_read(db, _lb_all_users, attempts=2, backoff_base=0.1, label='lb:server-leaders:users')
             rows = []
             for u in users:
                 score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
@@ -4494,23 +4621,26 @@ def api_leader_prizes():
             return {'data': {'predictors': preds, 'rich': rich, 'server': serv}, 'updated_at': None}
         db: Session = get_db()
         try:
-            period_start = _week_period_start_msk_to_utc()
-            won_case = case((Bet.status == 'won', 1), else_=0)
-            q1 = (
-                db.query(
-                    User.user_id.label('user_id'),
-                    User.display_name.label('display_name'),
-                    User.tg_username.label('tg_username'),
-                    func.count(Bet.id).label('bets_total'),
-                    func.sum(won_case).label('bets_won')
+            def _fetch_week_rows(ses: Session):
+                period_start = _week_period_start_msk_to_utc()
+                won_case = case((Bet.status == 'won', 1), else_=0)
+                q1 = (
+                    ses.query(
+                        User.user_id.label('user_id'),
+                        User.display_name.label('display_name'),
+                        User.tg_username.label('tg_username'),
+                        func.count(Bet.id).label('bets_total'),
+                        func.sum(won_case).label('bets_won')
+                    )
+                    .join(Bet, Bet.user_id == User.user_id)
+                    .filter(Bet.placed_at >= period_start)
+                    .group_by(User.user_id, User.display_name, User.tg_username)
+                    .having(func.count(Bet.id) > 0)
                 )
-                .join(Bet, Bet.user_id == User.user_id)
-                .filter(Bet.placed_at >= period_start)
-                .group_by(User.user_id, User.display_name, User.tg_username)
-                .having(func.count(Bet.id) > 0)
-            )
+                return list(q1)
+            week_rows, db = _db_retry_read(db, _lb_weekly_predictor_rows, attempts=2, backoff_base=0.1, label='lb:prizes:weekly')
             tmp = []
-            for r in q1:
+            for r in week_rows:
                 total = int(r.bets_total or 0); won = int(r.bets_won or 0)
                 pct = round((won / total) * 100, 1) if total > 0 else 0.0
                 tmp.append({'user_id': int(r.user_id), 'display_name': r.display_name or 'Игрок', 'tg_username': (r.tg_username or ''), 'winrate': pct, 'total': total})
@@ -4519,16 +4649,18 @@ def api_leader_prizes():
 
             period_start = _month_period_start_msk_to_utc()
             ensure_monthly_baselines(db, period_start)
-            bases = { int(r.user_id): int(r.credits_base or 0) for r in db.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == period_start).all() }
+            base_rows, db = _db_retry_read(db, lambda s: _lb_monthly_baseline_rows(s, period_start), attempts=2, backoff_base=0.1, label='lb:prizes:baselines')
+            bases = { int(r.user_id): int(r.credits_base or 0) for r in base_rows }
             tmp_rich = []
-            for u in db.query(User).all():
+            users_list, db = _db_retry_read(db, _lb_all_users, attempts=2, backoff_base=0.1, label='lb:prizes:users')
+            for u in users_list:
                 base = bases.get(int(u.user_id), int(u.credits or 0))
                 gain = int(u.credits or 0) - base
                 tmp_rich.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': (u.tg_username or ''), 'value': int(gain) })
             tmp_rich.sort(key=lambda x: (-x['value'], x['display_name']))
             rich = tmp_rich[:3]
 
-            users = db.query(User).all()
+            users, db = _db_retry_read(db, _lb_all_users, attempts=2, backoff_base=0.1, label='lb:prizes:server')
             tmp2 = []
             for u in users:
                 score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
@@ -5137,7 +5269,7 @@ def get_achievements():
         else:
             db = get_db();
             try:
-                db_user = db.get(User, int(user_id))
+                db_user, db = _db_retry_read(db, lambda s: s.get(User, int(user_id)), attempts=2, backoff_base=0.1, label='ach:user')
                 if not db_user:
                     return jsonify({'error': 'Пользователь не найден'}), 404
                 user = serialize_user(db_user)
@@ -5162,7 +5294,14 @@ def get_achievements():
         if SessionLocal is not None:
             db = get_db();
             try:
-                invited_count = db.query(func.count(Referral.user_id)).join(User, User.user_id==Referral.user_id).filter(Referral.referrer_id==int(user_id),(User.level>=2)).scalar() or 0
+                invited_count, db = _db_retry_read(
+                    db,
+                    lambda s: (s.query(func.count(Referral.user_id))
+                                 .join(User, User.user_id==Referral.user_id)
+                                 .filter(Referral.referrer_id==int(user_id),(User.level>=2))
+                                 .scalar() or 0),
+                    attempts=2, backoff_base=0.1, label='ach:invited'
+                )
             finally:
                 db.close()
         invited_tier = compute_tier(invited_count, invited_thresholds)
@@ -5181,13 +5320,18 @@ def get_achievements():
             if SessionLocal is not None:
                 db = get_db();
                 try:
-                    # Берём только нужные поля, чтобы не тащить всё
-                    for b in db.query(Bet.id, Bet.status, Bet.odds, Bet.market, Bet.placed_at, Bet.user_id).filter(Bet.user_id==int(user_id)).all():
+                    rows, db = _db_retry_read(
+                        db,
+                        lambda s: s.query(Bet.id, Bet.status, Bet.odds, Bet.market, Bet.placed_at, Bet.user_id)
+                                   .filter(Bet.user_id==int(user_id)).all(),
+                        attempts=2, backoff_base=0.1, label='ach:bets'
+                    )
+                    for b in rows:
                         bet_stats['total'] += 1
                         try:
                             if (b.status or '').lower()=='won':
                                 bet_stats['won'] += 1
-                                k=float((b.odds or '0').replace(',','.'))
+                                k=float((b.odds or '0').replace(',', '.'))
                                 if k>bet_stats['max_win_odds']: bet_stats['max_win_odds']=k
                         except Exception: pass
                         mk=(b.market or '1x2').lower();
@@ -5300,6 +5444,43 @@ def health_sync():
         return jsonify(data), 200
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/health/db-retry-metrics')
+def health_db_retry_metrics():
+    """Возвращает лёгкие метрики работы DB retry helper.
+
+    Формат: {
+      calls, success, failures, retries, transient_errors,
+      by_label: { label: {calls, success, failures, retries, transient_errors} }
+    }
+    """
+    try:
+        metrics = globals().get('_DB_RETRY_METRICS', {
+            'calls': 0,
+            'success': 0,
+            'failures': 0,
+            'retries': 0,
+            'transient_errors': 0,
+            'by_label': {}
+        })
+        out = {
+            'calls': int(metrics.get('calls', 0)),
+            'success': int(metrics.get('success', 0)),
+            'failures': int(metrics.get('failures', 0)),
+            'retries': int(metrics.get('retries', 0)),
+            'transient_errors': int(metrics.get('transient_errors', 0)),
+            'by_label': { k: {
+                'calls': int(v.get('calls',0)),
+                'success': int(v.get('success',0)),
+                'failures': int(v.get('failures',0)),
+                'retries': int(v.get('retries',0)),
+                'transient_errors': int(v.get('transient_errors',0)),
+            } for k,v in dict(metrics.get('by_label', {})).items() }
+        }
+        return jsonify(out), 200
+    except Exception as e:
+        app.logger.error(f"db-retry-metrics error: {e}")
+        return jsonify({'error': 'internal'}), 500
 
 # Telegram webhook handler with proper validation and logging.
 # ВАЖНО: ранее использовался маршрут '/<path:maybe_token>' который перехватывал ВСЕ многоуровневые POST пути
@@ -5876,39 +6057,9 @@ def api_betting_my_bets():
         if SessionLocal is None:
             return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
-        from sqlalchemy.exc import OperationalError, DisconnectionError
-        attempt = 0
-        rows = None
-        last_error = None
-        while attempt < 2:
-            try:
-                rows = db.query(Bet).filter(Bet.user_id == user_id).order_by(Bet.placed_at.desc()).limit(50).all()
-                break
-            except (OperationalError, DisconnectionError) as oe:
-                last_error = oe
-                app.logger.warning(f"My bets DB transient error (attempt {attempt+1}): {oe}")
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-                # Полное освобождение соединений пула и повтор
-                try:
-                    if engine is not None:
-                        engine.dispose()
-                except Exception:
-                    pass
-                try:
-                    db.close()
-                except Exception:
-                    pass
-                db = SessionLocal() if SessionLocal else None
-                attempt += 1
-                continue
-            except Exception as e_any:
-                last_error = e_any
-                raise
-        if rows is None and last_error:
-            raise last_error
+        def _q(ses: Session):
+            return ses.query(Bet).filter(Bet.user_id == user_id).order_by(Bet.placed_at.desc()).limit(50).all()
+        rows, db = _db_retry_read(db, _q, attempts=2, backoff_base=0.1)
         try:
             data = []
             # Соберём карту текущих дат матчей из снапшота betting-tours (фоллбэк к листу)
@@ -6437,177 +6588,153 @@ def api_match_details():
         home_key = norm(home)
         away_key = norm(away)
         cache_key = f"{home_key}|{away_key}"
-        now_ts = int(time.time())
-        cached = MATCH_DETAILS_CACHE.get(cache_key)
-        inm = request.headers.get('If-None-Match')
-        if cached and (now_ts - cached['ts'] < MATCH_DETAILS_TTL):
-            if inm and inm == cached.get('etag'):
-                resp = app.response_class(status=304)
-                resp.headers['ETag'] = cached['etag']
-                resp.headers['Cache-Control'] = 'private, max-age=3600'
-                return resp
-            resp = jsonify({ **cached['payload'], 'version': cached['etag'] })
-            resp.headers['ETag'] = cached['etag']
-            resp.headers['Cache-Control'] = 'private, max-age=3600'
-            return resp
-
-        ws = get_rosters_sheet()
-        # Сначала попробуем получить фиксированный диапазон, чтобы сохранить реальные индексы колонок (A=1..ZZ)
-        headers = []
-        try:
-            _metrics_inc('sheet_reads', 1)
-            arr = ws.get('A1:ZZ1') or [[]]
-            headers = (arr[0] if arr and len(arr) > 0 else []) or []
-        except Exception:
+        def _build():
+            now_ts = int(time.time())
+            cached = MATCH_DETAILS_CACHE.get(cache_key)
+            if cached and (now_ts - cached['ts'] < MATCH_DETAILS_TTL):
+                return cached['payload']
+            ws = get_rosters_sheet()
+            # Сначала попробуем получить фиксированный диапазон, чтобы сохранить реальные индексы колонок (A=1..ZZ)
             headers = []
-        # Фолбэк — row_values(1), если предыдущий способ не сработал
-        if not headers:
             try:
                 _metrics_inc('sheet_reads', 1)
-                headers = ws.row_values(1) or []
+                arr = ws.get('A1:ZZ1') or [[]]
+                headers = (arr[0] if arr and len(arr) > 0 else []) or []
             except Exception:
                 headers = []
-        # карта нормализованных заголовков -> индекс (1-based)
-        idx_map = {}
-        for i, h in enumerate(headers, start=1):
-            key = norm(h)
-            if not key:
-                continue
-            idx_map[key] = i
-            # алиас по базовой форме (без хвостовых цифр), чтобы "ювелиры (2)" сопоставлялись с "ювелиры"
-            bk = base_key(key)
-            if bk and bk not in idx_map:
-                idx_map[bk] = i
-            # убираем любые круглые скобки и содержимое как дополнительный алиас: "дождь (ю-1)" -> "дождь"
-            try:
-                simple = key.split('(')[0].strip()
-                if simple and simple not in idx_map:
-                    idx_map[simple] = i
-            except Exception:
-                pass
-
-        def extract(team_name: str):
-            key = norm(team_name)
-            col_idx = idx_map.get(key)
-            if col_idx is None:
-                # попробуем базовую форму без цифр в хвосте (например, Ювелиры2 -> Ювелиры)
-                bk = base_key(key)
-                col_idx = idx_map.get(bk)
-            if col_idx is None:
-                # подстрочное совпадение среди известных ключей (и их базовых форм)
-                for k, i in idx_map.items():
-                    if key and (key in k or k in key):
-                        col_idx = i
-                        break
-            if col_idx is None:
-                # не нашли — попробуем нестрогое сравнение (fuzzy) по похожести
+            # Фолбэк — row_values(1), если предыдущий способ не сработал
+            if not headers:
                 try:
-                    import difflib
-                    best_ratio = 0.0
-                    best_idx = None
-                    for k, i in idx_map.items():
-                        r = difflib.SequenceMatcher(None, key, k).ratio()
-                        if r > best_ratio:
-                            best_ratio = r
-                            best_idx = i
-                    if best_idx is not None and best_ratio >= 0.8:
-                        col_idx = best_idx
+                    _metrics_inc('sheet_reads', 1)
+                    headers = ws.row_values(1) or []
+                except Exception:
+                    headers = []
+            # карта нормализованных заголовков -> индекс (1-based)
+            idx_map = {}
+            for i, h in enumerate(headers, start=1):
+                key = norm(h)
+                if not key:
+                    continue
+                idx_map[key] = i
+                bk = base_key(key)
+                if bk and bk not in idx_map:
+                    idx_map[bk] = i
+                try:
+                    simple = key.split('(')[0].strip()
+                    if simple and simple not in idx_map:
+                        idx_map[simple] = i
                 except Exception:
                     pass
-            if col_idx is None:
-                return {'team': team_name, 'players': []}
-            _metrics_inc('sheet_reads', 1)
-            col_vals = ws.col_values(col_idx)
-            # убираем заголовок
-            players = [v.strip() for v in col_vals[1:] if v and v.strip()]
-            return {'team': headers[col_idx-1] or team_name, 'players': players}
-
-        home_data = extract(home)
-        away_data = extract(away)
-        # Если обе пустые, попробуем ещё раз с перестановкой (редкий кейс кросс-алиасов)
-        if not home_data['players'] and not away_data['players']:
-            alt_home = extract(away)
-            alt_away = extract(home)
-            # Если после перестановки появились игроки, используем их
-            if alt_home['players'] or alt_away['players']:
-                home_data, away_data = alt_home, alt_away
-
-        # Версионируем содержимое через хеш, чтобы поддержать ETag/кэш
-        import hashlib, json as _json
-        # Подтянем события игроков из БД (если доступна)
-        events = {'home': [], 'away': []}
-        if SessionLocal is not None:
-            try:
-                dbx = get_db()
+            def extract(team_name: str):
+                key = norm(team_name)
+                col_idx = idx_map.get(key)
+                if col_idx is None:
+                    bk = base_key(key)
+                    col_idx = idx_map.get(bk)
+                if col_idx is None:
+                    for k, i in idx_map.items():
+                        if key and (key in k or k in key):
+                            col_idx = i
+                            break
+                if col_idx is None:
+                    try:
+                        import difflib
+                        best_ratio = 0.0
+                        best_idx = None
+                        for k, i in idx_map.items():
+                            r = difflib.SequenceMatcher(None, key, k).ratio()
+                            if r > best_ratio:
+                                best_ratio = r
+                                best_idx = i
+                        if best_idx is not None and best_ratio >= 0.8:
+                            col_idx = best_idx
+                    except Exception:
+                        pass
+                if col_idx is None:
+                    return {'team': team_name, 'players': []}
+                _metrics_inc('sheet_reads', 1)
+                col_vals = ws.col_values(col_idx)
+                players = [v.strip() for v in col_vals[1:] if v and v.strip()]
+                return {'team': headers[col_idx-1] or team_name, 'players': players}
+            home_data = extract(home)
+            away_data = extract(away)
+            if not home_data['players'] and not away_data['players']:
+                alt_home = extract(away)
+                alt_away = extract(home)
+                if alt_home['players'] or alt_away['players']:
+                    home_data, away_data = alt_home, alt_away
+            # Подтянем события игроков из БД (если доступна)
+            events = {'home': [], 'away': []}
+            if SessionLocal is not None:
                 try:
-                    rows = dbx.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).order_by(MatchPlayerEvent.minute.asc().nulls_last()).all()
-                    for e in rows:
-                        side = 'home' if (e.team or 'home') == 'home' else 'away'
-                        events[side].append({
-                            'minute': (int(e.minute) if e.minute is not None else None),
-                            'player': e.player,
-                            'type': e.type,
-                            'note': e.note or ''
-                        })
-                finally:
-                    dbx.close()
-            except Exception:
-                events = {'home': [], 'away': []}
-        # Попробуем заменить составы на данные из таблицы match_lineups если есть
-        extended_lineups = None
-        if SessionLocal is not None:
-            try:
-                dbx = get_db()
-                try:
-                    lrows = dbx.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
-                    if lrows:
-                        ext = { 'home': {'starting_eleven': [], 'substitutes': []}, 'away': {'starting_eleven': [], 'substitutes': []} }
-                        for r in lrows:
-                            side = 'home' if (r.team or 'home')=='home' else 'away'
-                            bucket = 'starting_eleven' if r.position=='starting_eleven' else 'substitutes'
-                            ext[side][bucket].append({
-                                'player': r.player,
-                                'jersey_number': r.jersey_number,
-                                'is_captain': bool(r.is_captain)
+                    dbx = get_db()
+                    try:
+                        rows = dbx.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).order_by(MatchPlayerEvent.minute.asc().nulls_last()).all()
+                        for e in rows:
+                            side = 'home' if (e.team or 'home') == 'home' else 'away'
+                            events[side].append({
+                                'minute': (int(e.minute) if e.minute is not None else None),
+                                'player': e.player,
+                                'type': e.type,
+                                'note': e.note or ''
                             })
-                        # Отсортируем по номеру внутри категорий
-                        for s in ('home','away'):
-                            for b in ('starting_eleven','substitutes'):
-                                ext[s][b].sort(key=lambda x: (999 if x['jersey_number'] is None else x['jersey_number'], (x['player'] or '').lower()))
-                        extended_lineups = ext
-                finally:
-                    dbx.close()
-            except Exception:
-                extended_lineups = None
-        if extended_lineups:
-            # Используем расширенный формат + плоские списки для обратной совместимости
-            flat_home = [p['player'] for p in extended_lineups['home']['starting_eleven']] + [p['player'] for p in extended_lineups['home']['substitutes']]
-            flat_away = [p['player'] for p in extended_lineups['away']['starting_eleven']] + [p['player'] for p in extended_lineups['away']['substitutes']]
-            payload_core = {
-                'teams': {'home': home_data['team'], 'away': away_data['team']},
-                'rosters': {'home': flat_home, 'away': flat_away},
-                'lineups': extended_lineups,
-                'events': events
-            }
-        else:
-            payload_core = {
-                'teams': {'home': home_data['team'], 'away': away_data['team']},
-                'rosters': {'home': home_data['players'], 'away': away_data['players']},
-                'events': events
-            }
-        etag = hashlib.md5(_json.dumps(payload_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        # Если обе команды пустые, залогируем доступные ключи для отладки
-        if not home_data['players'] and not away_data['players']:
-            try:
-                app.logger.info("Rosters not found for %s vs %s; keys: %s", home, away, ','.join(sorted(set(idx_map.keys()))))
-            except Exception:
-                pass
-        # Сохраняем в кеш
-        MATCH_DETAILS_CACHE[cache_key] = { 'ts': now_ts, 'etag': etag, 'payload': payload_core }
-        resp = jsonify({ **payload_core, 'version': etag })
-        resp.headers['ETag'] = etag
-        resp.headers['Cache-Control'] = 'private, max-age=3600'
-        return resp
+                    finally:
+                        dbx.close()
+                except Exception:
+                    events = {'home': [], 'away': []}
+            extended_lineups = None
+            if SessionLocal is not None:
+                try:
+                    dbx = get_db()
+                    try:
+                        lrows, dbx = _db_retry_read(
+                            dbx,
+                            lambda s: s.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all(),
+                            attempts=2, backoff_base=0.1, label='lineups:details:extended'
+                        )
+                        if lrows:
+                            ext = { 'home': {'starting_eleven': [], 'substitutes': []}, 'away': {'starting_eleven': [], 'substitutes': []} }
+                            for r in lrows:
+                                side = 'home' if (r.team or 'home')=='home' else 'away'
+                                bucket = 'starting_eleven' if r.position=='starting_eleven' else 'substitutes'
+                                ext[side][bucket].append({
+                                    'player': r.player,
+                                    'jersey_number': r.jersey_number,
+                                    'is_captain': bool(r.is_captain)
+                                })
+                            for s in ('home','away'):
+                                for b in ('starting_eleven','substitutes'):
+                                    ext[s][b].sort(key=lambda x: (999 if x['jersey_number'] is None else x['jersey_number'], (x['player'] or '').lower()))
+                            extended_lineups = ext
+                    finally:
+                        dbx.close()
+                except Exception:
+                    extended_lineups = None
+            if extended_lineups:
+                flat_home = [p['player'] for p in extended_lineups['home']['starting_eleven']] + [p['player'] for p in extended_lineups['home']['substitutes']]
+                flat_away = [p['player'] for p in extended_lineups['away']['starting_eleven']] + [p['player'] for p in extended_lineups['away']['substitutes']]
+                payload_core = {
+                    'teams': {'home': home_data['team'], 'away': away_data['team']},
+                    'rosters': {'home': flat_home, 'away': flat_away},
+                    'lineups': extended_lineups,
+                    'events': events
+                }
+            else:
+                payload_core = {
+                    'teams': {'home': home_data['team'], 'away': away_data['team']},
+                    'rosters': {'home': home_data['players'], 'away': away_data['players']},
+                    'events': events
+                }
+            # лог для диагностики пустых составов
+            if not home_data['players'] and not away_data['players']:
+                try:
+                    app.logger.info("Rosters not found for %s vs %s", home, away)
+                except Exception:
+                    pass
+            # сохраняем локально для быстрой отдачи до истечения TTL
+            MATCH_DETAILS_CACHE[cache_key] = { 'ts': int(time.time()), 'etag': _etag_for_payload(payload_core), 'payload': payload_core }
+            return payload_core
+        return etag_json(f"match-details:{cache_key}", _build, cache_ttl=MATCH_DETAILS_TTL, max_age=3600, swr=600, core_filter=lambda p: p, cache_visibility='private')
     except Exception as e:
         app.logger.error(f"Ошибка получения составов: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить составы'}), 500
