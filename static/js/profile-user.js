@@ -162,13 +162,6 @@
         if (shadeBg) {
           if (!url) { shadeBg.style.backgroundImage=''; return; }
           shadeBg.style.backgroundImage = `url(${url})`;
-          // Точная подгонка: корона строго над аватаром для некоторых пресетов
-          try {
-            shadeBg.classList.remove('shade1','shade3');
-            const name = (url.split('/').pop()||'').toLowerCase();
-            if (name.includes('shade1')) shadeBg.classList.add('shade1');
-            else if (name.includes('shade3')) shadeBg.classList.add('shade3');
-          } catch(_){ }
         } else if (topArea) {
           if (!url) { topArea.style.backgroundImage=''; return; }
           topArea.style.backgroundImage = `url(${url})`;
