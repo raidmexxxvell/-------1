@@ -119,6 +119,7 @@
   const btnDry = document.getElementById('admin-season-dry');
   const btnSoft = document.getElementById('admin-season-soft');
   const btnRoll = document.getElementById('admin-season-roll');
+  const btnRollback = document.getElementById('admin-season-rollback');
   if (btnDry) btnDry.onclick = ()=> seasonRollover('dry');
   if (btnSoft) btnSoft.onclick = ()=> seasonRollover('soft');
     if (btnRoll) btnRoll.onclick = ()=> {
@@ -128,6 +129,7 @@
       if(phrase !== 'СБРОС') { alert('Отменено'); return; }
       seasonRollover('full');
     };
+  if (btnRollback) btnRollback.onclick = ()=> seasonRollback();
   }
 
   // Match management functions
@@ -505,6 +507,29 @@
       if(!res.ok || res.d.error){ throw new Error(res.d.error||'Ошибка'); }
       if(logEl){ logEl.textContent=JSON.stringify(res.d,null,2); }
       if(!res.d.dry_run){ showToast('Новый сезон: '+res.d.new_season,'success'); }
+    }).catch(e=>{ if(logEl){ logEl.textContent='Ошибка: '+e.message; } showToast('Ошибка: '+e.message,'error',6000); });
+  }
+
+  function seasonRollback(){
+    const initData = window.Telegram?.WebApp?.initData || '';
+    const urlDry = '/api/admin/season/rollback?dry=1';
+    const logEl=document.getElementById('season-rollover-log');
+    if(logEl){ logEl.style.display='block'; logEl.textContent='Проверка плана отката...'; }
+    const fd=new FormData(); fd.append('initData', initData);
+    // Сначала показываем план
+    fetch(urlDry,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res=>{
+      if(!res.ok || res.d.error){ throw new Error(res.d.error||'Ошибка'); }
+      if(logEl){ logEl.textContent=JSON.stringify(res.d,null,2); }
+      const proceed = confirm('Выполнить откат сезона? Активным станет предыдущий турнир. Данные legacy, если были очищены ранее, не восстановятся.');
+      if(!proceed) return;
+      const force = confirm('Принудительно выполнить откат даже если активный сезон не совпадает с последним из журнала? Нажмите Отмена для обычного отката.');
+      let url='/api/admin/season/rollback'; if(force) url+='?force=1';
+      if(logEl){ logEl.textContent+='\n\nВыполняю откат...'; }
+      return fetch(url,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res2=>{
+        if(!res2.ok || res2.d.error){ throw new Error(res2.d.error||'Ошибка'); }
+        if(logEl){ logEl.textContent=JSON.stringify(res2.d,null,2); }
+        showToast('Сезон откатан: активирован '+res2.d.activated_season,'success');
+      });
     }).catch(e=>{ if(logEl){ logEl.textContent='Ошибка: '+e.message; } showToast('Ошибка: '+e.message,'error',6000); });
   }
 

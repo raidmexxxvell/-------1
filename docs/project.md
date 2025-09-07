@@ -95,6 +95,7 @@
 
 - Сезонный reset и составы команд
     - Season rollover: `app.py` → `POST /api/admin/season/rollover`
+    - Season rollback: `api/admin.py` → `POST /api/admin/season/rollback` (dry/force)
     - Persistent roster: `app.py` → сохранение составов, синхронизация с `team_roster`
     - Публичные составы: `app.py` → `GET /api/match/lineups?match_id=...`
 
@@ -540,6 +541,8 @@ function updateTeamLineup(team){
 - `POST /api/admin/match/{id}/lineups/save` — сохранение (emit `lineups_updated` + синхронизация `team_roster`)
 - `POST /api/admin/match/{id}/lineups` — получение текущих матчевых составов (с fallback к `team_roster`)
 - `GET /api/match/lineups?match_id=...` — публичные составы (match-specific или fallback roster)
+- `POST /api/admin/season/rollover` — сброс/переключение сезона (dry/soft/full/deep)
+- `POST /api/admin/season/rollback` — откат к предыдущему сезону (dry/force), переключает active на предыдущий турнир без восстановления legacy-данных
 - WebSocket: событие `lineups_updated` → клиент вызывает `GET /api/match/lineups` (DB-first, без обращения к Sheets)
 - Нормализация: при сохранении имена приводятся к lower для ключей, хранится оригинальный вариант для отображения.
 
