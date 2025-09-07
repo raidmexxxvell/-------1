@@ -6517,9 +6517,11 @@ def _get_match_result(home: str, away: str):
 
 def _get_match_total_goals(home: str, away: str):
     # 1) Snapshot 'results'
-    global _INVALID_SCORE_WARNED
+    global _INVALID_SCORE_WARNED, _NO_MATCH_LOG_ONCE
     if '_INVALID_SCORE_WARNED' not in globals():
         _INVALID_SCORE_WARNED = set()
+    if '_NO_MATCH_LOG_ONCE' not in globals():
+        _NO_MATCH_LOG_ONCE = set()
     if SessionLocal is not None:
         db = get_db()
         try:
@@ -6545,8 +6547,12 @@ def _get_match_total_goals(home: str, away: str):
                     return total
         finally:
             db.close()
+    # Логируем отсутствие матча один раз на пару команд, чтобы не шуметь в логах
     try:
-        app.logger.warning(f"_get_match_total_goals: No match found for {home} vs {away}")
+        key = (home, away)
+        if key not in _NO_MATCH_LOG_ONCE:
+            _NO_MATCH_LOG_ONCE.add(key)
+            app.logger.info(f"_get_match_total_goals: No match found for {home} vs {away}")
     except: pass
     return None
 

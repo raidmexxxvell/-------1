@@ -245,6 +245,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 400);
 
     // Этапы готовности приходят событиями
+    // Учитываем готовность новостей и рекламных блоков/матча недели
+    let newsReady = false;
+    let adsReady = false;
+    let topMatchReady = false;
+    const tryMarkDataReady = () => {
+        if (!stageDataReady && (newsReady || adsReady || topMatchReady)) {
+            stageDataReady = true;
+            info('Data stage ready via preload events');
+            try { window.dispatchEvent(new CustomEvent('app:data-ready')); } catch(_) {}
+        }
+        if (!ready && newsReady && (adsReady || topMatchReady)) {
+            ready = true;
+            info('All core preloads ready -> finish');
+            try { window.dispatchEvent(new CustomEvent('app:all-ready')); } catch(_) {}
+        }
+    };
+    window.addEventListener('preload:news-ready', () => { newsReady = true; tryMarkDataReady(); }, { once:true });
+    window.addEventListener('preload:ads-ready', () => { adsReady = true; tryMarkDataReady(); }, { once:true });
+    window.addEventListener('preload:topmatch-ready', () => { topMatchReady = true; tryMarkDataReady(); }, { once:true });
     // 1) Профиль (имя + аватар)
     window.addEventListener('app:profile-ready', () => {
         info('Received app:profile-ready');

@@ -115,16 +115,15 @@
           for (let i=0;i<targets.length;i++){ if(currentValue < Number(targets[i])) return Number(targets[i]); }
           return null;
         })();
-
-        // Лестница целей: "Цели: 7/30/120" (или соответствующие для группы)
+        // Лестница целей для подробностей (перенесено под кнопку "Подробнее")
         const ladderText = `Цели: ${targets.join('/')}`;
 
         // Текст прогресса
         const baseDesc = descFor(a);
         if (nextTarget === null) {
-          req.textContent = `${baseDesc} ✅ Выполнено (${currentValue}). ${ladderText}`;
+          req.textContent = `${baseDesc} ✅ Выполнено (${currentValue}).`;
         } else {
-          req.textContent = `${baseDesc}: ${currentValue}/${nextTarget}. ${ladderText}`;
+          req.textContent = `${baseDesc}: ${currentValue}/${nextTarget}.`;
         }
 
         // Прогресс-бар относительно ближайшей цели
@@ -136,11 +135,22 @@
         const progressPercent = Math.max(0, Math.min(100, denom ? (currentValue/denom*100) : 0));
         progressBar.style.width = progressPercent + '%';
         progressContainer.appendChild(progressBar);
+        // Добавим цели внутрь блока подробностей
+        const targetsEl = document.createElement('div');
+        targetsEl.style.cssText = 'margin-top:8px; font-size:12px; color:var(--gray)';
+        targetsEl.textContent = ladderText;
+        fullDescEl.appendChild(targetsEl);
         card.append(img,name,req,progressContainer,toggleBtn,fullDescEl);
       } else {
         // Нет числового прогресса — просто описание
-        const targets = Array.isArray(a.all_targets) && a.all_targets.length ? ` Цели: ${a.all_targets.join('/')}` : '';
-        req.textContent = `${descFor(a)}${targets}`;
+        req.textContent = `${descFor(a)}`;
+        // Если цели есть — переносим их в подробности
+        if (Array.isArray(a.all_targets) && a.all_targets.length) {
+          const targetsEl = document.createElement('div');
+          targetsEl.style.cssText = 'margin-top:8px; font-size:12px; color:var(--gray)';
+          targetsEl.textContent = `Цели: ${a.all_targets.join('/')}`;
+          fullDescEl.appendChild(targetsEl);
+        }
         card.append(img,name,req,toggleBtn,fullDescEl);
       }
       
