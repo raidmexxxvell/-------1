@@ -726,6 +726,29 @@
         let lbActiveTab = 'predictors';
         const LB_POLL_MS = 60000; // 60s
         const LB_JITTER_MS = 4000; // небольшой джиттер
+        let _leaderPrefetched = false;
+        function prefetchLeaderboards() {
+            if (_leaderPrefetched) return;
+            _leaderPrefetched = true;
+            try {
+                if (!window.fetchEtag) return;
+                // небольшая задержка, чтобы не мешать первичной загрузке
+                setTimeout(() => {
+                    const tryPrefetch = (cacheKey, url, swrMs) => {
+                        try {
+                            const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+                            if (cached && cached.ts && (Date.now() - cached.ts) < swrMs) return; // свежо
+                        } catch(_) {}
+                        window.fetchEtag(url, { cacheKey, swrMs, extract: j => j }).catch(()=>{});
+                    };
+                    // Префетчим «богатство» и «сервер» (не активные по умолчанию)
+                    tryPrefetch('lb:rich', '/api/leaderboard/top-rich', 60000);
+                    tryPrefetch('lb:server', '/api/leaderboard/server-leaders', 60000);
+                    // Призы обновляются реже, но можно тоже прогреть с меньшим swr
+                    tryPrefetch('lb:prizes', '/api/leaderboard/prizes', 30000);
+                }, 1400);
+            } catch(_) {}
+        }
         function isPaneVisible(key){
             const pane = panes[key];
             if (!pane) return false;
@@ -771,6 +794,8 @@
         });
         // первичная загрузка
         loadLBPredictors();
+    // Тихий префетч остальных вкладок для мгновенного переключения
+    prefetchLeaderboards();
         startLbPolling('predictors');
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {

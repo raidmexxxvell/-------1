@@ -311,9 +311,10 @@ class Tournament(Base):
 - Пилотный DB retry для `/api/betting/my-bets` отмечен как внедренный; задача по вынесению в централизованный helper остаётся в backlog.
 
 ### 2025-09-06 (вечер, актуализация)
-- Серверный etag_json:
-    - Применён к `/api/schedule` и `/api/results` (единые заголовки, 304 поведение, core_filter).
-    - `/api/match-details` переписан на etag_json с private Cache-Control, сохранён локальный TTL-кэш и форма ответа (version=etag).
+        - Серверный etag_json:
+            - Применён к `/api/schedule` и `/api/results` (единые заголовки, 304 поведение, core_filter).
+            - `/api/match-details` переписан на etag_json с private Cache-Control, сохранён локальный TTL-кэш и форма ответа (version=etag).
+            - `/api/betting/tours` переведён на etag_json с `public, max-age=300, stale-while-revalidate=300`; core_filter исключает служебные поля, учитывается только `{tours}`.
 - Централизованный DB retry helper:
     - Добавлен `_db_retry_read(session, query_callable, attempts=2, backoff_base=0.1)`.
     - `POST /api/betting/my-bets` переведён на использование helper (идентичное поведение, меньше дублирования).

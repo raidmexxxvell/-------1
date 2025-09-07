@@ -6285,52 +6285,50 @@ def api_betting_tours():
     """Возвращает ближайший тур для ставок, из снапшота БД; при отсутствии — собирает on-demand.
     Для матчей в прошлом блокируем ставки (поле lock: true). Поддерживает ETag/304."""
     try:
-        # авто-расчёт открытых ставок (раз в 5 минут)
+        # авто-расчёт открытых ставок (раз в 5 минут) — выполняем вне builder,
+        # чтобы срабатывать даже при 304 без вызова builder
         global _LAST_SETTLE_TS
         now_ts = int(time.time())
         if now_ts - _LAST_SETTLE_TS > 300:
             try:
                 _settle_open_bets()
             except Exception as e:
-                app.logger.warning(f"Авторасчёт ставок: {e}")
+                try:
+                    app.logger.warning(f"Авторасчёт ставок: {e}")
+                except Exception:
+                    pass
             _LAST_SETTLE_TS = now_ts
 
-        # 1) Отдать снапшот, если есть
-        if SessionLocal is not None:
-            db: Session = get_db()
-            try:
-                snap = _snapshot_get(db, 'betting-tours')
-                if snap and snap.get('payload'):
-                    payload = snap['payload']
-                    _core = {'tours': payload.get('tours')}
-                    etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-                    inm = request.headers.get('If-None-Match')
-                    if inm and inm == etag:
-                        resp = app.response_class(status=304)
-                        resp.headers['ETag'] = etag
-                        resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=300'
-                        return resp
-                    resp = _json_response({ **payload, 'version': etag })
-                    resp.headers['ETag'] = etag
-                    resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=300'
-                    return resp
-            finally:
-                db.close()
+        def _builder():
+            # 1) Пробуем отдать из снапшота БД
+            if SessionLocal is not None:
+                db: Session = get_db()
+                try:
+                    snap = _snapshot_get(db, 'betting-tours')
+                    if snap and snap.get('payload'):
+                        return snap['payload']
+                finally:
+                    db.close()
+            # 2) On-demand сборка и запись снапшота
+            payload = _build_betting_tours_payload()
+            if SessionLocal is not None:
+                db2: Session = get_db()
+                try:
+                    _snapshot_set(db2, 'betting-tours', payload)
+                finally:
+                    db2.close()
+            return payload
 
-        # 2) On-demand сборка и запись снапшота
-        payload = _build_betting_tours_payload()
-        _core = {'tours': payload.get('tours')}
-        etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        if SessionLocal is not None:
-            db = get_db()
-            try:
-                _snapshot_set(db, 'betting-tours', payload)
-            finally:
-                db.close()
-        resp = _json_response({ **payload, 'version': etag })
-        resp.headers['ETag'] = etag
-        resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=300'
-        return resp
+        # etag_json обеспечит локальный TTL‑кэш, корректные заголовки и 304 без обращения к БД
+        return etag_json(
+            'betting:tours',
+            _builder,
+            cache_ttl=30,
+            max_age=300,
+            swr=300,
+            cache_visibility='public',
+            core_filter=lambda p: {'tours': p.get('tours')}
+        )
     except Exception as e:
         app.logger.error(f"Ошибка betting tours: {e}")
         return jsonify({'error': 'Не удалось загрузить туры для ставок'}), 500
