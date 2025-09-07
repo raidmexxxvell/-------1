@@ -287,7 +287,8 @@
     function mkTeam(name) {
       const d = document.createElement('div'); d.className = 'team';
       const img = document.createElement('img'); img.className = 'logo'; img.alt = name || '';
-      (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(img, name||'');
+  (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(img, name||'');
+  img.setAttribute('data-team-name', name || '');
       const nm = document.createElement('div'); nm.className = 'team-name';
       nm.setAttribute('data-team-name', name || '');
       try {

@@ -15,12 +15,13 @@
     try { mdPane.querySelectorAll('.admin-score-ctrls').forEach(n=>n.remove()); } catch(_) {}
     schedulePane.style.display='none'; mdPane.style.display='';
     try { document.getElementById('ufo-subtabs').style.display='none'; } catch(_) {}
-    const hLogo=document.getElementById('md-home-logo'); const aLogo=document.getElementById('md-away-logo');
-    const hName=document.getElementById('md-home-name'); const aName=document.getElementById('md-away-name');
+  const hLogo=document.getElementById('md-home-logo'); const aLogo=document.getElementById('md-away-logo');
+  const hName=document.getElementById('md-home-name'); const aName=document.getElementById('md-away-name');
     const score=document.getElementById('md-score'); const dt=document.getElementById('md-datetime');
     const homePane=document.getElementById('md-pane-home'); const awayPane=document.getElementById('md-pane-away');
   const setLogo=(imgEl,name)=>{ try { (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(imgEl, name||''); } catch(_) {} };
-    hName.setAttribute('data-team-name', match.home || ''); aName.setAttribute('data-team-name', match.away || '');
+  hName.setAttribute('data-team-name', match.home || ''); aName.setAttribute('data-team-name', match.away || '');
+  try { hLogo?.setAttribute('data-team-name', match.home||''); aLogo?.setAttribute('data-team-name', match.away||''); } catch(_) {}
     hName.textContent = (window.withTeamCount?window.withTeamCount(match.home||''):(match.home||''));
     aName.textContent = (window.withTeamCount?window.withTeamCount(match.away||''):(match.away||''));
   setLogo(hLogo, match.home||''); setLogo(aLogo, match.away||''); score.textContent='— : —';

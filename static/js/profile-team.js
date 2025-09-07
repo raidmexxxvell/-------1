@@ -123,7 +123,9 @@
     const res = document.getElementById('ufo-results');
     const table = document.getElementById('ufo-table');
     const stats = document.getElementById('ufo-stats');
+  const mdPane = document.getElementById('ufo-match-details');
     [sched,res,table,stats].forEach(el=>{ if (el) el.style.display='none'; });
+  if (mdPane) mdPane.style.display='none';
     if (subtabs) subtabs.style.display = 'none';
     pane.style.display = '';
     nameEl.textContent = teamName;
@@ -150,24 +152,56 @@
   }
 
   function attachDelegation(){
-    // Делегирование клика от карточек матчей (расписание/результаты)
+    // Делегирование клика: имя или логотип команды (любой элемент с data-team-name)
     document.addEventListener('click', (e) => {
       try {
-        const el = e.target.closest?.('.team-name[data-team-name]');
+        const el = e.target.closest?.('[data-team-name]');
         if (el){
           const name = el.getAttribute('data-team-name') || el.textContent || '';
-          if (name){ e.preventDefault(); e.stopPropagation(); openTeam(name.trim()); }
+          if (name){
+            // Запомним контекст возврата: из матча или из вкладки UFO (table/schedule/results/stats)
+            const mdPane = document.getElementById('ufo-match-details');
+            const fromMatch = mdPane && mdPane.style.display !== 'none';
+            if (fromMatch){
+              window.__TEAM_BACK_CTX__ = { from: 'match' };
+            } else {
+              const activeSub = document.querySelector('#ufo-subtabs .subtab-item.active');
+              const subKey = activeSub ? (activeSub.getAttribute('data-subtab')||'table') : 'table';
+              window.__TEAM_BACK_CTX__ = { from: 'ufo', subtab: subKey };
+            }
+            e.preventDefault(); e.stopPropagation();
+            openTeam(name.trim());
+          }
         }
       } catch(_) {}
     }, true);
     // Назад
     document.getElementById('team-back')?.addEventListener('click', () => {
       const pane = document.getElementById('ufo-team');
-      const subtabs = document.getElementById('ufo-subtabs');
       if (pane) pane.style.display = 'none';
-      if (subtabs) subtabs.style.display = '';
-      // Вернёмся в таблицу по умолчанию
-      try { document.querySelector('#ufo-subtabs .subtab-item[data-subtab="table"]').click(); } catch(_) {}
+      const ctx = window.__TEAM_BACK_CTX__ || { from: 'ufo', subtab: 'table' };
+      // Возврат к источнику
+      if (ctx.from === 'match'){
+        // Вернуть экран деталей матча (subtabs оставляем скрытыми)
+        try {
+          const mdPane = document.getElementById('ufo-match-details');
+          if (mdPane) mdPane.style.display = '';
+          const sched = document.getElementById('ufo-schedule'); if (sched) sched.style.display='none';
+          const res = document.getElementById('ufo-results'); if (res) res.style.display='none';
+          const table = document.getElementById('ufo-table'); if (table) table.style.display='none';
+          const stats = document.getElementById('ufo-stats'); if (stats) stats.style.display='none';
+          const subtabs = document.getElementById('ufo-subtabs'); if (subtabs) subtabs.style.display='none';
+        } catch(_) {}
+      } else {
+        // Вернуть соответствующую подвкладку UFO
+        try {
+          const subtabs = document.getElementById('ufo-subtabs'); if (subtabs) subtabs.style.display='';
+          const target = document.querySelector(`#ufo-subtabs .subtab-item[data-subtab="${ctx.subtab||'table'}"]`)
+                        || document.querySelector('#ufo-subtabs .subtab-item[data-subtab="table"]');
+          target?.click();
+        } catch(_) {}
+      }
+      window.__TEAM_BACK_CTX__ = null;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
     // Переключение сабвкладок внутри экрана команды

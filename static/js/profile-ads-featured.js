@@ -96,7 +96,7 @@
       if (dtText) { sub.textContent=dtText; card.appendChild(sub); }
       const center = document.createElement('div'); center.className='match-center';
   const loadLogo = (imgEl, teamName) => { try { (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(imgEl, teamName||''); } catch(_) {} };
-  const L = (name)=>{ const t=document.createElement('div'); t.className='team'; const i=document.createElement('img'); i.className='logo'; loadLogo(i,name||''); const n=document.createElement('div'); n.className='team-name'; n.textContent=name||''; n.setAttribute('data-team-name', name||''); n.addEventListener('click', (e)=>{ try{ e.stopPropagation(); }catch(_){} }); t.append(i,n); return t; };
+  const L = (name)=>{ const t=document.createElement('div'); t.className='team'; const i=document.createElement('img'); i.className='logo'; loadLogo(i,name||''); const n=document.createElement('div'); n.className='team-name'; n.textContent=name||''; t.append(i,n); return t; };
       const scoreEl=document.createElement('div'); scoreEl.className='score'; scoreEl.textContent='VS';
       center.append(L(m.home), scoreEl, L(m.away)); card.appendChild(center);
       try { if (window.MatchUtils?.isLiveNow(m)) { scoreEl.textContent='0 : 0'; (async()=>{ try { const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`); const d=await r.json(); if (typeof d?.score_home==='number' && typeof d?.score_away==='number') scoreEl.textContent=`${Number(d.score_home)} : ${Number(d.score_away)}`; } catch(_){} })(); } } catch(_) {}
