@@ -398,6 +398,38 @@
   }
 
   // Player management functions
+  // --- Google Sheets repair handler ---
+  function repairUsersSheet() {
+    const btn = document.getElementById('admin-google-repair-users');
+    if (btn) { btn.disabled = true; btn.textContent = 'Repairing...'; }
+    const fd = new FormData();
+    fd.append('initData', window.Telegram?.WebApp?.initData || '');
+    fd.append('sheet', 'users');
+    fetch('/api/admin/google/repair-users-sheet', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(data => {
+        console.log('repair result', data);
+        if (data && data.status === 'ok') {
+          showToast('Repair completed: ' + (data.deduped_rows || 0) + ' rows kept', 'success', 5000);
+          if (data.removed_examples && data.removed_examples.length) {
+            console.info('Removed examples:', data.removed_examples.slice(0,5));
+          }
+        } else {
+          showToast('Repair failed: ' + (data.error || 'unknown'), 'error', 6000);
+        }
+      })
+      .catch(err => { console.error('repair error', err); showToast('Repair request failed','error'); })
+      .finally(()=>{ if (btn) { btn.disabled = false; btn.textContent = 'Repair users sheet'; } });
+  }
+
+  // Wire up the button after DOM ready
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const repairBtn = document.getElementById('admin-google-repair-users');
+    if (repairBtn) repairBtn.addEventListener('click', ()=>{
+      const ok = confirm('Запустить ремонт листа пользователей? Операция перепишет лист.');
+      if (!ok) return; repairUsersSheet();
+    });
+  });
   function loadPlayers() {
     console.log('[Admin] Loading players...');
     const tbody = document.getElementById('players-table');

@@ -7493,9 +7493,40 @@ def api_admin_google_export_all():
                 values = [[r.c1, r.c2, r.c3, r.c4, r.c5, r.c6, r.c7, r.c8] for r in lt_rows]
                 sm.update_range('ТАБЛИЦА', 'A1:H'+str(max(1, len(values))), values)
             # Пользователи: простой экспорт в лист users (A:F)
-            user_values = [['user_id','display_name','username','level','xp','credits']]
+            # Deduplicate by user_id (keep latest by updated_at when available)
+            user_map = {}
             for u in users:
-                user_values.append([int(u.user_id or 0), u.display_name or '', u.tg_username or '', int(u.level or 1), int(u.xp or 0), int(u.credits or 0)])
+                try:
+                    uid = int(u.user_id or 0)
+                except Exception:
+                    uid = 0
+                # prefer record with newer updated_at if present
+                existing = user_map.get(uid)
+                u_updated = None
+                try:
+                    u_updated = getattr(u, 'updated_at', None)
+                except Exception:
+                    u_updated = None
+                if existing is None:
+                    user_map[uid] = u
+                else:
+                    try:
+                        ex_up = getattr(existing, 'updated_at', None)
+                        if u_updated and ex_up:
+                            if u_updated > ex_up:
+                                user_map[uid] = u
+                        elif u_updated and not ex_up:
+                            user_map[uid] = u
+                    except Exception:
+                        pass
+            user_values = [['user_id','display_name','username','level','xp','credits']]
+            for uid, u in sorted(user_map.items(), key=lambda x: x[0] or 0):
+                user_values.append([int(uid or 0), (u.display_name or ''), (u.tg_username or ''), int(getattr(u, 'level', 1) or 1), int(getattr(u, 'xp', 0) or 0), int(getattr(u, 'credits', 0) or 0)])
+            # clear worksheet first to avoid duplicates from previous runs
+            try:
+                sm.clear_worksheet('users')
+            except Exception:
+                pass
             sm.update_range('users', 'A1:F'+str(len(user_values)), user_values)
             # Ставки: лист bets (минимальный набор)
             bet_values = [['id','user_id','market','selection','odds','stake','status','placed_at']]
@@ -8424,22 +8455,143 @@ def api_admin_season_rollover_inline():
                 summary['error_tournaments']=str(_e)
             legacy_counts={}
             legacy_db_local = get_db()
-            try:
-                for tbl in ['team_player_stats','match_scores','match_player_events','match_lineups','match_stats','match_flags']:
-                    try:
-                        cnt = legacy_db_local.execute(_sql_text(f'SELECT COUNT(*) FROM {tbl}')).scalar() or 0
-                        legacy_counts[tbl]=cnt
-                    except Exception as _tbl_e:
-                        legacy_counts[tbl]=f'err:{_tbl_e}'
-            finally:
-                try: legacy_db_local.close()
-                except Exception: pass
-            summary['legacy']=legacy_counts
-            try:
-                summary['_hash'] = _hashlib.sha256(_json.dumps(summary, sort_keys=True).encode()).hexdigest()
-            except Exception:
-                summary['_hash']=None
-            return summary
+
+    except Exception as e:
+        try:
+            adv_sess.rollback()
+        except Exception:
+            pass
+        app.logger.error(f"season rollover error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
+
+@app.route('/api/admin/google/repair-users-sheet', methods=['POST'])
+def api_admin_google_repair_users_sheet():
+    """Repair sheet: deduplicate rows for supported sheets (admin only).
+
+    Supported sheets: 'users' (dedupe by user_id), 'bets' (dedupe by id),
+    'ТАБЛИЦА' (league table) — dedupe identical rows. Use form/args 'sheet'.
+    Returns: { status, deduped_rows, removed_examples: [...] }
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+
+        target = (request.form.get('sheet') or request.args.get('sheet') or 'users')
+        target = target.strip()
+
+        creds_b64 = os.environ.get('GOOGLE_CREDENTIALS_B64', '')
+        if not creds_b64:
+            creds_raw = os.environ.get('GOOGLE_SHEETS_CREDENTIALS', '')
+            if creds_raw:
+                try:
+                    import base64 as _b64
+                    creds_b64 = _b64.b64encode(creds_raw.encode('utf-8')).decode('ascii')
+                except Exception:
+                    creds_b64 = ''
+        sheet_id = os.environ.get('SHEET_ID', '') or os.environ.get('SPREADSHEET_ID', '')
+        if not creds_b64 or not sheet_id:
+            return jsonify({'error': 'sheets_not_configured'}), 400
+
+        from utils.sheets import SheetsManager
+        sm = SheetsManager(creds_b64, sheet_id)
+
+        # Read rows
+        rows = sm.read_all_values(target)
+        if not rows or len(rows) <= 1:
+            return jsonify({'status': 'ok', 'note': f'{target} sheet empty or only header'}), 200
+
+        header = rows[0]
+        data_rows = rows[1:]
+        removed_examples = []
+        deduped_rows = []
+
+        if target.lower() == 'users':
+            # dedupe by user_id (col 0)
+            seen = {}
+            order = []
+            for idx, r in enumerate(data_rows):
+                if not r or len(r) == 0:
+                    continue
+                uid_raw = r[0] if len(r) > 0 else ''
+                try:
+                    uid = int(uid_raw)
+                except Exception:
+                    uid = uid_raw or ''
+                # record last occurrence; keep track of duplicates
+                if uid in seen:
+                    # previous will be candidate for removal; store example
+                    removed_examples.append({'user_id': uid, 'removed_row': r})
+                seen[uid] = r
+                if uid not in order:
+                    order.append(uid)
+            for uid in order:
+                r = seen.get(uid)
+                if r:
+                    if len(r) < len(header):
+                        r = r + [''] * (len(header) - len(r))
+                    deduped_rows.append(r[:len(header)])
+
+        elif target.lower() == 'bets':
+            # dedupe by bet id (col 0)
+            seen = {}
+            order = []
+            for r in data_rows:
+                if not r or len(r) == 0:
+                    continue
+                id_raw = r[0] if len(r) > 0 else ''
+                try:
+                    bid = int(id_raw)
+                except Exception:
+                    bid = id_raw or ''
+                if bid in seen:
+                    removed_examples.append({'bet_id': bid, 'removed_row': r})
+                seen[bid] = r
+                if bid not in order:
+                    order.append(bid)
+            for bid in order:
+                r = seen.get(bid)
+                if r:
+                    if len(r) < len(header):
+                        r = r + [''] * (len(header) - len(r))
+                    deduped_rows.append(r[:len(header)])
+
+        else:
+            # default: dedupe identical rows for arbitrary sheet (e.g., 'ТАБЛИЦА')
+            seen_set = {}
+            for r in data_rows:
+                key = tuple((c or '').strip() for c in r)
+                if key in seen_set:
+                    removed_examples.append({'duplicate_of': key, 'removed_row': r})
+                    continue
+                seen_set[key] = r
+                rr = r
+                if len(rr) < len(header):
+                    rr = rr + [''] * (len(header) - len(rr))
+                deduped_rows.append(rr[:len(header)])
+
+        # Rebuild output with header
+        out_rows = [header] + deduped_rows
+        # Rewrite sheet
+        try:
+            sm.clear_worksheet(target)
+        except Exception:
+            pass
+        success = sm.update_range(target, 'A1:'+ chr(ord('A') + max(0, len(header)-1)) + str(len(out_rows)), out_rows)
+        if not success:
+            return jsonify({'error': 'sheet_write_failed'}), 500
+
+        return jsonify({'status': 'ok', 'deduped_rows': len(deduped_rows), 'removed_examples': removed_examples[:10]}), 200
+    except Exception as e:
+        app.logger.error(f"repair-users-sheet error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
+        
         pre_summary=_collect_summary()
         if dry_run:
             return jsonify({

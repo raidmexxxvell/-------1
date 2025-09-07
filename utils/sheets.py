@@ -108,6 +108,21 @@ class SheetsManager:
             print(f"[ERROR] Failed to append row to {worksheet_name}: {e}")
             return False
 
+    def clear_worksheet(self, worksheet_name: str) -> bool:
+        """Clear all values in a worksheet (best-effort)."""
+        ws = self.get_worksheet(worksheet_name)
+        if not ws:
+            # create empty worksheet
+            ws = self.ensure_worksheet(worksheet_name)
+            if not ws:
+                return False
+        try:
+            ws.clear()
+            return True
+        except Exception as e:
+            print(f"[WARN] Failed to clear worksheet {worksheet_name}: {e}")
+            return False
+
 class DataSyncManager:
     """Manages data synchronization between Sheets and database"""
     
