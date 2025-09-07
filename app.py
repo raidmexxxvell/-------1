@@ -670,6 +670,7 @@ LEADER_RICH_CACHE = {'data': None, 'ts': 0, 'etag': ''}
 LEADER_SERVER_CACHE = {'data': None, 'ts': 0, 'etag': ''}
 LEADER_PRIZES_CACHE = {'data': None, 'ts': 0, 'etag': ''}
 LEADER_TTL = 60 * 60  # 1 час
+LEADERBOARD_ITEMS_CAP = int(os.environ.get('LEADERBOARD_ITEMS_CAP', '100'))  # safety cap for items length
 
 def _week_period_start_msk_to_utc(now_utc: datetime|None = None) -> datetime:
     """Возвращает UTC-время начала текущего лидерборд-периода: понедельник 03:00 по МСК (UTC+3).
@@ -3349,6 +3350,53 @@ def _json_response(payload: dict, status: int = 200):
 # ---------------------- ETag JSON Helper ----------------------
 _ETAG_HELPER_CACHE = {}
 _ETAG_HELPER_SWEEP = {'count': 0}
+# Lightweight ETag metrics (per endpoint_key). Thread-safe via local lock.
+_ETAG_METRICS_LOCK = threading.Lock()
+_ETAG_METRICS = {
+    'by_key': {}
+}
+
+def _etag_metrics_inc(endpoint_key: str, field: str, delta: int = 1):
+    try:
+        with _ETAG_METRICS_LOCK:
+            m = _ETAG_METRICS['by_key'].setdefault(endpoint_key, {
+                'requests': 0,
+                'etag_requests': 0,
+                'memory_hits': 0,
+                'builds': 0,
+                'served_200': 0,
+                'served_304': 0,
+                'last_ts': 0,
+            })
+            m[field] = int(m.get(field, 0)) + delta
+            if field in ('requests','etag_requests','memory_hits','builds','served_200','served_304'):
+                m['last_ts'] = int(time.time())
+    except Exception:
+        pass
+
+def _etag_metrics_snapshot(prefix: str | None = None):
+    try:
+        with _ETAG_METRICS_LOCK:
+            out = {}
+            for k, v in _ETAG_METRICS.get('by_key', {}).items():
+                if prefix and not k.startswith(prefix):
+                    continue
+                etag_req = int(v.get('etag_requests', 0)) or 0
+                served_304 = int(v.get('served_304', 0)) or 0
+                hit_ratio = (served_304 / etag_req) if etag_req > 0 else 0.0
+                out[k] = {
+                    'requests': int(v.get('requests', 0)),
+                    'etag_requests': etag_req,
+                    'memory_hits': int(v.get('memory_hits', 0)),
+                    'builds': int(v.get('builds', 0)),
+                    'served_200': int(v.get('served_200', 0)),
+                    'served_304': served_304,
+                    'hit_ratio': round(hit_ratio, 4),
+                    'last_ts': int(v.get('last_ts', 0)),
+                }
+            return out
+    except Exception:
+        return {}
 def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: int = 30, swr: int = 30, core_filter=None, cache_visibility: str = 'public'):
     """Универсальный helper: строит или отдаёт из памяти JSON + ETag + SWR.
 
@@ -3360,16 +3408,23 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
     """
     now = time.time()
     client_etag = request.headers.get('If-None-Match')
+    # Metrics: count request + whether client sent If-None-Match
+    _etag_metrics_inc(endpoint_key, 'requests', 1)
+    if client_etag:
+        _etag_metrics_inc(endpoint_key, 'etag_requests', 1)
     ce = _ETAG_HELPER_CACHE.get(endpoint_key)
     if ce and (now - ce['ts'] < cache_ttl):
+        _etag_metrics_inc(endpoint_key, 'memory_hits', 1)
         if client_etag and client_etag == ce['etag']:
             resp = flask.make_response('', 304)
             resp.headers['ETag'] = ce['etag']
             resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
+            _etag_metrics_inc(endpoint_key, 'served_304', 1)
             return resp
         resp = _json_response({**ce['payload'], 'version': ce['etag']})
         resp.headers['ETag'] = ce['etag']
         resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
+        _etag_metrics_inc(endpoint_key, 'served_200', 1)
         return resp
     payload = builder_func() or {}
     try:
@@ -3378,6 +3433,7 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
     except Exception:
         etag = hashlib.md5(str(endpoint_key).encode()).hexdigest()
     _ETAG_HELPER_CACHE[endpoint_key] = {'ts': now, 'payload': payload, 'etag': etag, 'ttl': cache_ttl}
+    _etag_metrics_inc(endpoint_key, 'builds', 1)
     # Periodic cleanup of stale cached entries to avoid unbounded growth
     try:
         _ETAG_HELPER_SWEEP['count'] = _ETAG_HELPER_SWEEP.get('count', 0) + 1
@@ -3396,10 +3452,12 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
         resp = flask.make_response('', 304)
         resp.headers['ETag'] = etag
         resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
+        _etag_metrics_inc(endpoint_key, 'served_304', 1)
         return resp
     resp = _json_response({**payload, 'version': etag})
     resp.headers['ETag'] = etag
     resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
+    _etag_metrics_inc(endpoint_key, 'served_200', 1)
     return resp
 
 def _cache_fresh(cache_obj: dict, ttl: int) -> bool:
@@ -4770,6 +4828,9 @@ def api_leader_top_predictors():
             if cache_manager:
                 cached = cache_manager.get('leaderboards', 'top-predictors')
                 if cached and isinstance(cached, dict) and (cached.get('items') is not None):
+                    # enforce cap
+                    if isinstance(cached.get('items'), list):
+                        cached = {**cached, 'items': cached['items'][:LEADERBOARD_ITEMS_CAP]}
                     return {**cached}
         except Exception:
             pass
@@ -4781,11 +4842,15 @@ def api_leader_top_predictors():
             finally:
                 db.close()
             if snap and snap.get('payload'):
-                return {**snap['payload']}
+                pay = dict(snap['payload'])
+                if isinstance(pay.get('items'), list):
+                    pay['items'] = pay['items'][:LEADERBOARD_ITEMS_CAP]
+                return pay
         # 2) In-memory fast cache (старый формат) – если свежий, используем
         global LEADER_PRED_CACHE
         if _cache_fresh(LEADER_PRED_CACHE, LEADER_TTL):
-            return { 'items': LEADER_PRED_CACHE['data'], 'updated_at': datetime.fromtimestamp(LEADER_PRED_CACHE['ts']).isoformat() }
+            data = (LEADER_PRED_CACHE['data'] or [])
+            return { 'items': data[:LEADERBOARD_ITEMS_CAP], 'updated_at': datetime.fromtimestamp(LEADER_PRED_CACHE['ts']).isoformat() }
         # 3) Строим заново
         if SessionLocal is None:
             return {'items': [], 'updated_at': None}
@@ -4806,7 +4871,7 @@ def api_leader_top_predictors():
                     'winrate': pct
                 })
             rows.sort(key=lambda x: (-x['winrate'], -x['bets_total'], x['display_name']))
-            rows = rows[:10]
+            rows = rows[:min(10, LEADERBOARD_ITEMS_CAP)]
             # mirror into old cache to allow smooth transition / invalidation code reuse
             LEADER_PRED_CACHE = { 'data': rows, 'ts': time.time(), 'etag': _etag_for_payload({'items': rows}) }
             return {'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat()}
@@ -4823,6 +4888,8 @@ def api_leader_top_rich():
             if cache_manager:
                 cached = cache_manager.get('leaderboards', 'top-rich')
                 if cached and isinstance(cached, dict) and (cached.get('items') is not None):
+                    if isinstance(cached.get('items'), list):
+                        cached = {**cached, 'items': cached['items'][:LEADERBOARD_ITEMS_CAP]}
                     return {**cached}
         except Exception:
             pass
@@ -4833,10 +4900,14 @@ def api_leader_top_rich():
             finally:
                 db.close()
             if snap and snap.get('payload'):
-                return {**snap['payload']}
+                pay = dict(snap['payload'])
+                if isinstance(pay.get('items'), list):
+                    pay['items'] = pay['items'][:LEADERBOARD_ITEMS_CAP]
+                return pay
         global LEADER_RICH_CACHE
         if _cache_fresh(LEADER_RICH_CACHE, LEADER_TTL):
-            return { 'items': LEADER_RICH_CACHE['data'], 'updated_at': datetime.fromtimestamp(LEADER_RICH_CACHE['ts']).isoformat() }
+            data = (LEADER_RICH_CACHE['data'] or [])
+            return { 'items': data[:LEADERBOARD_ITEMS_CAP], 'updated_at': datetime.fromtimestamp(LEADER_RICH_CACHE['ts']).isoformat() }
         if SessionLocal is None:
             return {'items': [], 'updated_at': None}
         db: Session = get_db()
@@ -4857,7 +4928,7 @@ def api_leader_top_rich():
                     'gain': int(gain),
                 })
             rows.sort(key=lambda x: (-x['gain'], x['display_name']))
-            rows = rows[:10]
+            rows = rows[:min(10, LEADERBOARD_ITEMS_CAP)]
             LEADER_RICH_CACHE = {'data': rows, 'ts': time.time(), 'etag': _etag_for_payload({'items': rows})}
             return {'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat()}
         finally:
@@ -4876,6 +4947,8 @@ def api_leader_server_leaders():
             if cache_manager:
                 cached = cache_manager.get('leaderboards', 'server-leaders')
                 if cached and isinstance(cached, dict) and (cached.get('items') is not None):
+                    if isinstance(cached.get('items'), list):
+                        cached = {**cached, 'items': cached['items'][:LEADERBOARD_ITEMS_CAP]}
                     return {**cached}
         except Exception:
             pass
@@ -4886,10 +4959,14 @@ def api_leader_server_leaders():
             finally:
                 db.close()
             if snap and snap.get('payload'):
-                return {**snap['payload']}
+                pay = dict(snap['payload'])
+                if isinstance(pay.get('items'), list):
+                    pay['items'] = pay['items'][:LEADERBOARD_ITEMS_CAP]
+                return pay
         global LEADER_SERVER_CACHE
         if _cache_fresh(LEADER_SERVER_CACHE, LEADER_TTL):
-            return { 'items': LEADER_SERVER_CACHE['data'], 'updated_at': datetime.fromtimestamp(LEADER_SERVER_CACHE['ts']).isoformat() }
+            data = (LEADER_SERVER_CACHE['data'] or [])
+            return { 'items': data[:LEADERBOARD_ITEMS_CAP], 'updated_at': datetime.fromtimestamp(LEADER_SERVER_CACHE['ts']).isoformat() }
         if SessionLocal is None:
             return {'items': [], 'updated_at': None}
         db: Session = get_db()
@@ -4908,7 +4985,7 @@ def api_leader_server_leaders():
                     'score': score
                 })
             rows.sort(key=lambda x: (-x['score'], -x['level'], -x['xp']))
-            rows = rows[:10]
+            rows = rows[:min(10, LEADERBOARD_ITEMS_CAP)]
             LEADER_SERVER_CACHE = { 'data': rows, 'ts': time.time(), 'etag': _etag_for_payload({'items': rows}) }
             return {'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat()}
         finally:
@@ -5874,6 +5951,42 @@ def health_db_retry_metrics():
         return _json_response(out, 200)
     except Exception as e:
         app.logger.error(f"db-retry-metrics error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
+@app.route('/health/etag-metrics')
+def health_etag_metrics():
+    """Admin-only: Возвращает метрики ETag по ключам endpoint_key с hit ratio.
+
+    Формат: { by_key: { key: { requests, etag_requests, memory_hits, builds, served_200, served_304, hit_ratio, last_ts } } }
+    Можно фильтровать по префиксу ?prefix=leader- (или другому), чтобы получить только нужные ключи.
+    Доступ: как /health/db-retry-metrics — admin через initData или секретный заголовок X-METRICS-KEY.
+    """
+    try:
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        metrics_secret = os.environ.get('METRICS_SECRET', '')
+        allowed = False
+        try:
+            hdr = request.headers.get('X-METRICS-KEY', '')
+            if metrics_secret and hdr and hmac.compare_digest(hdr, metrics_secret):
+                allowed = True
+        except Exception:
+            pass
+        if not allowed and admin_id:
+            try:
+                init_data = (request.args.get('initData') or request.headers.get('X-Telegram-Init-Data') or request.form.get('initData') or '')
+                if init_data:
+                    parsed = parse_and_verify_telegram_init_data(init_data)
+                    if parsed and parsed.get('user') and str(parsed['user'].get('id')) == str(admin_id):
+                        allowed = True
+            except Exception:
+                pass
+        if not allowed:
+            return jsonify({'error': 'unauthorized'}), 401
+        prefix = request.args.get('prefix') or None
+        snap = _etag_metrics_snapshot(prefix)
+        return _json_response({'by_key': snap}, 200)
+    except Exception as e:
+        app.logger.error(f"etag-metrics error: {e}")
         return jsonify({'error': 'internal'}), 500
 
 # Telegram webhook handler with proper validation and logging.

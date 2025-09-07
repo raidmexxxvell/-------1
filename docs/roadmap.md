@@ -359,6 +359,12 @@ UI / UX мелкие правки (быстрый финиш)
   - ⬜ Среднее время генерации payload vs отдача из кэша
   - ⬜ Кол-во WebSocket сообщений/мин после batching
 
+### Обновления — 2025-09-07 (наблюдаемость ETag + лидерборд cap)
+- Добавлены лёгкие ETag‑метрики в helper `etag_json`: собираются per-endpoint (`requests`, `etag_requests`, `memory_hits`, `builds`, `served_200`, `served_304`, `hit_ratio`).
+- Новый admin-only endpoint `/health/etag-metrics` (секретный `X-METRICS-KEY` или Telegram admin initData) с фильтром `?prefix=leader-` для выборки по лидерам.
+- Введён безопасный cap `LEADERBOARD_ITEMS_CAP` (env, по умолчанию 100) на массивы `items` в `/api/leaderboard/top-predictors`, `/api/leaderboard/top-rich`, `/api/leaderboard/server-leaders` на всех уровнях (Redis/DB snapshot/in-memory/fresh build).
+- 🔄 Roadmap has been updated
+
 
 ### ⚽ Управление командами и матчами
 
