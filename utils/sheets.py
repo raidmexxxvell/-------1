@@ -35,11 +35,24 @@ class SheetsManager:
                 print(f"[ERROR] Failed to initialize Google Sheets: {e}")
                 raise
     
-    def get_worksheet(self, name: str):
-        """Get worksheet by name"""
+    def ensure_worksheet(self, name: str, rows: int = 100, cols: int = 26):
+        """Get worksheet by name, creating it if missing."""
         if not self.spreadsheet:
             raise ValueError("Spreadsheet not initialized")
-        
+        try:
+            return self.spreadsheet.worksheet(name)
+        except gspread.WorksheetNotFound:
+            try:
+                ws = self.spreadsheet.add_worksheet(title=name, rows=rows, cols=cols)
+                return ws
+            except Exception as e:
+                print(f"[ERROR] Failed to create worksheet {name}: {e}")
+                return None
+
+    def get_worksheet(self, name: str):
+        """Get worksheet by name (no auto-create)"""
+        if not self.spreadsheet:
+            raise ValueError("Spreadsheet not initialized")
         try:
             return self.spreadsheet.worksheet(name)
         except gspread.WorksheetNotFound:
@@ -47,7 +60,7 @@ class SheetsManager:
     
     def read_range(self, worksheet_name: str, range_name: str) -> Optional[List[List[str]]]:
         """Read data from specific range"""
-        worksheet = self.get_worksheet(worksheet_name)
+    worksheet = self.get_worksheet(worksheet_name)
         if not worksheet:
             return None
         
@@ -71,7 +84,7 @@ class SheetsManager:
     
     def update_range(self, worksheet_name: str, range_name: str, values: List[List[Any]]) -> bool:
         """Update range with values"""
-        worksheet = self.get_worksheet(worksheet_name)
+        worksheet = self.ensure_worksheet(worksheet_name)
         if not worksheet:
             return False
         
@@ -84,7 +97,7 @@ class SheetsManager:
     
     def append_row(self, worksheet_name: str, values: List[Any]) -> bool:
         """Append row to worksheet"""
-        worksheet = self.get_worksheet(worksheet_name)
+        worksheet = self.ensure_worksheet(worksheet_name)
         if not worksheet:
             return False
         

@@ -7348,9 +7348,18 @@ def api_admin_google_export_all():
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
-        # Требуются env: GOOGLE_CREDENTIALS_B64, SHEET_ID
+        # Требуются env: GOOGLE_CREDENTIALS_B64 или GOOGLE_SHEETS_CREDENTIALS; SHEET_ID или SPREADSHEET_ID
         creds_b64 = os.environ.get('GOOGLE_CREDENTIALS_B64', '')
-        sheet_id = os.environ.get('SHEET_ID', '')
+        if not creds_b64:
+            # Поддержка raw JSON в GOOGLE_SHEETS_CREDENTIALS
+            creds_raw = os.environ.get('GOOGLE_SHEETS_CREDENTIALS', '')
+            if creds_raw:
+                try:
+                    import base64 as _b64
+                    creds_b64 = _b64.b64encode(creds_raw.encode('utf-8')).decode('ascii')
+                except Exception:
+                    creds_b64 = ''
+        sheet_id = os.environ.get('SHEET_ID', '') or os.environ.get('SPREADSHEET_ID', '')
         if not creds_b64 or not sheet_id:
             return jsonify({'error': 'sheets_not_configured'}), 400
         # Собираем данные из БД
