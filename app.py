@@ -5686,21 +5686,65 @@ def get_achievements():
         upd(weeks_tier>ach.get('weeks_tier',0), [(f'R{ach_row}', str(weeks_tier)), (f'S{ach_row}', now_iso)])
         if updates: get_achievements_sheet().batch_update(updates)
 
+        # Учитываем перманентно достигнутый tier из таблицы достижений (best_*_tier)
+        best_streak_tier = max(int(ach.get('streak_tier', 0) or 0), int(streak_tier or 0))
+        best_credits_tier = max(int(ach.get('credits_tier', 0) or 0), int(credits_tier or 0))
+        best_level_tier = max(int(ach.get('level_tier', 0) or 0), int(level_tier or 0))
+        best_invited_tier = max(int(ach.get('invited_tier', 0) or 0), int(invited_tier or 0))
+        best_betcount_tier = max(int(ach.get('betcount_tier', 0) or 0), int(betcount_tier or 0))
+        best_betwins_tier = max(int(ach.get('betwins_tier', 0) or 0), int(betwins_tier or 0))
+        best_bigodds_tier = max(int(ach.get('bigodds_tier', 0) or 0), int(bigodds_tier or 0))
+        best_markets_tier = max(int(ach.get('markets_tier', 0) or 0), int(markets_tier or 0))
+        best_weeks_tier = max(int(ach.get('weeks_tier', 0) or 0), int(weeks_tier or 0))
+
         achievements=[]
-        def add(group, tier, name_map, value, targets, icon_map, unlocked):
+        def add(group, best_tier, name_map, value, targets, icon_map):
+            # unlocked отражает факт, что когда-то был достигнут как минимум 1-й tier
+            unlocked = bool(best_tier)
             if unlocked:
-                achievements.append({'group':group,'tier':tier,'name':name_map[tier],'value':value,'target':{1:targets[0],2:targets[1],3:targets[2]}[tier],'next_target':_next_target_by_value(value, targets),'all_targets':targets,'icon':icon_map[tier],'unlocked':True})
+                # Используем best_tier для визуального бейджа, но прогресс считаем от текущего value
+                try:
+                    display_name = name_map[max(1, min(3, int(best_tier)))]
+                    display_icon = icon_map[max(1, min(3, int(best_tier)))]
+                    display_target = {1:targets[0],2:targets[1],3:targets[2]}[max(1, min(3, int(best_tier)))]
+                except Exception:
+                    display_name = list(name_map.values())[0]
+                    display_icon = icon_map.get(1, 'bronze')
+                    display_target = targets[0] if targets else None
+                achievements.append({
+                    'group': group,
+                    'tier': int(best_tier),
+                    'best_tier': int(best_tier),
+                    'name': display_name,
+                    'value': value,
+                    'target': display_target,
+                    'next_target': _next_target_by_value(value, targets),
+                    'all_targets': targets,
+                    'icon': display_icon,
+                    'unlocked': True
+                })
             else:
-                achievements.append({'group':group,'tier':1,'name':list(name_map.values())[0],'value':value,'target':targets[0],'next_target':_next_target_by_value(value, targets),'all_targets':targets,'icon':icon_map[1],'unlocked':False})
-        add('streak', streak_tier, {1:'Бронза',2:'Серебро',3:'Золото'}, user['consecutive_days'], streak_targets, {1:'bronze',2:'silver',3:'gold'}, bool(streak_tier))
-        add('credits', credits_tier, {1:'Бедолага',2:'Мажор',3:'Олигарх'}, user['credits'], credits_targets, {1:'bronze',2:'silver',3:'gold'}, bool(credits_tier))
-        add('level', level_tier, {1:'Новобранец',2:'Ветеран',3:'Легенда'}, user['level'], level_targets, {1:'bronze',2:'silver',3:'gold'}, bool(level_tier))
-        add('invited', invited_tier, {1:'Рекрутер',2:'Посол',3:'Легенда'}, invited_count, invited_targets, {1:'bronze',2:'silver',3:'gold'}, bool(invited_tier))
-        add('betcount', betcount_tier, {1:'Новичок ставок',2:'Профи ставок',3:'Марафонец'}, bet_stats['total'], betcount_targets, {1:'bronze',2:'silver',3:'gold'}, bool(betcount_tier))
-        add('betwins', betwins_tier, {1:'Счастливчик',2:'Снайпер',3:'Чемпион'}, bet_stats['won'], betwins_targets, {1:'bronze',2:'silver',3:'gold'}, bool(betwins_tier))
-        add('bigodds', bigodds_tier, {1:'Рисковый',2:'Хайроллер',3:'Легенда кэфов'}, bet_stats['max_win_odds'], bigodds_targets, {1:'bronze',2:'silver',3:'gold'}, bool(bigodds_tier))
-        add('markets', markets_tier, {1:'Универсал I',2:'Универсал II',3:'Универсал III'}, len(bet_stats['markets_used']), markets_targets, {1:'bronze',2:'silver',3:'gold'}, bool(markets_tier))
-        add('weeks', weeks_tier, {1:'Регуляр',2:'Постоянный',3:'Железный'}, len(bet_stats['weeks_active']), weeks_targets, {1:'bronze',2:'silver',3:'gold'}, bool(weeks_tier))
+                achievements.append({
+                    'group': group,
+                    'tier': 0,
+                    'best_tier': 0,
+                    'name': list(name_map.values())[0],
+                    'value': value,
+                    'target': targets[0] if targets else None,
+                    'next_target': _next_target_by_value(value, targets),
+                    'all_targets': targets,
+                    'icon': icon_map.get(1, 'bronze'),
+                    'unlocked': False
+                })
+        add('streak', best_streak_tier, {1:'Бронза',2:'Серебро',3:'Золото'}, user['consecutive_days'], streak_targets, {1:'bronze',2:'silver',3:'gold'})
+        add('credits', best_credits_tier, {1:'Бедолага',2:'Мажор',3:'Олигарх'}, user['credits'], credits_targets, {1:'bronze',2:'silver',3:'gold'})
+        add('level', best_level_tier, {1:'Новобранец',2:'Ветеран',3:'Легенда'}, user['level'], level_targets, {1:'bronze',2:'silver',3:'gold'})
+        add('invited', best_invited_tier, {1:'Рекрутер',2:'Посол',3:'Легенда'}, invited_count, invited_targets, {1:'bronze',2:'silver',3:'gold'})
+        add('betcount', best_betcount_tier, {1:'Новичок ставок',2:'Профи ставок',3:'Марафонец'}, bet_stats['total'], betcount_targets, {1:'bronze',2:'silver',3:'gold'})
+        add('betwins', best_betwins_tier, {1:'Счастливчик',2:'Снайпер',3:'Чемпион'}, bet_stats['won'], betwins_targets, {1:'bronze',2:'silver',3:'gold'})
+        add('bigodds', best_bigodds_tier, {1:'Рисковый',2:'Хайроллер',3:'Легенда кэфов'}, bet_stats['max_win_odds'], bigodds_targets, {1:'bronze',2:'silver',3:'gold'})
+        add('markets', best_markets_tier, {1:'Универсал I',2:'Универсал II',3:'Универсал III'}, len(bet_stats['markets_used']), markets_targets, {1:'bronze',2:'silver',3:'gold'})
+        add('weeks', best_weeks_tier, {1:'Регуляр',2:'Постоянный',3:'Железный'}, len(bet_stats['weeks_active']), weeks_targets, {1:'bronze',2:'silver',3:'gold'})
         # Финальный payload
         resp_payload = {'achievements': achievements}
         # Стабильный ETag (sorted keys)

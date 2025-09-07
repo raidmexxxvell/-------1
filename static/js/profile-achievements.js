@@ -15,7 +15,8 @@
       const empty=document.createElement('div'); empty.style.cssText='padding:12px; color:var(--gray); font-size:12px;'; empty.textContent='Пока нет достижений'; badgesContainer.appendChild(empty); return; }
     const slugify = (s) => (s||'').toString().trim().toLowerCase().replace(/[\s_/]+/g,'-').replace(/[^a-z0-9\-]/g,'');
     const stateFromTier = (a) => {
-      const t = (typeof a.tier === 'number') ? a.tier : null;
+      // Показываем визуальный уровень по best_tier (перманентно достигнутый), если он есть
+      const t = (typeof a.best_tier === 'number' && a.best_tier > 0) ? a.best_tier : ((typeof a.tier === 'number') ? a.tier : null);
       if (a.unlocked === false || t === 0) return 'locked';
       if (t === 1) return 'bronze';
       if (t === 2) return 'silver';
@@ -38,7 +39,7 @@
       svgFallbacks.forEach(s => { if(!candidates.includes(s)) candidates.push(s); });
       let i=0; const next=()=>{ if(i>=candidates.length) return; imgEl.onerror=()=>{ i++; next(); }; imgEl.src=candidates[i]; }; next();
     };
-    const descFor = (a) => {
+  const descFor = (a) => {
       try {
         switch(a.group){
           case 'streak': return `Дней подряд`;
@@ -105,115 +106,42 @@
       toggleBtn.addEventListener('click', e=>{ e.stopPropagation(); toggle(); });
       toggleBtn.addEventListener('keydown', e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggle(); } });
       
-      // Улучшенное отображение прогресса и требований
-      if(a.value !== undefined && (a.target !== undefined || a.next_target !== undefined)) {
-        const currentValue = a.value || 0;
-        let currentTarget = a.target || 0;
-        let nextTarget = a.next_target;
-        
-        console.debug(`Processing achievement: ${a.name} (${a.group}), value: ${currentValue}, original target: ${currentTarget}, next: ${nextTarget}`);
-        
-        // Специальная логика для разных типов достижений с правильными целями
-        if (a.group === 'streak') {
-          const streakTargets = [7, 30, 120]; // Правильные цели для streak
-          
-          // Находим текущую и следующую цель
-          let currentTargetIndex = streakTargets.findIndex(target => currentValue < target);
-          if (currentTargetIndex === -1) {
-            // Достигли максимальной цели
-            currentTarget = streakTargets[streakTargets.length - 1];
-            nextTarget = null;
-          } else {
-            currentTarget = streakTargets[currentTargetIndex];
-            nextTarget = streakTargets[currentTargetIndex + 1] || null;
-          }
-        } else if (a.group === 'betcount') {
-          const betTargets = [10, 50, 200]; // Цели для количества ставок
-          
-          let currentTargetIndex = betTargets.findIndex(target => currentValue < target);
-          if (currentTargetIndex === -1) {
-            currentTarget = betTargets[betTargets.length - 1];
-            nextTarget = null;
-          } else {
-            currentTarget = betTargets[currentTargetIndex];
-            nextTarget = betTargets[currentTargetIndex + 1] || null;
-          }
-        } else if (a.group === 'credits') {
-          const creditTargets = [1000, 5000, 20000]; // Цели для кредитов
-          
-          let currentTargetIndex = creditTargets.findIndex(target => currentValue < target);
-          if (currentTargetIndex === -1) {
-            currentTarget = creditTargets[creditTargets.length - 1];
-            nextTarget = null;
-          } else {
-            currentTarget = creditTargets[currentTargetIndex];
-            nextTarget = creditTargets[currentTargetIndex + 1] || null;
-          }
-        } else if (a.group === 'invited') {
-          const inviteTargets = [1, 5, 20]; // Цели для приглашений
-          
-          let currentTargetIndex = inviteTargets.findIndex(target => currentValue < target);
-          if (currentTargetIndex === -1) {
-            currentTarget = inviteTargets[inviteTargets.length - 1];
-            nextTarget = null;
-          } else {
-            currentTarget = inviteTargets[currentTargetIndex];
-            nextTarget = inviteTargets[currentTargetIndex + 1] || null;
-          }
-        }
-        
-        console.debug(`After processing: target: ${currentTarget}, next: ${nextTarget}`);
-        
-        // Простая логика отображения прогресса
-        let displayTarget = currentTarget;
-        let progressValue = currentValue;
-        let isCompleted = false;
-        
-        // Если достигли текущую цель и есть следующая
-        if (currentValue >= currentTarget && nextTarget && nextTarget > currentTarget) {
-          displayTarget = nextTarget;
-          progressValue = currentValue;
-          isCompleted = false;
-        } else if (currentValue >= currentTarget && !nextTarget) {
-          // Достигли финальную цель
-          displayTarget = currentTarget;
-          progressValue = currentTarget;
-          isCompleted = true;
-        } else {
-          // Ещё не достигли текущую цель
-          displayTarget = currentTarget;
-          progressValue = currentValue;
-          isCompleted = false;
-        }
-        
-        // Текст с прогрессом - более понятный и простой
+      // Улучшенное отображение прогресса и требований (используем server all_targets/next_target)
+      const hasProgressFields = (a.value !== undefined) && (Array.isArray(a.all_targets) && a.all_targets.length > 0);
+      if (hasProgressFields) {
+        const currentValue = Number(a.value || 0);
+        const targets = a.all_targets.slice();
+        const nextTarget = (a.next_target !== undefined && a.next_target !== null) ? Number(a.next_target) : (()=>{
+          for (let i=0;i<targets.length;i++){ if(currentValue < Number(targets[i])) return Number(targets[i]); }
+          return null;
+        })();
+
+        // Лестница целей: "Цели: 7/30/120" (или соответствующие для группы)
+        const ladderText = `Цели: ${targets.join('/')}`;
+
+        // Текст прогресса
         const baseDesc = descFor(a);
-        if (isCompleted) {
-          req.textContent = `${baseDesc} ✅ Завершено (${currentValue})`;
+        if (nextTarget === null) {
+          req.textContent = `${baseDesc} ✅ Выполнено (${currentValue}). ${ladderText}`;
         } else {
-          req.textContent = `${baseDesc}: ${progressValue}/${displayTarget}`;
+          req.textContent = `${baseDesc}: ${currentValue}/${nextTarget}. ${ladderText}`;
         }
-        
-        // Прогресс-бар - простая логика
-        const progressContainer = document.createElement('div'); 
+
+        // Прогресс-бар относительно ближайшей цели
+        const progressContainer = document.createElement('div');
         progressContainer.className='achv-progress-container';
-        const progressBar = document.createElement('div'); 
+        const progressBar = document.createElement('div');
         progressBar.className='achv-progress-bar';
-        
-        let progressPercent = 0;
-        if (isCompleted) {
-          progressPercent = 100;
-        } else {
-          // Простой расчет процента
-          progressPercent = Math.min(100, (progressValue / displayTarget) * 100);
-        }
-        
+        const denom = nextTarget || targets[targets.length-1];
+        const progressPercent = Math.max(0, Math.min(100, denom ? (currentValue/denom*100) : 0));
         progressBar.style.width = progressPercent + '%';
         progressContainer.appendChild(progressBar);
-  card.append(img,name,req,progressContainer,toggleBtn,fullDescEl);
+        card.append(img,name,req,progressContainer,toggleBtn,fullDescEl);
       } else {
-  req.textContent = descFor(a);
-  card.append(img,name,req,toggleBtn,fullDescEl);
+        // Нет числового прогресса — просто описание
+        const targets = Array.isArray(a.all_targets) && a.all_targets.length ? ` Цели: ${a.all_targets.join('/')}` : '';
+        req.textContent = `${descFor(a)}${targets}`;
+        card.append(img,name,req,toggleBtn,fullDescEl);
       }
       
       badgesContainer.appendChild(card);

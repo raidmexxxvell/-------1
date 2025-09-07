@@ -1,6 +1,6 @@
 # Анализ кодовой базы: Лига Обнинска (Актуализировано)
 
-> Дата актуализации: 2025-09-06  
+> Дата актуализации: 2025-09-07  
 > Текущая версия `app.py`: ~9750 строк (etag_json расширен, /api/match-details переведён на etag_json, централизованный DB retry helper для чтений).  
 > Последние ключевые изменения: persistent roster (`team_roster`), публичный эндпоинт lineups, унификация match-details через `etag_json` (server) и `fetchMatchDetails` (client), миграция schedule/results на `etag_json` (server) и `fetchEtag` (client), числовой прогресс splash (stage API), UI фиксы горизонтального скролла, централизованный DB retry для `/api/betting/my-bets`.
 
@@ -82,7 +82,9 @@
 
 - Лидерборды и достижения
     - Серверные эндпоинты (ETag): `app.py` → `/api/leaderboard/*`, `/api/achievements`
+    - API `/api/achievements`: добавлено поле `best_tier` (наивысший достигнутый уровень), сохранены `all_targets` и `next_target` для клиентского прогресса.
     - Клиентские вызовы: `static/js/profile.js` (leaderboards) и `static/js/profile-achievements.js`
+    - Рендер достижений: бейдж (иконка/цвет) определяется по `best_tier`; в описании добавляется «Цели: <all_targets.join('/')>»; прогресс показывается как `value/next_target`.
     - Универсальная утилита SWR/ETag: `static/js/etag-fetch.js`
     - Поведение обновления: лидерборды обновляются через ETag‑пуллинг каждые ~60с с джиттером, отменяется при скрытии вкладки и при переходе на другие сабвкладки (реализовано в `static/js/profile.js`).
 
