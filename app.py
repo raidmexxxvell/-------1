@@ -8547,6 +8547,90 @@ def api_admin_season_rollover_inline():
         try: adv_sess.close()
         except Exception: pass
 
+@app.route('/api/admin/season/rollback', methods=['POST'])
+def api_admin_season_rollback_inline():
+    """Откат к предыдущему сезону на основе последней записи в season_rollovers.
+    Делает предыдущий турнир активным, а текущий — завершённым.
+    Поддерживает ?dry=1 (показать план) и ?force=1 (игнорировать несоответствие активного турнира).
+    """
+    if not _admin_cookie_or_telegram_ok():
+        return jsonify({'error': 'Недействительные данные'}), 401
+    try:
+        # Расширенная схема
+        from database.database_models import db_manager as adv_db_manager, Tournament
+        adv_db_manager._ensure_initialized()
+    except Exception as imp_err:
+        return jsonify({'error': f'advanced schema unavailable: {imp_err}'}), 500
+
+    dry_run = request.args.get('dry') in ('1','true','yes')
+    force = request.args.get('force') in ('1','true','yes')
+
+    adv_sess = adv_db_manager.get_session()
+    from sqlalchemy import text as _sql_text
+    try:
+        row = adv_sess.execute(_sql_text('SELECT id, prev_tournament_id, prev_season, new_tournament_id, new_season, soft_mode, legacy_cleanup_done, created_at FROM season_rollovers ORDER BY id DESC LIMIT 1')).fetchone()
+        if not row:
+            return jsonify({'error': 'no_rollover_history'}), 400
+        audit_id, prev_tid, prev_season, cur_tid, cur_season, soft_mode, legacy_cleanup_done, created_at = row
+
+        prev_t = adv_sess.query(Tournament).get(prev_tid) if prev_tid else None
+        cur_t = adv_sess.query(Tournament).get(cur_tid) if cur_tid else None
+        if not prev_t or not cur_t:
+            return jsonify({'error': 'tournament_not_found', 'details': {'prev_tournament_id': prev_tid, 'new_tournament_id': cur_tid}}), 404
+
+        # Текущий активный
+        active_t = (adv_sess.query(Tournament)
+                    .filter(Tournament.status=='active')
+                    .order_by(Tournament.start_date.desc().nullslast(), Tournament.created_at.desc())
+                    .first())
+        if active_t and active_t.id != cur_t.id and not force:
+            return jsonify({'error': 'active_mismatch', 'expected_active_id': cur_t.id, 'actual_active_id': active_t.id, 'hint': 'use ?force=1 to override'}), 409
+
+        if dry_run:
+            return jsonify({
+                'ok': True,
+                'dry_run': True,
+                'will_activate': {'id': prev_t.id, 'season': prev_t.season},
+                'will_deactivate': {'id': cur_t.id, 'season': cur_t.season},
+                'warning': None if (soft_mode or not legacy_cleanup_done) else 'Legacy-данные были очищены при предыдущем rollover и не будут восстановлены'
+            })
+
+        # Переключаем статусы
+        from datetime import date as _date
+        cur_t.status = 'completed'
+        if not cur_t.end_date:
+            cur_t.end_date = _date.today()
+        prev_t.status = 'active'
+        prev_t.end_date = None
+        adv_sess.commit()
+
+        # Инвалидация кэшей
+        try:
+            from optimizations.multilevel_cache import get_cache
+            cache = get_cache()
+            for key in ('league_table','stats_table','results','schedule','tours','betting-tours'):
+                try: cache.invalidate(key)
+                except Exception: pass
+        except Exception as _c_err:
+            app.logger.warning(f"cache invalidate failed season rollback: {_c_err}")
+
+        return jsonify({
+            'ok': True,
+            'activated_season': prev_t.season,
+            'deactivated_season': cur_t.season,
+            'activated_tournament_id': prev_t.id,
+            'deactivated_tournament_id': cur_t.id,
+            'legacy_restored': False,
+            'legacy_cleanup_was_done': bool(legacy_cleanup_done),
+            'soft_mode_rollover': bool(soft_mode)
+        })
+    except Exception as e:
+        app.logger.error(f"Season rollback error (inline): {e}")
+        return jsonify({'error': 'season rollback failed'}), 500
+    finally:
+        try: adv_sess.close()
+        except Exception: pass
+
 @app.route('/test-themes')
 def test_themes():
     """Тестирование цветовых схем"""

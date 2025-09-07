@@ -60,7 +60,7 @@ class SheetsManager:
     
     def read_range(self, worksheet_name: str, range_name: str) -> Optional[List[List[str]]]:
         """Read data from specific range"""
-    worksheet = self.get_worksheet(worksheet_name)
+        worksheet = self.get_worksheet(worksheet_name)
         if not worksheet:
             return None
         
