@@ -90,7 +90,11 @@
     - Заголовок свежести: сервер добавляет `X-Updated-At` в ответы 200/304; клиент (через `etag-fetch.js`) при 304 использует `headerUpdatedAt`, чтобы обновить лейбл «Обновлено» без перезагрузки тела.
 
 - Страница команды (новое)
-    - API: `GET /api/team/overview?name=...` — агрегированные показатели по команде за все сезоны (W/D/L, GF/GA, clean sheets, last5). Кэш: `etag_json` (`public, max-age=60, stale-while-revalidate=300`, `X-Updated-At`).
+        - API: `GET /api/team/overview?name=...` — агрегированные показатели по команде за все сезоны (W/D/L, GF/GA, clean sheets, last5), а также:
+                - `recent` — два последних завершённых матча: `{date, opponent, score, result}`
+                - `tournaments` — число уникальных турниров, в которых команда участвовала
+                - `cards` — суммарно `{ yellow, red }`
+            Кэш: `etag_json` (`public, max-age=60, stale-while-revalidate=300`, `X-Updated-At`).
     - Клиент: `static/js/profile-team.js` — `TeamPage.openTeam(name)` загружает данные, обновляет «Обновлено» по `headerUpdatedAt` даже при 304.
     - Навигация: разметка в `templates/index.html` — панель `#ufo-team` с сабвкладками «Обзор/Матчи/Состав» (последние две — заглушки).
     - Точки входа: клики по `.team-name[data-team-name]` в расписании/результатах/таблице, а также в «Прогнозах» и карточке «Игра недели».

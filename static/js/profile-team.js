@@ -32,22 +32,80 @@
     if (!host) return;
     host.innerHTML = '';
     const stats = payload?.stats || { matches:0,wins:0,draws:0,losses:0,goals_for:0,goals_against:0,clean_sheets:0,last5:[] };
-    const wrap = document.createElement('div');
-    wrap.style.display = 'grid'; wrap.style.gridTemplateColumns = 'repeat(3,1fr)'; wrap.style.gap = '10px'; wrap.style.padding = '10px';
-    const card = (label, value) => { const d=document.createElement('div'); d.className='stat-card'; d.innerHTML = `<div class="stat-value">${value}</div><div class="stat-label">${label}</div>`; return d; };
-    wrap.append(
-      card('Матчей', stats.matches||0),
-      card('Побед', stats.wins||0),
-      card('Ничьих', stats.draws||0),
-      card('Поражений', stats.losses||0),
-      card('Голы (заб.)', stats.goals_for||0),
-      card('Голы (проп.)', stats.goals_against||0),
-      card('Сухие', stats.clean_sheets||0)
+
+    // Раздел: Форма (2 последних матча)
+    const section = document.createElement('div'); section.className = 'team-overview-section';
+    const title = document.createElement('div'); title.className = 'section-title'; title.textContent = 'Форма';
+    const form = document.createElement('div'); form.className = 'team-form';
+    const last2 = Array.isArray(payload?.recent) && payload.recent.length ? payload.recent.slice(0,2) : (stats.last5||[]).slice(0,2);
+    last2.forEach((r) => {
+      const cell = document.createElement('div'); cell.className='form-cell';
+      const dt = document.createElement('div'); dt.className='form-date';
+      const item = document.createElement('div'); item.className='form-item';
+      const logoWrap = document.createElement('div'); logoWrap.className='logo-wrap';
+      const logo = document.createElement('img'); logo.className='logo'; logo.alt='';
+      try { (window.setTeamLogo||window.TeamUtils?.setTeamLogo)?.(logo, payload?.team?.name || ''); } catch(_) {}
+      const scoreOverlay = document.createElement('div'); scoreOverlay.className='score-badge';
+      const score = document.createElement('div'); score.className='score';
+      const badge = document.createElement('div'); badge.className = 'badge';
+      if (typeof r === 'string') {
+        score.textContent = r==='W'?'3:2':(r==='D'?'1:1':'0:2');
+        badge.className += ' ' + (r==='W'?'badge-win':(r==='D'?'badge-draw':'badge-loss'));
+        badge.textContent = r;
+        dt.textContent = '';
+        scoreOverlay.textContent = score.textContent;
+      } else {
+        score.textContent = r?.score || '—';
+        const rr = r?.result || 'D';
+        badge.className += ' ' + (rr==='W'?'badge-win':(rr==='D'?'badge-draw':'badge-loss'));
+        badge.textContent = rr;
+        try { dt.textContent = r?.date ? new Date(r.date).toLocaleDateString() : ''; } catch(_) { dt.textContent = ''; }
+        scoreOverlay.textContent = r?.score || '';
+      }
+      logoWrap.append(logo, scoreOverlay);
+      item.append(logoWrap, score, badge);
+      cell.append(dt, item);
+      form.appendChild(cell);
+    });
+    section.append(title, form);
+
+    // Статистика: сводная карта + мини-карточки
+    const statsWrap = document.createElement('div'); statsWrap.className='stats-wrap';
+    const summary = document.createElement('div'); summary.className='stat-summary';
+    const left = document.createElement('div'); left.className='summary-left';
+    const gauge = document.createElement('div'); gauge.className='gauge'; gauge.style.setProperty('--pct', Math.max(0, Math.min(100, (stats.matches||0))));
+    const gText = document.createElement('div'); gText.className='gauge-text';
+    const gVal = document.createElement('div'); gVal.className='gauge-value'; gVal.textContent = String(stats.matches||0);
+    const gLab = document.createElement('div'); gLab.className='gauge-label'; gLab.textContent = 'матч';
+    gText.append(gVal, gLab); gauge.appendChild(gText); left.appendChild(gauge);
+    const right = document.createElement('div'); right.className='summary-right';
+    const ul = document.createElement('div'); ul.className='summary-list';
+    const row = (label, value)=>{ const d=document.createElement('div'); d.innerHTML=`<span class="dot"></span>${label}: <b>${value}</b>`; return d; };
+    ul.append(row('Победы', stats.wins||0), row('Ничьи', stats.draws||0), row('Поражения', stats.losses||0));
+    right.appendChild(ul);
+    summary.append(left, right);
+
+    const mini = document.createElement('div'); mini.className='mini-grid';
+    const m = (icon, val, label)=>{
+      const d=document.createElement('div'); d.className='mini-card';
+      const i=document.createElement('img'); i.className='icon'; i.src=icon; i.alt='';
+      i.onerror = () => { try { i.onerror=null; i.src='/static/img/icons/goal.png'; } catch(_) {} };
+      const w=document.createElement('div');
+      const v=document.createElement('div'); v.className='mval'; v.textContent=String(val);
+      const l=document.createElement('div'); l.className='mlabel'; l.textContent=label; w.append(v,l);
+      d.append(i,w); return d;
+    };
+    mini.append(
+      m('/static/img/icons/trophy.svg', payload?.tournaments || 0, 'Турниры'),
+      m('/static/img/icons/goal.png', stats.goals_for||0, 'Забито'),
+      m('/static/img/icons/goal.png', stats.goals_against||0, 'Пропущено'),
+      m('/static/img/icons/yellow.png', (payload?.cards && payload.cards.yellow) ? payload.cards.yellow : 0, 'Жёлтых'),
+      m('/static/img/icons/red.png', (payload?.cards && payload.cards.red) ? payload.cards.red : 0, 'Красных'),
+      m('/static/img/icons/clean-sheet.svg', stats.clean_sheets||0, 'На «0»')
     );
-    const last = document.createElement('div'); last.style.padding='10px'; last.style.color='var(--gray)';
-    const seq = (stats.last5||[]).slice().join(' · ');
-    last.textContent = `Последние 5: ${seq || '—'}`;
-    host.append(wrap, last);
+
+    statsWrap.append(summary, mini);
+    host.append(section, statsWrap);
   }
 
   async function openTeam(teamName){

@@ -124,7 +124,15 @@
 
 ### Контракт и допущения
 - Вход (API): GET `/api/team/overview?name=...` или `?id=...`
-- Выход: `{ team:{id,name}, stats:{ matches,wins,draws,losses,goals_for,goals_against,clean_sheets,last5:["W"|"D"|"L"] }, updated_at, version }`
+- Выход: `{
+    team:{id,name},
+    stats:{ matches,wins,draws,losses,goals_for,goals_against,clean_sheets,last5:["W"|"D"|"L"] },
+    recent:[{date,opponent,score,result}],
+    tournaments:number,
+    cards:{yellow,red},
+    updated_at,
+    version
+  }`
 - Источник данных: при наличии расширенной БД — таблицы `matches` (status='finished'); безопасный fallback — снапшот `results`.
 - Кэш: `etag_json` с `public, max-age=60, stale-while-revalidate=300`, `X-Updated-At`.
 
@@ -133,10 +141,10 @@
 - ✅ Backend: `/api/team/overview`
   - ✅ Резолв по `id` или `name` (case-insensitive), найти каноническое имя
   - ✅ Агрегация: total, W/D/L, GF/GA, clean sheets, last5 (по всем сезонам; DB→Match.status='finished', fallback→snapshot `results`)
-  - ✅ ETag: core_filter учитывает только `{team,stats}`; `X-Updated-At` на 200/304
+  - ✅ ETag: core_filter учитывает только основные поля (`team,stats,recent,tournaments,cards` без updated_at); `X-Updated-At` на 200/304
 - ✅ Frontend: экран команды
   - ✅ Разметка панели `#ufo-team` с топбаром «← Назад», заголовком и сабвкладками «Обзор/Матчи/Состав» (последние две — заглушки)
-  - ✅ Модуль `static/js/profile-team.js`: `TeamPage.openTeam(name)` → fetchEtag(`/api/team/overview`) → рендер карточек метрик и last5
+  - ✅ Модуль `static/js/profile-team.js`: `TeamPage.openTeam(name)` → fetchEtag(`/api/team/overview`) → рендер «Форма», сводка (W/D/L) с gauge и мини‑карточки (турниры, забито/пропущено, карточки, «на 0»)
   - ✅ Делегирование клика по `.team-name[data-team-name]` из расписания/результатов/таблицы; также — в «Прогнозах» и карточке «Игра недели»
   - ✅ Темизация: цвета/логотип через `TeamUtils.getTeamColor/setTeamLogo`
 - ⬜ Расширение «Матчи»: пагинация прошедших/предстоящих (второй этап)

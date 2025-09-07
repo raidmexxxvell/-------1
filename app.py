@@ -3629,16 +3629,16 @@ def api_team_overview():
                     return _team_overview_from_results_snapshot(db, raw_name)
                 # 2) Агрегация по таблице matches по всем сезонам
                 # Учитываем только завершённые матчи (status='finished')
-                sql = text(
-                    """
-                    SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score
-                    FROM matches m
-                    WHERE m.status = 'finished'
-                      AND (
-                        (m.home_team_id = :tid) OR (m.away_team_id = :tid)
-                      )
-                    """
-                )
+                                sql = text(
+                                        """
+                                        SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.tournament_id
+                                        FROM matches m
+                                        WHERE m.status = 'finished'
+                                            AND (
+                                                (m.home_team_id = :tid) OR (m.away_team_id = :tid)
+                                            )
+                                        """
+                                )
                 # Если не нашли id — попробуем по имени, тогда условие будет по join'у
                 rows = None
                 if team_id:
@@ -3646,7 +3646,7 @@ def api_team_overview():
                 else:
                     sql2 = text(
                         """
-                        SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score
+                        SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.tournament_id
                         FROM matches m
                         JOIN teams th ON th.id = m.home_team_id
                         JOIN teams ta ON ta.id = m.away_team_id
@@ -3655,6 +3655,7 @@ def api_team_overview():
                     )
                     rows = db.execute(sql2, { 'nm': name_final }).fetchall()
                 matches = 0; w=d=l=0; gf=ga=0; cs=0
+                tournaments_set = set()
                 # last5: достанем последние 5 завершённых матчей этой команды по updated order
                 last_sql = text(
                     """
@@ -3672,7 +3673,7 @@ def api_team_overview():
                 if rows:
                     for r in rows:
                         try:
-                            h_id, a_id, hs, as_ = int(r[0] or 0), int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)
+                            h_id, a_id, hs, as_, tourn_id = int(r[0] or 0), int(r[1] or 0), int(r[2] or 0), int(r[3] or 0), (int(r[4]) if r[4] is not None else None)
                             is_home = (team_id and h_id == team_id) or (not team_id and False)
                             is_away = (team_id and a_id == team_id) or (not team_id and False)
                             # если team_id неизвестен (по имени), считаем нейтрально: определим по имени позже — для надёжности используем fallback путь
@@ -3687,27 +3688,62 @@ def api_team_overview():
                             elif tgf == tga: d += 1
                             else: l += 1
                             if tga == 0: cs += 1
+                            if tourn_id is not None:
+                                try: tournaments_set.add(int(tourn_id))
+                                except Exception: pass
                         except Exception:
                             continue
                 last5 = []
+                recent = []
                 if last_rows:
                     for r in last_rows:
                         try:
-                            h_id, a_id, hs, as_ = int(r[0] or 0), int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)
+                            h_id, a_id, hs, as_, upd_at = int(r[0] or 0), int(r[1] or 0), int(r[2] or 0), int(r[3] or 0), r[4]
                             is_home = team_id and h_id == team_id
                             tgf = hs if is_home else as_
                             tga = as_ if is_home else hs
                             if tgf > tga: last5.append('W')
                             elif tgf == tga: last5.append('D')
                             else: last5.append('L')
+                            # недавние 2 матча: дата, соперник, счёт и результат
+                            if len(recent) < 2:
+                                opp_id = a_id if is_home else h_id
+                                opp_name_row = db.execute(text("SELECT name FROM teams WHERE id=:id"), { 'id': opp_id }).first()
+                                opp_name = opp_name_row[0] if opp_name_row else None
+                                score_text = f"{tgf}:{tga}"
+                                dt_iso = None
+                                try:
+                                    if hasattr(upd_at, 'isoformat'): dt_iso = upd_at.isoformat()
+                                    else: dt_iso = str(upd_at)
+                                except Exception:
+                                    dt_iso = None
+                                recent.append({ 'date': dt_iso, 'opponent': opp_name, 'score': score_text, 'result': ('W' if tgf>tga else ('D' if tgf==tga else 'L')) })
                         except Exception:
                             continue
                 # updated_at: возьмём из max(updated_at) матчей этой команды
                 upd_row = db.execute(text("SELECT max(updated_at) FROM matches WHERE status='finished'" + (" AND (home_team_id=:tid OR away_team_id=:tid)" if team_id else "")), ({'tid': team_id} if team_id else {})).first()
                 updated_at = (upd_row and (upd_row[0].isoformat() if hasattr(upd_row[0], 'isoformat') else str(upd_row[0]))) or datetime.now(timezone.utc).isoformat()
+                # Подсчёт карточек
+                cards = { 'yellow': 0, 'red': 0 }
+                try:
+                    if team_id:
+                        cr = db.execute(text("""
+                            SELECT event_type, COUNT(*) FROM match_events 
+                            WHERE team_id=:tid AND event_type IN ('yellow_card','red_card')
+                            GROUP BY event_type
+                        """), { 'tid': team_id }).fetchall()
+                        for et, cnt in cr:
+                            if str(et) == 'yellow_card': cards['yellow'] = int(cnt or 0)
+                            if str(et) == 'red_card': cards['red'] = int(cnt or 0)
+                except Exception:
+                    pass
+                tournaments = len(tournaments_set) if tournaments_set else 0
                 return {
                     'team': {'id': team_id, 'name': name_final},
                     'stats': {'matches':matches,'wins':w,'draws':d,'losses':l,'goals_for':gf,'goals_against':ga,'clean_sheets':cs,'last5':last5},
+                    'recent': recent,
+                    'tournaments': tournaments,
+                    'cards': cards,
                     'updated_at': updated_at
                 }
             except Exception:
@@ -3719,7 +3755,13 @@ def api_team_overview():
 
     # Ключ ETag: учитывает каноническое имя (или id)
     def _core_filter(p: dict):
-        return { 'team': p.get('team') or {}, 'stats': p.get('stats') or {} }
+        return {
+            'team': p.get('team') or {},
+            'stats': p.get('stats') or {},
+            'recent': p.get('recent') or [],
+            'tournaments': p.get('tournaments') or 0,
+            'cards': p.get('cards') or {}
+        }
 
     # endpoint_key должен включать идентификатор команды
     cache_key = 'team-overview:' + ((request.args.get('id') or request.args.get('name') or '').strip().lower() or '__')
