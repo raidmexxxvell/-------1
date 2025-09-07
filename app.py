@@ -3216,6 +3216,9 @@ def serialize_user(db_user: 'User'):
         'credits': int(db_user.credits or 0),
         'xp': int(db_user.xp or 0),
         'level': int(db_user.level or 1),
+    # Производные поля для клиента: текущий XP в уровне и порог для следующего уровня
+    'current_xp': int(db_user.xp or 0),
+    'next_xp': int((db_user.level or 1) * 100),
         'consecutive_days': int(db_user.consecutive_days or 0),
         'last_checkin_date': (db_user.last_checkin_date.isoformat() if isinstance(db_user.last_checkin_date, date) else ''),
         'badge_tier': int(db_user.badge_tier or 0),

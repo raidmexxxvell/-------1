@@ -76,37 +76,24 @@
       // Получаем текущие значения профиля (для корректного расчёта прогресса уровня)
       const user = (window.ProfileUser && window.ProfileUser.getLastUser && window.ProfileUser.getLastUser()) || null;
       if (window.CounterAnimation && user){
-        // Текущий уровень и XP
-        let level = user.level || 1;
-        let totalXpBefore = user.xp || 0;
-        const totalXpAfter = totalXpBefore + xpGain;
-        // Функция для вычисления отображаемых данных
-        function levelMeta(total){
-          let lvl = 1; let remain = total; let need = 100; // формула: уровень N требует N*100 для перехода на N+1
-          while(true){
-            need = lvl * 100;
-            if (remain < need) return { lvl, cur: remain, need };
-            remain -= need; lvl++;
-            if (lvl>500) return { lvl:500, cur:0, need:500*100 }; // предохранитель
-          }
-        }
-        const beforeMeta = levelMeta(totalXpBefore);
-        const afterMeta = levelMeta(totalXpAfter);
+        const baseLevel = Math.max(1, user.level || 1);
+        const baseCurXp = Math.max(0, (user.current_xp != null ? user.current_xp : (user.xp || 0)));
+        const applyFn = (window.XPUtils && XPUtils.applyGain) ? XPUtils.applyGain : (function(level, cur, gain){
+          let lvl = Math.max(1, level||1); let curXp = Math.max(0, cur||0); let left = gain;
+          while (left > 0){ const need = lvl*100; const toNext = need - curXp; if (left < toNext){ curXp += left; left=0; return { lvl, cur: curXp, need }; } left -= toNext; lvl += 1; curXp = 0; if (lvl>500) return { lvl:500, cur:0, need:500*100 }; }
+          return { lvl, cur: curXp, need: (lvl*100) };
+        });
+        const endMeta = applyFn(baseLevel, baseCurXp, xpGain);
         if (xpElement){
-          // Анимируем не просто число, а плавно переход, включая возможный апгрейд уровня
-          const steps = 30; const duration = 1200; const start = performance.now();
+          const duration = 1200; const start = performance.now();
           function frame(now){
             const p = Math.min(1, (now-start)/duration);
             const eased = 1 - Math.pow(1-p,3);
-            const curTotal = totalXpBefore + (xpGain * eased);
-            const m = levelMeta(curTotal);
+            const m = applyFn(baseLevel, baseCurXp, xpGain * eased);
             xpElement.textContent = `${Math.round(m.cur)}/${m.need}`;
-            // Обновляем полоску прогресса если есть
             try { const bar = document.getElementById('xp-progress'); if(bar) bar.style.width = `${Math.min(100, (m.cur/m.need)*100)}%`; } catch(_) {}
             try { const lvlEl = document.getElementById('level'); const clEl=document.getElementById('current-level'); if (lvlEl) lvlEl.textContent = m.lvl; if(clEl) clEl.textContent = m.lvl; } catch(_) {}
-            if (p<1) requestAnimationFrame(frame); else {
-              xpElement.textContent = `${afterMeta.cur}/${afterMeta.need}`;
-            }
+            if (p<1) requestAnimationFrame(frame); else { xpElement.textContent = `${Math.round(endMeta.cur)}/${endMeta.need}`; }
           }
           requestAnimationFrame(frame);
         }

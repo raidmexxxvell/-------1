@@ -104,11 +104,16 @@
     if (elements.credits) elements.credits.textContent = (user.credits||0).toLocaleString();
     if (elements.level) elements.level.textContent = user.level || 1;
     const lvl = user.level || 1; if (elements.currentLevel) elements.currentLevel.textContent = lvl;
-    const xpForNext = lvl * 100; const currentXp = (user.xp||0) % xpForNext;
-    if (elements.xp) elements.xp.textContent = `${currentXp}/${xpForNext}`;
-    if (elements.currentXp) elements.currentXp.textContent = currentXp;
-    if (elements.xpNeeded) elements.xpNeeded.textContent = xpForNext;
-    if (elements.xpProgress) elements.xpProgress.style.width = `${Math.min(Math.max(xpForNext ? (currentXp/xpForNext)*100 : 0,0),100)}%`;
+    // Используем производные поля, если они пришли с бэкенда; иначе считаем через XPUtils
+    let cur = (user.current_xp != null) ? user.current_xp : (user.xp || 0);
+    let need = (user.next_xp != null) ? user.next_xp : (window.XPUtils ? XPUtils.threshold(lvl) : (lvl*100));
+    if (window.XPUtils && (user.current_xp == null || user.next_xp == null)){
+      const p = XPUtils.getProgress(lvl, user.xp||0); cur = p.cur; need = p.need;
+    }
+    if (elements.xp) elements.xp.textContent = `${cur}/${need}`;
+    if (elements.currentXp) elements.currentXp.textContent = cur;
+    if (elements.xpNeeded) elements.xpNeeded.textContent = need;
+    if (elements.xpProgress) elements.xpProgress.style.width = `${Math.min(Math.max(need ? (cur/need)*100 : 0,0),100)}%`;
     _lastUser = user;
     try { window.dispatchEvent(new CustomEvent('profile:user-loaded',{ detail: user })); } catch(_) {}
   }
