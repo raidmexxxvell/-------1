@@ -5883,6 +5883,8 @@ def api_users_public_batch():
                     'display_name': u.display_name or 'Игрок',
                     'level': int(u.level or 1),
                     'xp': int(u.xp or 0),
+                    'current_xp': int(u.xp or 0),
+                    'next_xp': int((u.level or 1) * 100),
                     'consecutive_days': int(u.consecutive_days or 0),
                     'photo_url': photos.get(int(u.user_id), '')
                 })

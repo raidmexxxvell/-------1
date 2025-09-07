@@ -994,7 +994,8 @@
             const meta = document.createElement('div'); meta.style.fontSize='12px'; meta.style.color='var(--gray)';
             const parts = [];
             if (data.level != null) parts.push(`Уровень ${data.level}`);
-            if (data.xp != null) parts.push(`${data.xp} XP`);
+            if (data.current_xp != null && data.next_xp != null) parts.push(`${data.current_xp}/${data.next_xp} XP`);
+            else if (data.xp != null) parts.push(`${data.xp} XP`);
             if (data.consecutive_days != null) parts.push(`Серия ${data.consecutive_days}`);
             meta.textContent = parts.join(' • ');
             info.append(name, meta);
