@@ -7399,6 +7399,83 @@ def api_admin_google_export_all():
         app.logger.error(f"admin export all error: {e}")
         return jsonify({'error': 'internal'}), 500
 
+@app.route('/api/admin/google/self-test', methods=['POST'])
+def api_admin_google_selftest():
+    """Самотест доступа к Google Sheets. Возвращает подробные подсказки.
+    Проверки:
+      - наличие ADMIN, валидация initData
+      - наличие credentials (B64/raw)
+      - наличие sheet id
+      - авторизация gspread
+      - доступ к spreadsheet и создание временного листа (best-effort)
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        if user_id != os.environ.get('ADMIN_USER_ID',''):
+            return jsonify({'error': 'forbidden'}), 403
+
+        report = { 'checks': [] }
+        def ok(name, detail=None): report['checks'].append({'name':name,'ok':True,'detail':detail});
+        def fail(name, err, hint=None): report['checks'].append({'name':name,'ok':False,'error':err,'hint':hint});
+
+        # creds
+        creds_b64 = os.environ.get('GOOGLE_CREDENTIALS_B64','')
+        raw = os.environ.get('GOOGLE_SHEETS_CREDENTIALS','')
+        if not creds_b64 and raw:
+            import base64 as _b64
+            try:
+                creds_b64 = _b64.b64encode(raw.encode('utf-8')).decode('ascii')
+                ok('credentials','using GOOGLE_SHEETS_CREDENTIALS (raw)')
+            except Exception as e:
+                fail('credentials','raw->b64 convert failed',str(e))
+        elif creds_b64:
+            ok('credentials','GOOGLE_CREDENTIALS_B64 present')
+        else:
+            fail('credentials','missing','Set GOOGLE_CREDENTIALS_B64 or GOOGLE_SHEETS_CREDENTIALS')
+
+        sheet_id = os.environ.get('SHEET_ID','') or os.environ.get('SPREADSHEET_ID','')
+        if sheet_id:
+            ok('spreadsheet_id', sheet_id)
+        else:
+            fail('spreadsheet_id','missing','Set SHEET_ID or SPREADSHEET_ID')
+
+        if not creds_b64 or not sheet_id:
+            return jsonify({'ok': False, **report})
+
+        # try authorize & open
+        try:
+            from utils.sheets import SheetsManager
+            sm = SheetsManager(creds_b64, sheet_id)
+            if not sm.spreadsheet:
+                fail('open_spreadsheet','client created but spreadsheet is None','Check ID and service account access')
+            else:
+                ok('open_spreadsheet', sm.spreadsheet.title)
+            # try list/create temp ws
+            try:
+                tmp = sm.ensure_worksheet('SELFTEST_TMP', rows=2, cols=2)
+                if tmp:
+                    ok('worksheet_create','SELFTEST_TMP ok')
+                    try:
+                        tmp.update('A1:B1', [['ping','ok']])
+                        ok('worksheet_write','A1:B1 write ok')
+                    except Exception as we:
+                        fail('worksheet_write',str(we),'Service account likely has read-only access')
+                else:
+                    fail('worksheet_create','failed','Service account likely lacks edit rights')
+            except Exception as ce:
+                fail('worksheet_ops',str(ce))
+        except Exception as e:
+            fail('authorize_or_open', str(e), 'Verify JSON key validity and Google APIs enabled (Sheets & Drive)')
+
+        report['ok'] = all(c.get('ok') for c in report['checks'])
+        return jsonify(report)
+    except Exception as e:
+        app.logger.error(f"Sheets self-test error: {e}")
+        return jsonify({'error':'internal'}), 500
+
 @app.route('/api/betting/tours/refresh', methods=['POST'])
 def api_betting_tours_refresh():
     """Принудительно обновляет снапшот туров для ставок (только админ).

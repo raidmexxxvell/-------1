@@ -220,7 +220,9 @@
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
                         <button id="admin-google-import-schedule" class="action-btn" style="background:#2b6cb0;">Загрузить из Google (расписание)</button>
                         <button id="admin-google-export-all" class="action-btn" style="background:#2f855a;">Выгрузить в Google (всё)</button>
+                        <button id="admin-google-selftest" class="action-btn" style="background:#3182ce;">Проверить доступ к Sheets</button>
                     </div>
+                    <pre id="google-selftest-log" style="display:none; max-height:140px; overflow:auto; font-size:12px; background:#111; padding:8px; border:1px solid #333; border-radius:6px; margin-top:8px;"></pre>
                 </div>
                 <div class="admin-section">
                     <h3>Сезон</h3>
@@ -235,6 +237,15 @@
                     </div>
                     <p class="help-text">Dry: только план. Мягкий: без очистки legacy и матчей. Полный: чистит legacy. Deep + Полный: ДОПОЛНИТЕЛЬНО удаляет матчи прошлого турнира (adv) + импортирует новое расписание (до 300 строк).</p>
                     <pre id="season-rollover-log" style="max-height:160px; overflow:auto; font-size:12px; background:#111; padding:8px; border:1px solid #333; border-radius:6px; display:none;"></pre>
+                    <div class="help-text" style="margin-top:6px; line-height:1.4;">
+                        Подсказки по ошибкам отката:
+                        <ul style="margin:6px 0 0 18px;">
+                            <li><b>Not Found</b> — эндпоинт недоступен. Используется встроенный путь <code>POST /api/admin/season/rollback</code>; если видите это, обновите сервер до последней версии.</li>
+                            <li><b>no_rollover_history</b> — нет записей в журнале <code>season_rollovers</code>. Сначала выполните «Полный сброс» (rollover).</li>
+                            <li><b>active_mismatch</b> — активный турнир отличается от последнего rollover. Можно выполнить с параметром <code>?force=1</code> (кнопка попросит подтверждение).</li>
+                            <li><b>tournament_not_found</b> — записи турниров не найдены по id. Проверьте целостность данных БД.</li>
+                        </ul>
+                    </div>
                 </div>
             </div>
 

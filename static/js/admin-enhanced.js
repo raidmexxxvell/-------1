@@ -120,6 +120,7 @@
   const btnSoft = document.getElementById('admin-season-soft');
   const btnRoll = document.getElementById('admin-season-roll');
   const btnRollback = document.getElementById('admin-season-rollback');
+  const btnSheetsSelftest = document.getElementById('admin-google-selftest');
   if (btnDry) btnDry.onclick = ()=> seasonRollover('dry');
   if (btnSoft) btnSoft.onclick = ()=> seasonRollover('soft');
     if (btnRoll) btnRoll.onclick = ()=> {
@@ -130,6 +131,7 @@
       seasonRollover('full');
     };
   if (btnRollback) btnRollback.onclick = ()=> seasonRollback();
+  if (btnSheetsSelftest) btnSheetsSelftest.onclick = ()=> sheetsSelfTest();
   }
 
   // Match management functions
@@ -465,6 +467,30 @@
       .finally(()=>{ btn.disabled=false; btn.textContent=t; });
   }
 
+  function sheetsSelfTest(){
+    const btn = document.getElementById('admin-google-selftest');
+    const log = document.getElementById('google-selftest-log');
+    if(!btn || !log) return;
+    btn.disabled = true; const t=btn.textContent; btn.textContent='Проверяю...';
+    log.style.display='block'; log.textContent='Запуск самотеста...';
+    const fd=new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
+    fetch('/api/admin/google/self-test', { method:'POST', body: fd })
+      .then(r=>r.json().then(d=>({ok:r.ok, d})))
+      .then(res=>{
+        if(!res.ok){ throw new Error(res.d?.error || 'Ошибка самотеста'); }
+        const list = res.d?.checks || [];
+        const lines = list.map(c=>{
+          if(c.ok) return `✔ ${c.name}: ${c.detail??'ok'}`;
+          const hint = c.hint?`\n   hint: ${c.hint}`:'';
+          return `✖ ${c.name}: ${c.error}${hint}`;
+        });
+        log.textContent = (res.d.ok? '[OK] Доступ к Sheets настроен' : '[FAIL] Найдены проблемы')+"\n\n"+lines.join('\n');
+        showToast(res.d.ok? 'Sheets OK' : 'Sheets: найдены проблемы','info');
+      })
+      .catch(e=>{ log.textContent='Ошибка самотеста: '+e.message; showToast('Ошибка самотеста: '+e.message,'error'); })
+      .finally(()=>{ btn.disabled=false; btn.textContent=t; });
+  }
+
   function exportAllToGoogle(){
     const btn = document.getElementById('admin-google-export-all');
     if(!btn) return;
@@ -517,7 +543,7 @@
     if(logEl){ logEl.style.display='block'; logEl.textContent='Проверка плана отката...'; }
     const fd=new FormData(); fd.append('initData', initData);
     // Сначала показываем план
-    fetch(urlDry,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res=>{
+    fetch(urlDry,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, status:r.status, d}))).then(res=>{
       if(!res.ok || res.d.error){ throw new Error(res.d.error||'Ошибка'); }
       if(logEl){ logEl.textContent=JSON.stringify(res.d,null,2); }
       const proceed = confirm('Выполнить откат сезона? Активным станет предыдущий турнир. Данные legacy, если были очищены ранее, не восстановятся.');
@@ -525,12 +551,21 @@
       const force = confirm('Принудительно выполнить откат даже если активный сезон не совпадает с последним из журнала? Нажмите Отмена для обычного отката.');
       let url='/api/admin/season/rollback'; if(force) url+='?force=1';
       if(logEl){ logEl.textContent+='\n\nВыполняю откат...'; }
-      return fetch(url,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res2=>{
+      return fetch(url,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, status:r.status, d}))).then(res2=>{
         if(!res2.ok || res2.d.error){ throw new Error(res2.d.error||'Ошибка'); }
         if(logEl){ logEl.textContent=JSON.stringify(res2.d,null,2); }
         showToast('Сезон откатан: активирован '+res2.d.activated_season,'success');
       });
-    }).catch(e=>{ if(logEl){ logEl.textContent='Ошибка: '+e.message; } showToast('Ошибка: '+e.message,'error',6000); });
+    }).catch(e=>{
+      let hint='';
+      const msg = e.message||'';
+      if(msg.includes('no_rollover_history')) hint='Нет записей в журнале season_rollovers. Сначала выполните «Полный сброс» (rollover).';
+      else if(msg.includes('active_mismatch')) hint='Активный турнир отличается от ожидаемого. Повторите с force=1.';
+      else if(msg.includes('tournament_not_found')) hint='Не найдены записи турниров по id. Проверьте БД.';
+      else if(msg.toLowerCase().includes('not found')) hint='Эндпоинт не найден. Обновите сервер до версии с /api/admin/season/rollback.';
+      if(logEl){ logEl.textContent='Ошибка: '+msg+(hint?"\nПодсказка: "+hint:''); }
+      showToast('Ошибка: '+msg,'error',6000);
+    });
   }
 
   // News management functions
