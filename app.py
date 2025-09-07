@@ -3419,11 +3419,23 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
             resp = flask.make_response('', 304)
             resp.headers['ETag'] = ce['etag']
             resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
+            try:
+                upd = (ce.get('payload') or {}).get('updated_at')
+                if upd:
+                    resp.headers['X-Updated-At'] = str(upd)
+            except Exception:
+                pass
             _etag_metrics_inc(endpoint_key, 'served_304', 1)
             return resp
         resp = _json_response({**ce['payload'], 'version': ce['etag']})
         resp.headers['ETag'] = ce['etag']
         resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
+        try:
+            upd = (ce.get('payload') or {}).get('updated_at')
+            if upd:
+                resp.headers['X-Updated-At'] = str(upd)
+        except Exception:
+            pass
         _etag_metrics_inc(endpoint_key, 'served_200', 1)
         return resp
     payload = builder_func() or {}
@@ -3452,11 +3464,23 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
         resp = flask.make_response('', 304)
         resp.headers['ETag'] = etag
         resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
+        try:
+            upd = (payload or {}).get('updated_at')
+            if upd:
+                resp.headers['X-Updated-At'] = str(upd)
+        except Exception:
+            pass
         _etag_metrics_inc(endpoint_key, 'served_304', 1)
         return resp
     resp = _json_response({**payload, 'version': etag})
     resp.headers['ETag'] = etag
     resp.headers['Cache-Control'] = f'{cache_visibility}, max-age={max_age}, stale-while-revalidate={swr}'
+    try:
+        upd = (payload or {}).get('updated_at')
+        if upd:
+            resp.headers['X-Updated-At'] = str(upd)
+    except Exception:
+        pass
     _etag_metrics_inc(endpoint_key, 'served_200', 1)
     return resp
 
@@ -4265,6 +4289,12 @@ def _sync_leaderboards():
         # Инвалидируем соответствующий кэш
         if cache_manager:
             cache_manager.invalidate('leaderboards')
+        try:
+            # Инвалидируем in-memory ETag helper cache для соответствующих ключей
+            for k in ('leader-top-predictors','leader-top-rich','leader-server-leaders','leader-prizes'):
+                _ETAG_HELPER_CACHE.pop(k, None)
+        except Exception:
+            pass
             
         # Отправляем WebSocket уведомление
         if websocket_manager:
@@ -7536,6 +7566,7 @@ def api_admin_google_export_all():
             # Дополнительно: экспорт по командам и вкладка "ГОЛ+ПАС" (лучшее усилие, не ломаем при отсутствии расширенной схемы)
             try:
                 from database.database_models import db_manager as adv_db, Team, Player, Match, MatchEvent, TeamComposition, Tournament, PlayerStatistics
+                adv_sess = None
                 adv_sess = adv_db.get_session()
                 try:
                     active_tournament = adv_sess.query(Tournament).filter(Tournament.status=='active').order_by(Tournament.id.desc()).first()
@@ -7577,13 +7608,27 @@ def api_admin_google_export_all():
                                 plist = adv_sess.query(Player).filter(Player.id.in_(list(involved_pids))).all()
                                 pmap = {p.id:p for p in plist}
                             rows = [['player_id','first_name','last_name','matches','yellow','red','assists','goals','goal+assist']]
-                            for pid in sorted(involved_pids):
-                                p = pmap.get(pid)
-                                mp = len(matches_by_player.get(pid, set()))
-                                yg = yellow.get(pid,0); rg = red.get(pid,0); asg = assists.get(pid,0); gl = goals.get(pid,0)
-                                rows.append([pid, getattr(p,'first_name','') or '', getattr(p,'last_name','') or '', mp, yg, rg, asg, gl, asg+gl])
+                            if involved_pids:
+                                for pid in sorted(involved_pids):
+                                    p = pmap.get(pid)
+                                    mp = len(matches_by_player.get(pid, set()))
+                                    yg = yellow.get(pid,0); rg = red.get(pid,0); asg = assists.get(pid,0); gl = goals.get(pid,0)
+                                    rows.append([pid, getattr(p,'first_name','') or '', getattr(p,'last_name','') or '', mp, yg, rg, asg, gl, asg+gl])
+                            else:
+                                # Fallback: используем legacy team_roster если нет расширенных данных
+                                try:
+                                    from sqlalchemy import text as _sa_text
+                                    raw_rows = adv_sess.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': t.name}).fetchall()
+                                    for rr in raw_rows:
+                                        nm = (rr[0] if isinstance(rr, (list, tuple)) else rr.player) if rr is not None else ''
+                                        rows.append(['', nm or '', '', 0, 0, 0, 0, 0, 0])
+                                except Exception as _fe:
+                                    app.logger.warning(f"export-all: team_roster fallback failed for {t.name}: {_fe}")
                             hdr, body = rows[0], rows[1:]
-                            body.sort(key=lambda r: (-int(r[8] or 0), int(r[3] or 0), -int(r[7] or 0)))
+                            try:
+                                body.sort(key=lambda r: (-int(r[8] or 0), int(r[3] or 0), -int(r[7] or 0)))
+                            except Exception:
+                                pass
                             rows = [hdr] + body
                             safe_title = f"team_{t.name}"[:90]
                             _write_sheet(safe_title, rows)
@@ -7627,8 +7672,11 @@ def api_admin_google_export_all():
                             rows = [hdr] + body
                             _write_sheet('ГОЛ+ПАС', rows)
                 finally:
-                    try: adv_sess.close()
-                    except Exception: pass
+                    try:
+                        if adv_sess is not None:
+                            adv_sess.close()
+                    except Exception:
+                        pass
             except Exception as adv_err:
                 app.logger.warning(f"advanced export skipped: {adv_err}")
         except Exception as e:
@@ -7637,6 +7685,29 @@ def api_admin_google_export_all():
         return jsonify({'status': 'ok'})
     except Exception as e:
         app.logger.error(f"admin export all error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
+@app.route('/api/admin/leaderboards/refresh', methods=['POST'])
+def api_admin_leaderboards_refresh():
+    """Принудительно перестраивает лидерборды и инвалидирует кэши (только админ)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        # Выполняем синхронизацию
+        try:
+            _sync_leaderboards()
+        except Exception as e:
+            app.logger.warning(f"admin force refresh leaderboards failed: {e}")
+            return jsonify({'error': 'refresh_failed'}), 500
+        # После синка снапшоты и кэши инвалидированы
+        return jsonify({'status': 'ok', 'refreshed_at': datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        app.logger.error(f"admin leaderboards refresh error: {e}")
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/admin/google/self-test', methods=['POST'])
@@ -8476,6 +8547,7 @@ def api_admin_season_rollover_inline():
     dry_run = request.args.get('dry') in ('1','true','yes')
     soft_mode = request.args.get('soft') in ('1','true','yes')
     deep_mode = (not soft_mode) and (request.args.get('deep') in ('1','true','yes'))  # deep только в full-reset
+    adv_sess = None
     adv_sess = adv_db_manager.get_session()
     from sqlalchemy import text as _sql_text
     import json as _json, hashlib as _hashlib
@@ -8953,8 +9025,12 @@ def api_admin_google_repair_users_sheet():
         app.logger.error(f'Season rollover error (inline): {e}')
         return jsonify({'error':'season rollover failed'}), 500
     finally:
-        try: adv_sess.close()
-        except Exception: pass
+        try:
+            _tmp_adv = locals().get('adv_sess', None)
+            if _tmp_adv is not None:
+                _tmp_adv.close()
+        except Exception:
+            pass
 
 @app.route('/api/admin/season/rollback', methods=['POST'])
 def api_admin_season_rollback_inline():
@@ -8974,6 +9050,7 @@ def api_admin_season_rollback_inline():
     dry_run = request.args.get('dry') in ('1','true','yes')
     force = request.args.get('force') in ('1','true','yes')
 
+    adv_sess = None
     adv_sess = adv_db_manager.get_session()
     from sqlalchemy import text as _sql_text
     try:
@@ -9037,8 +9114,12 @@ def api_admin_season_rollback_inline():
         app.logger.error(f"Season rollback error (inline): {e}")
         return jsonify({'error': 'season rollback failed'}), 500
     finally:
-        try: adv_sess.close()
-        except Exception: pass
+        try:
+            _tmp_adv = locals().get('adv_sess', None)
+            if _tmp_adv is not None:
+                _tmp_adv.close()
+        except Exception:
+            pass
 
 @app.route('/test-themes')
 def test_themes():
