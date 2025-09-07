@@ -7533,6 +7533,104 @@ def api_admin_google_export_all():
             for b in bets:
                 bet_values.append([int(b.id or 0), int(b.user_id or 0), b.market or '1x2', b.selection or '', str(b.odds or ''), int(b.stake or 0), b.status or '', (b.placed_at.isoformat() if getattr(b,'placed_at', None) else '')])
             sm.update_range('bets', 'A1:H'+str(len(bet_values)), bet_values)
+            # Дополнительно: экспорт по командам и вкладка "ГОЛ+ПАС" (лучшее усилие, не ломаем при отсутствии расширенной схемы)
+            try:
+                from database.database_models import db_manager as adv_db, Team, Player, Match, MatchEvent, TeamComposition, Tournament, PlayerStatistics
+                adv_sess = adv_db.get_session()
+                try:
+                    active_tournament = adv_sess.query(Tournament).filter(Tournament.status=='active').order_by(Tournament.id.desc()).first()
+                    if active_tournament:
+                        tid = active_tournament.id
+                        teams = adv_sess.query(Team).filter(Team.is_active==True).all()
+                        def _write_sheet(title, rows):
+                            try:
+                                sm.clear_worksheet(title)
+                            except Exception:
+                                pass
+                            ncols = max((len(r) for r in rows), default=0)
+                            end_col = chr(ord('A') + max(0, ncols-1))
+                            sm.update_range(title, f'A1:{end_col}{len(rows)}', rows)
+                        # Пер-командная статистика
+                        for t in teams:
+                            comps = adv_sess.query(TeamComposition).join(Match, TeamComposition.match_id==Match.id).filter(Match.tournament_id==tid, TeamComposition.team_id==t.id).all()
+                            events = adv_sess.query(MatchEvent).join(Match, MatchEvent.match_id==Match.id).filter(Match.tournament_id==tid, MatchEvent.team_id==t.id).all()
+                            matches_by_player = {}
+                            for c in comps:
+                                matches_by_player.setdefault(c.player_id, set()).add(c.match_id)
+                            goals = {}; assists = {}; yellow = {}; red = {}
+                            involved_pids = set(matches_by_player.keys())
+                            for e in events:
+                                if e.player_id:
+                                    involved_pids.add(e.player_id)
+                                if e.event_type == 'goal' and e.player_id:
+                                    goals[e.player_id] = goals.get(e.player_id,0)+1
+                                    if e.assisted_by_player_id:
+                                        assists[e.assisted_by_player_id] = assists.get(e.assisted_by_player_id,0)+1
+                                elif e.event_type == 'assist' and e.player_id:
+                                    assists[e.player_id] = assists.get(e.player_id,0)+1
+                                elif e.event_type == 'yellow_card' and e.player_id:
+                                    yellow[e.player_id] = yellow.get(e.player_id,0)+1
+                                elif e.event_type == 'red_card' and e.player_id:
+                                    red[e.player_id] = red.get(e.player_id,0)+1
+                            pmap = {}
+                            if involved_pids:
+                                plist = adv_sess.query(Player).filter(Player.id.in_(list(involved_pids))).all()
+                                pmap = {p.id:p for p in plist}
+                            rows = [['player_id','first_name','last_name','matches','yellow','red','assists','goals','goal+assist']]
+                            for pid in sorted(involved_pids):
+                                p = pmap.get(pid)
+                                mp = len(matches_by_player.get(pid, set()))
+                                yg = yellow.get(pid,0); rg = red.get(pid,0); asg = assists.get(pid,0); gl = goals.get(pid,0)
+                                rows.append([pid, getattr(p,'first_name','') or '', getattr(p,'last_name','') or '', mp, yg, rg, asg, gl, asg+gl])
+                            hdr, body = rows[0], rows[1:]
+                            body.sort(key=lambda r: (-int(r[8] or 0), int(r[3] or 0), -int(r[7] or 0)))
+                            rows = [hdr] + body
+                            safe_title = f"team_{t.name}"[:90]
+                            _write_sheet(safe_title, rows)
+                        # Глобальная вкладка ГОЛ+ПАС
+                        stats = adv_sess.query(PlayerStatistics, Player).join(Player, PlayerStatistics.player_id==Player.id).filter(PlayerStatistics.tournament_id==tid).all()
+                        if stats:
+                            rows = [['player_id','first_name','last_name','matches','goals','assists','goal+assist']]
+                            for ps, p in stats:
+                                rows.append([ps.player_id, getattr(p,'first_name','') or '', getattr(p,'last_name','') or '', int(ps.matches_played or 0), int(ps.goals_scored or 0), int(ps.assists or 0), int((ps.goals_scored or 0)+(ps.assists or 0))])
+                            hdr, body = rows[0], rows[1:]
+                            body.sort(key=lambda r: (-int(r[6] or 0), int(r[3] or 0), -int(r[4] or 0)))
+                            rows = [hdr] + body
+                            _write_sheet('ГОЛ+ПАС', rows)
+                        else:
+                            comps = adv_sess.query(TeamComposition).join(Match).filter(Match.tournament_id==tid).all()
+                            events = adv_sess.query(MatchEvent).join(Match).filter(Match.tournament_id==tid).all()
+                            matches_by_player = {}
+                            for c in comps:
+                                matches_by_player.setdefault(c.player_id, set()).add(c.match_id)
+                            goals = {}; assists = {}
+                            for e in events:
+                                if e.event_type == 'goal' and e.player_id:
+                                    goals[e.player_id] = goals.get(e.player_id,0)+1
+                                    if e.assisted_by_player_id:
+                                        assists[e.assisted_by_player_id] = assists.get(e.assisted_by_player_id,0)+1
+                                elif e.event_type == 'assist' and e.player_id:
+                                    assists[e.player_id] = assists.get(e.player_id,0)+1
+                            pids = set(matches_by_player.keys()) | set(goals.keys()) | set(assists.keys())
+                            pmap = {}
+                            if pids:
+                                plist = adv_sess.query(Player).filter(Player.id.in_(list(pids))).all()
+                                pmap = {p.id:p for p in plist}
+                            rows = [['player_id','first_name','last_name','matches','goals','assists','goal+assist']]
+                            for pid in sorted(pids):
+                                p = pmap.get(pid)
+                                mp = len(matches_by_player.get(pid, set()))
+                                gl = goals.get(pid,0); asg = assists.get(pid,0)
+                                rows.append([pid, getattr(p,'first_name','') or '', getattr(p,'last_name','') or '', mp, gl, asg, gl+asg])
+                            hdr, body = rows[0], rows[1:]
+                            body.sort(key=lambda r: (-int(r[6] or 0), int(r[3] or 0), -int(r[4] or 0)))
+                            rows = [hdr] + body
+                            _write_sheet('ГОЛ+ПАС', rows)
+                finally:
+                    try: adv_sess.close()
+                    except Exception: pass
+            except Exception as adv_err:
+                app.logger.warning(f"advanced export skipped: {adv_err}")
         except Exception as e:
             app.logger.error(f"export-all to sheets failed: {e}")
             return jsonify({'error': 'sheet_write_failed'}), 500
@@ -8556,6 +8654,54 @@ def api_admin_google_repair_users_sheet():
                     order.append(bid)
             for bid in order:
                 r = seen.get(bid)
+                if r:
+                    if len(r) < len(header):
+                        r = r + [''] * (len(header) - len(r))
+                    deduped_rows.append(r[:len(header)])
+
+        elif target.lower() in ('achievements', 'referrals'):
+            # dedupe by user_id (col 0), prefer latest by updated_at if column exists
+            from datetime import datetime as _dt
+            def _parse_ts(val: str):
+                try:
+                    # handle multiple ISO-like timestamps separated by ';'
+                    part = (val or '').split(';')[-1].strip()
+                    return _dt.fromisoformat(part)
+                except Exception:
+                    return None
+            updated_idx = None
+            for i, h in enumerate(header):
+                if (h or '').strip().lower() == 'updated_at':
+                    updated_idx = i
+                    break
+            seen = {}
+            order = []
+            for r in data_rows:
+                if not r:
+                    continue
+                uid_raw = r[0] if len(r) > 0 else ''
+                try:
+                    uid = int(uid_raw)
+                except Exception:
+                    uid = uid_raw or ''
+                if uid in seen:
+                    removed_examples.append({'user_id': uid, 'removed_row': r})
+                    if updated_idx is not None:
+                        try:
+                            cur_dt = _parse_ts(r[updated_idx] if len(r) > updated_idx else '')
+                            prev_dt = _parse_ts(seen[uid][updated_idx] if len(seen[uid]) > updated_idx else '')
+                            if cur_dt and (not prev_dt or cur_dt >= prev_dt):
+                                seen[uid] = r
+                        except Exception:
+                            seen[uid] = r
+                    else:
+                        # keep last occurrence
+                        seen[uid] = r
+                else:
+                    seen[uid] = r
+                    order.append(uid)
+            for uid in order:
+                r = seen.get(uid)
                 if r:
                     if len(r) < len(header):
                         r = r + [''] * (len(header) - len(r))

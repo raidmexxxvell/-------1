@@ -399,12 +399,16 @@
 
   // Player management functions
   // --- Google Sheets repair handler ---
-  function repairUsersSheet() {
+  function repairUsersSheet(sheet) {
     const btn = document.getElementById('admin-google-repair-users');
     if (btn) { btn.disabled = true; btn.textContent = 'Repairing...'; }
+    if (!sheet) {
+      const sel = document.getElementById('repair-sheet-select');
+      sheet = (sel && sel.value) ? sel.value : 'users';
+    }
     const fd = new FormData();
     fd.append('initData', window.Telegram?.WebApp?.initData || '');
-    fd.append('sheet', 'users');
+    fd.append('sheet', sheet);
     fetch('/api/admin/google/repair-users-sheet', { method: 'POST', body: fd })
       .then(r => r.json())
       .then(data => {
@@ -419,15 +423,17 @@
         }
       })
       .catch(err => { console.error('repair error', err); showToast('Repair request failed','error'); })
-      .finally(()=>{ if (btn) { btn.disabled = false; btn.textContent = 'Repair users sheet'; } });
+  .finally(()=>{ if (btn) { btn.disabled = false; btn.textContent = 'Почистить дубли'; } });
   }
 
   // Wire up the button after DOM ready
   document.addEventListener('DOMContentLoaded', ()=>{
     const repairBtn = document.getElementById('admin-google-repair-users');
     if (repairBtn) repairBtn.addEventListener('click', ()=>{
-      const ok = confirm('Запустить ремонт листа пользователей? Операция перепишет лист.');
-      if (!ok) return; repairUsersSheet();
+      const sel = document.getElementById('repair-sheet-select');
+      const target = (sel && sel.value) ? sel.value : 'users';
+      const ok = confirm(`Запустить чистку дублей в листе "${target}"? Операция перепишет лист.`);
+      if (!ok) return; repairUsersSheet(target);
     });
   });
   function loadPlayers() {
