@@ -831,8 +831,11 @@
         if (!table) return;
         if (window.fetchEtag) {
             window.fetchEtag('/api/leaderboard/top-predictors', { cacheKey: 'lb:predictors', swrMs: 60000, extract: j => j, forceRevalidate })
-                .then(({ data, updated: isUpdated }) => {
-                    if (skipIfNotUpdated && !isUpdated) return; // ничего не меняем
+                .then(({ data, updated: isUpdated, headerUpdatedAt }) => {
+                    if (skipIfNotUpdated && !isUpdated) {
+                        if (updated && headerUpdatedAt) { try { updated.textContent = `Обновлено: ${new Date(headerUpdatedAt).toLocaleString()}`; } catch(_) {} }
+                        return; // ничего не меняем содержимое таблицы
+                    }
                     const items = data?.items || [];
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
@@ -843,8 +846,9 @@
                         tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.bets_total}</td><td>${it.bets_won}</td><td>${it.winrate}%</td>`;
                         table.appendChild(tr);
                     });
-                    if (updated && data?.updated_at) {
-                        try { updated.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {}
+                    if (updated) {
+                        const iso = data?.updated_at || headerUpdatedAt;
+                        if (iso) { try { updated.textContent = `Обновлено: ${new Date(iso).toLocaleString()}`; } catch(_) {} }
                     }
                 })
                 .catch(err => console.error('lb predictors err', err));
@@ -877,8 +881,11 @@
         if (!table) return;
         if (window.fetchEtag) {
             window.fetchEtag('/api/leaderboard/top-rich', { cacheKey: 'lb:rich', swrMs: 60000, extract: j => j, forceRevalidate })
-                .then(({ data, updated: isUpdated }) => {
-                    if (skipIfNotUpdated && !isUpdated) return;
+                .then(({ data, updated: isUpdated, headerUpdatedAt }) => {
+                    if (skipIfNotUpdated && !isUpdated) {
+                        if (updated && headerUpdatedAt) { try { updated.textContent = `Обновлено: ${new Date(headerUpdatedAt).toLocaleString()}`; } catch(_) {} }
+                        return;
+                    }
                     const items = data?.items || [];
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
@@ -889,8 +896,9 @@
                         tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${Number(it.gain||0).toLocaleString()}</td>`;
                         table.appendChild(tr);
                     });
-                    if (updated && data?.updated_at) {
-                        try { updated.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {}
+                    if (updated) {
+                        const iso = data?.updated_at || headerUpdatedAt;
+                        if (iso) { try { updated.textContent = `Обновлено: ${new Date(iso).toLocaleString()}`; } catch(_) {} }
                     }
                 })
                 .catch(err => console.error('lb rich err', err));
@@ -923,8 +931,11 @@
         if (!table) return;
         if (window.fetchEtag) {
             window.fetchEtag('/api/leaderboard/server-leaders', { cacheKey: 'lb:server', swrMs: 60000, extract: j => j, forceRevalidate })
-                .then(({ data, updated: isUpdated }) => {
-                    if (skipIfNotUpdated && !isUpdated) return;
+                .then(({ data, updated: isUpdated, headerUpdatedAt }) => {
+                    if (skipIfNotUpdated && !isUpdated) {
+                        if (updated && headerUpdatedAt) { try { updated.textContent = `Обновлено: ${new Date(headerUpdatedAt).toLocaleString()}`; } catch(_) {} }
+                        return;
+                    }
                     const items = data?.items || [];
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
@@ -935,8 +946,9 @@
                         tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.level}</td><td>${it.xp}</td><td>${it.streak}</td><td>${it.score}</td>`;
                         table.appendChild(tr);
                     });
-                    if (updated && data?.updated_at) {
-                        try { updated.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {}
+                    if (updated) {
+                        const iso = data?.updated_at || headerUpdatedAt;
+                        if (iso) { try { updated.textContent = `Обновлено: ${new Date(iso).toLocaleString()}`; } catch(_) {} }
                     }
                 })
                 .catch(err => console.error('lb server err', err));
@@ -1030,7 +1042,7 @@
         };
         if (window.fetchEtag) {
             window.fetchEtag('/api/leaderboard/prizes', { cacheKey: 'lb:prizes', swrMs: 30000, extract: j => j })
-                .then(({ data }) => {
+                .then(({ data, headerUpdatedAt }) => {
                     const dataBlock = data?.data || {};
                     host.innerHTML = '';
                 const blocks = [
@@ -1088,8 +1100,9 @@
                 } else {
                     render({});
                 }
-                if (updated && store?.data?.updated_at) {
-                    try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
+                if (updated) {
+                    const iso = data?.updated_at || headerUpdatedAt;
+                    if (iso) { try { updated.textContent = `Обновлено: ${new Date(iso).toLocaleString()}`; } catch(_) {} }
                 }
                 })
                 .catch(err => console.error('lb prizes err', err));

@@ -115,7 +115,17 @@
       const tr = document.createElement('tr');
       for (let j = 0; j < 8; j++) {
         const td = document.createElement('td');
-        td.textContent = (r[j] ?? '').toString();
+        const val = (r[j] ?? '').toString();
+        if (j === 1) {
+          // Колонка с названием команды — делаем кликабельной
+          const nameEl = document.createElement('span');
+          nameEl.className = 'team-name';
+          nameEl.setAttribute('data-team-name', val);
+          nameEl.textContent = val;
+          td.appendChild(nameEl);
+        } else {
+          td.textContent = val;
+        }
         tr.appendChild(td);
       }
       nodes.push(tr);

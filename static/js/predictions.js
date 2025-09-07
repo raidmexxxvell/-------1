@@ -289,6 +289,7 @@
       const img = document.createElement('img'); img.className = 'logo'; img.alt = name || '';
       (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(img, name||'');
       const nm = document.createElement('div'); nm.className = 'team-name';
+      nm.setAttribute('data-team-name', name || '');
       try {
         const withTeamCount = window.withTeamCount || (window.profileWithTeamCount /* fallback stub */);
         nm.textContent = withTeamCount ? withTeamCount(name||'') : (name||'');

@@ -65,14 +65,15 @@
 
     return fetch(finalUrl, { method, headers: reqHeaders })
       .then(async res => {
+        const headerUpdatedAt = res.headers ? res.headers.get('X-Updated-At') : null;
         if (res.status === 304 && cached){
-          // Ничего не изменилось
-            return { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
+          // Ничего не изменилось — возвращаем кэш и время обновления из заголовка
+          return { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw, headerUpdatedAt };
         }
         let json = null;
         try { json = await res.json(); } catch(e){
           if (cached){
-            return { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
+            return { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw, headerUpdatedAt };
           }
           throw e;
         }
@@ -80,7 +81,7 @@
         let data = null;
         try { data = extract(json); } catch(e){ data = json; }
         try { localStorage.setItem(storeKey, JSON.stringify({ etag, ts: Date.now(), data, raw: json })); } catch(_) {}
-        return { data, etag, fromCache: false, updated: true, raw: json };
+        return { data, etag, fromCache: false, updated: true, raw: json, headerUpdatedAt };
       })
       .catch(err => {
         console.warn('fetchEtag error', err);

@@ -3546,6 +3546,185 @@ def _snapshot_set(db: Session, key: str, payload: dict):
     return False
 
 # ---------------------- BUILDERS FROM SHEETS ----------------------
+def _team_overview_from_results_snapshot(db: Session, team_name: str) -> dict:
+    """Fallback агрегация из снапшота results: учитывает все сезоны.
+    Возвращает {team:{name}, stats:{...}, updated_at} либо пустые значения.
+    """
+    snap = _snapshot_get(db, 'results') or {}
+    payload = (snap.get('payload') or {}) if isinstance(snap, dict) else {}
+    updated_at = (snap.get('updated_at') if isinstance(snap, dict) else None) or datetime.now(timezone.utc).isoformat()
+    results = payload.get('results') or []
+    name = (team_name or '').strip()
+    if not name:
+        return {'team': {'id': None, 'name': ''}, 'stats': {'matches':0,'wins':0,'draws':0,'losses':0,'goals_for':0,'goals_against':0,'clean_sheets':0,'last5':[]}, 'updated_at': updated_at}
+    norm = name.lower()
+    matches = 0; w=d=l=0; gf=ga=0; cs=0
+    last5 = []
+    for m in results:
+        try:
+            h = (m.get('home') or '').strip()
+            a = (m.get('away') or '').strip()
+            if not h and not a:
+                continue
+            is_team_home = (h.lower() == norm)
+            is_team_away = (a.lower() == norm)
+            if not (is_team_home or is_team_away):
+                continue
+            sh = str(m.get('score_home') or '').strip()
+            sa = str(m.get('score_away') or '').strip()
+            if not sh or not sa or not sh.isdigit() or not sa.isdigit():
+                # пропускаем некорректные/пустые
+                continue
+            g1 = int(sh); g2 = int(sa)
+            tgf = g1 if is_team_home else g2
+            tga = g2 if is_team_home else g1
+            matches += 1
+            gf += tgf; ga += tga
+            if tgf > tga: w += 1; last5.append('W')
+            elif tgf == tga: d += 1; last5.append('D')
+            else: l += 1; last5.append('L')
+            if tga == 0: cs += 1
+        except Exception:
+            continue
+    # последние 5 в порядке убывания времени уже примерно соблюдаются в снапшоте; ограничим
+    last5 = last5[-5:]
+    return {
+        'team': {'id': None, 'name': name},
+        'stats': {'matches':matches,'wins':w,'draws':d,'losses':l,'goals_for':gf,'goals_against':ga,'clean_sheets':cs,'last5':last5},
+        'updated_at': updated_at
+    }
+
+@app.route('/api/team/overview', methods=['GET'])
+def api_team_overview():
+    """Обзор команды: агрегаты по всем сезонам. Источник — БД (если доступны модели Match/Team), иначе снапшот results.
+    Query: ?name=Команда | ?id=123
+    Ответ через etag_json (version=etag, X-Updated-At на 200/304).
+    """
+    # Строитель payload
+    def _build():
+        team_id = None
+        raw_id = (request.args.get('id') or '').strip()
+        raw_name = (request.args.get('name') or '').strip()
+        # Если нет БД — используем снапшот результатов
+        if SessionLocal is None:
+            return _team_overview_from_results_snapshot(None, raw_name)
+        db: Session = get_db()
+        try:
+            # Попытка через расширенную схему (если модели есть в app.py)
+            try:
+                # Локальные классы могут отсутствовать — используем text-запросы через engine
+                # 1) Определить имя и id
+                qname = raw_name
+                if raw_id and raw_id.isdigit():
+                    team_id = int(raw_id)
+                    row = db.execute(text("SELECT id, name FROM teams WHERE id=:tid"), { 'tid': team_id }).first()
+                    if row:
+                        team_id = int(row[0]); qname = row[1]
+                if (not qname) and raw_name:
+                    row = db.execute(text("SELECT id, name FROM teams WHERE lower(name)=lower(:nm) ORDER BY id LIMIT 1"), { 'nm': raw_name }).first()
+                    if row:
+                        team_id = int(row[0]); qname = row[1]
+                name_final = (qname or raw_name or '').strip()
+                if not name_final:
+                    return _team_overview_from_results_snapshot(db, raw_name)
+                # 2) Агрегация по таблице matches по всем сезонам
+                # Учитываем только завершённые матчи (status='finished')
+                sql = text(
+                    """
+                    SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score
+                    FROM matches m
+                    WHERE m.status = 'finished'
+                      AND (
+                        (m.home_team_id = :tid) OR (m.away_team_id = :tid)
+                      )
+                    """
+                )
+                # Если не нашли id — попробуем по имени, тогда условие будет по join'у
+                rows = None
+                if team_id:
+                    rows = db.execute(sql, { 'tid': team_id }).fetchall()
+                else:
+                    sql2 = text(
+                        """
+                        SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score
+                        FROM matches m
+                        JOIN teams th ON th.id = m.home_team_id
+                        JOIN teams ta ON ta.id = m.away_team_id
+                        WHERE m.status = 'finished' AND (lower(th.name)=lower(:nm) OR lower(ta.name)=lower(:nm))
+                        """
+                    )
+                    rows = db.execute(sql2, { 'nm': name_final }).fetchall()
+                matches = 0; w=d=l=0; gf=ga=0; cs=0
+                # last5: достанем последние 5 завершённых матчей этой команды по updated order
+                last_sql = text(
+                    """
+                    SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.updated_at
+                    FROM matches m
+                    WHERE m.status = 'finished' AND (m.home_team_id=:tid OR m.away_team_id=:tid)
+                    ORDER BY m.updated_at DESC NULLS LAST, m.match_date DESC NULLS LAST
+                    LIMIT 5
+                    """
+                )
+                last_rows = []
+                if team_id:
+                    last_rows = db.execute(last_sql, { 'tid': team_id }).fetchall()
+                # подведём общий подсчёт
+                if rows:
+                    for r in rows:
+                        try:
+                            h_id, a_id, hs, as_ = int(r[0] or 0), int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)
+                            is_home = (team_id and h_id == team_id) or (not team_id and False)
+                            is_away = (team_id and a_id == team_id) or (not team_id and False)
+                            # если team_id неизвестен (по имени), считаем нейтрально: определим по имени позже — для надёжности используем fallback путь
+                            if not (is_home or is_away):
+                                # при отсутствии точного id не различаем дом/выезд — считаем как для home, это влияет только на clean sheet, но не на W/D/L
+                                is_home = True
+                            tgf = hs if is_home else as_
+                            tga = as_ if is_home else hs
+                            matches += 1
+                            gf += max(0, tgf); ga += max(0, tga)
+                            if tgf > tga: w += 1
+                            elif tgf == tga: d += 1
+                            else: l += 1
+                            if tga == 0: cs += 1
+                        except Exception:
+                            continue
+                last5 = []
+                if last_rows:
+                    for r in last_rows:
+                        try:
+                            h_id, a_id, hs, as_ = int(r[0] or 0), int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)
+                            is_home = team_id and h_id == team_id
+                            tgf = hs if is_home else as_
+                            tga = as_ if is_home else hs
+                            if tgf > tga: last5.append('W')
+                            elif tgf == tga: last5.append('D')
+                            else: last5.append('L')
+                        except Exception:
+                            continue
+                # updated_at: возьмём из max(updated_at) матчей этой команды
+                upd_row = db.execute(text("SELECT max(updated_at) FROM matches WHERE status='finished'" + (" AND (home_team_id=:tid OR away_team_id=:tid)" if team_id else "")), ({'tid': team_id} if team_id else {})).first()
+                updated_at = (upd_row and (upd_row[0].isoformat() if hasattr(upd_row[0], 'isoformat') else str(upd_row[0]))) or datetime.now(timezone.utc).isoformat()
+                return {
+                    'team': {'id': team_id, 'name': name_final},
+                    'stats': {'matches':matches,'wins':w,'draws':d,'losses':l,'goals_for':gf,'goals_against':ga,'clean_sheets':cs,'last5':last5},
+                    'updated_at': updated_at
+                }
+            except Exception:
+                # Любая ошибка — fallback на снапшот results
+                return _team_overview_from_results_snapshot(db, raw_name)
+        finally:
+            try: db.close()
+            except Exception: pass
+
+    # Ключ ETag: учитывает каноническое имя (или id)
+    def _core_filter(p: dict):
+        return { 'team': p.get('team') or {}, 'stats': p.get('stats') or {} }
+
+    # endpoint_key должен включать идентификатор команды
+    cache_key = 'team-overview:' + ((request.args.get('id') or request.args.get('name') or '').strip().lower() or '__')
+    return etag_json(cache_key, _build, cache_ttl=60, max_age=60, swr=300, core_filter=_core_filter, cache_visibility='public')
+
 @app.route('/api/feature-match/set', methods=['POST'])
 def api_feature_match_set():
     """Админ: вручную назначить «Матч недели» для главной. Поля: initData, home, away, [date], [datetime].
@@ -7617,11 +7796,68 @@ def api_admin_google_export_all():
                             else:
                                 # Fallback: используем legacy team_roster если нет расширенных данных
                                 try:
-                                    from sqlalchemy import text as _sa_text
+                                    from sqlalchemy import text as _sa_text, func as _sa_func
                                     raw_rows = adv_sess.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': t.name}).fetchall()
+                                    seen_names = set(); seen_ids = set()
+                                    def _split_name(full: str):
+                                        try:
+                                            parts = [p for p in (full or '').strip().split() if p]
+                                            if not parts:
+                                                return '', ''
+                                            if len(parts) == 1:
+                                                return parts[0], ''
+                                            if len(parts) == 2:
+                                                # Частый формат: Фамилия Имя
+                                                return parts[1], parts[0]
+                                            # 3+ слов: считаем Фамилия Имя Отчество -> last = first token (+ остальное в last), first = second token
+                                            first = parts[1]
+                                            last = ' '.join([parts[0]] + parts[2:])
+                                            return first, last
+                                        except Exception:
+                                            return full or '', ''
+                                    def _find_player_by_name(nm: str):
+                                        try:
+                                            nm_clean = ' '.join((nm or '').strip().split())
+                                            parts = nm_clean.split(' ')
+                                            cand = None
+                                            if len(parts) >= 2:
+                                                # Попробуем оба порядка
+                                                fn1, ln1 = parts[0], ' '.join(parts[1:])
+                                                fn2, ln2 = parts[-1], ' '.join(parts[:-1])
+                                                cand = (adv_sess.query(Player)
+                                                    .filter(_sa_func.lower(Player.first_name)==fn1.lower(), _sa_func.lower(Player.last_name)==ln1.lower())
+                                                    .first())
+                                                if not cand:
+                                                    cand = (adv_sess.query(Player)
+                                                        .filter(_sa_func.lower(Player.first_name)==fn2.lower(), _sa_func.lower(Player.last_name)==ln2.lower())
+                                                        .first())
+                                            if not cand:
+                                                # Простой contains-поиск как fallback (может вернуть неверного, используем только при одном совпадении)
+                                                like = f"%{nm_clean}%"
+                                                q = adv_sess.query(Player).filter(_sa_func.lower(Player.first_name + ' ' + (_sa_func.coalesce(Player.last_name,'') )).like(like.lower()))
+                                                arr = q.limit(2).all()
+                                                cand = arr[0] if len(arr)==1 else None
+                                            return cand
+                                        except Exception:
+                                            return None
                                     for rr in raw_rows:
                                         nm = (rr[0] if isinstance(rr, (list, tuple)) else rr.player) if rr is not None else ''
-                                        rows.append(['', nm or '', '', 0, 0, 0, 0, 0, 0])
+                                        norm = (nm or '').strip().lower()
+                                        if not norm:
+                                            continue
+                                        # Попробуем найти Player
+                                        p = _find_player_by_name(nm)
+                                        if p and p.id in seen_ids:
+                                            continue
+                                        if (not p) and (norm in seen_names):
+                                            continue
+                                        if p:
+                                            seen_ids.add(p.id)
+                                            rows.append([int(p.id), getattr(p,'first_name','') or '', getattr(p,'last_name','') or '', 0, 0, 0, 0, 0, 0])
+                                        else:
+                                            seen_names.add(norm)
+                                            fn, ln = _split_name(nm)
+                                            rows.append(['', fn, ln, 0, 0, 0, 0, 0, 0])
                                 except Exception as _fe:
                                     app.logger.warning(f"export-all: team_roster fallback failed for {t.name}: {_fe}")
                             hdr, body = rows[0], rows[1:]
@@ -10241,20 +10477,29 @@ def api_match_settle():
                 event_rows = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).all()
                 # 3. Обновляем games для всех игроков из составов обеих команд (старт + запасные считаются как сыгравшие, по требованиям)
                 from collections import defaultdict
-                team_players_games = defaultdict(set)  # team -> set(player)
+                team_players_games = defaultdict(set)  # real_team_name -> set(player)
+                real_home = home
+                real_away = away
+                try:
+                    # Нормализуем реальные имена команд из параметров эндпоинта
+                    real_home = (home or '').strip()
+                    real_away = (away or '').strip()
+                except Exception:
+                    pass
                 for r in lineup_rows:
-                    team_players_games[r.team].add(r.player.strip())
+                    team_name = real_home if (r.team or 'home') == 'home' else real_away
+                    team_players_games[team_name].add((r.player or '').strip())
                 def upsert_player(team, player):
                     pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team, TeamPlayerStats.player==player).first()
                     if not pl:
                         pl = TeamPlayerStats(team=team, player=player)
                         db.add(pl)
                     return pl
-                for team_side, players_set in team_players_games.items():
+                for team_name, players_set in team_players_games.items():
                     for p in players_set:
                         if not p:
                             continue
-                        entry = upsert_player(team_side, p)
+                        entry = upsert_player(team_name, p)
                         entry.games = (entry.games or 0) + 1  # инкрементируем; защита от повторного вызова ниже
                         entry.updated_at = datetime.now(timezone.utc)
                 # 4. Применяем события. Чтобы избежать двойного подсчёта при повторном settle, проверим state.
@@ -10269,9 +10514,9 @@ def api_match_settle():
                         # Мы уже когда-то добавляли games. Поэтому теперь откатим предыдущее добавление и пересчитаем games корректно.
                         # Для простоты: пересчитаем games заново — установим games = games (без +1) (т.к. удвоения).
                         # NOTE: Для предотвращения двукратного увеличения можно пропустить инкремент, если уже counted.
-                        for team_side, players_set in team_players_games.items():
+                        for team_name, players_set in team_players_games.items():
                             for p in players_set:
-                                pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_side, TeamPlayerStats.player==p).first()
+                                pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_name, TeamPlayerStats.player==p).first()
                                 if pl and pl.games>0:
                                     pl.games -= 1  # откат предыдущего добавления
                         # Не инкрементируем второй раз
@@ -10279,9 +10524,9 @@ def api_match_settle():
                         state.lineup_counted = 1
                 # После нормализации: гарантированно games +=1 один раз
                 if state and state.lineup_counted == 0:
-                    for team_side, players_set in team_players_games.items():
+                    for team_name, players_set in team_players_games.items():
                         for p in players_set:
-                            pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_side, TeamPlayerStats.player==p).first()
+                            pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_name, TeamPlayerStats.player==p).first()
                             if pl:
                                 pl.games = (pl.games or 0) + 1
                 # Обновляем события если ещё не применены
@@ -10289,8 +10534,8 @@ def api_match_settle():
                     for ev in event_rows:
                         player = (ev.player or '').strip();
                         if not player: continue
-                        team_side = ev.team or 'home'
-                        pl = upsert_player(team_side, player)
+                        team_name = real_home if (ev.team or 'home') == 'home' else real_away
+                        pl = upsert_player(team_name, player)
                         # Если у игрока ещё 0 игр (и не добавлялся по составу) — считаем, что сыграл
                         if not pl.games:
                             pl.games = 1

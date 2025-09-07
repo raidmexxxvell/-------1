@@ -282,6 +282,25 @@
                         <div id="md-pane-away" class="md-pane" style="display:none;"></div>
                     </div>
                 </div>
+                <!-- Страница команды -->
+                <div id="ufo-team" class="ufo-pane" style="display:none;">
+                    <div class="match-details-topbar">
+                        <button id="team-back" class="back-btn">← Назад</button>
+                        <div class="md-title" id="team-title">Команда</div>
+                    </div>
+                    <div class="team-header" style="display:flex; align-items:center; gap:10px; padding:6px 10px;">
+                        <img id="team-logo" alt="" style="width:36px; height:36px; object-fit:contain; border-radius:4px; background: rgba(255,255,255,0.06);">
+                        <div id="team-name" style="font-weight:800; font-size:16px;">—</div>
+                    </div>
+                    <div class="subtabs modal-subtabs" id="team-subtabs">
+                        <div class="subtab-item active" data-ttab="overview">Обзор</div>
+                        <div class="subtab-item" data-ttab="matches">Матчи</div>
+                        <div class="subtab-item" data-ttab="roster">Состав</div>
+                    </div>
+                    <div id="team-pane-overview" class="md-pane"></div>
+                    <div id="team-pane-matches" class="md-pane" style="display:none; color: var(--gray); padding:12px;">Скоро...</div>
+                    <div id="team-pane-roster" class="md-pane" style="display:none; color: var(--gray); padding:12px;">Скоро...</div>
+                </div>
             </div>
 
             <!-- Блок БЛБ: пустые подвкладки -->
@@ -591,6 +610,7 @@
     <script src="/static/js/profile-match-stream.js"></script>
     <script src="/static/js/profile-referral.js"></script>
     <script src="/static/js/profile-ads-featured.js"></script>
+    <script src="/static/js/profile-team.js"></script>
     <script src="/static/js/profile-core.js"></script>
     <script src="/static/js/profile.js"></script>
     <script src="/static/js/profile-scorers.js"></script>
