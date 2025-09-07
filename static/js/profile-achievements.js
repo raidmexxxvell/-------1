@@ -111,19 +111,33 @@
       if (hasProgressFields) {
         const currentValue = Number(a.value || 0);
         const targets = a.all_targets.slice();
-        const nextTarget = (a.next_target !== undefined && a.next_target !== null) ? Number(a.next_target) : (()=>{
-          for (let i=0;i<targets.length;i++){ if(currentValue < Number(targets[i])) return Number(targets[i]); }
-          return null;
-        })();
+        // Если есть перманентно достигнутый уровень (best_tier ≥ 1), показываем прогресс к СЛЕДУЮЩЕЙ цели,
+        // а не к ближайшей относительно текущего значения. Например, для лестницы [7,30,120]
+        // и best_tier=1 (бронза) — denominator должен быть 30.
+        let nextTarget;
+        const bestTier = Number(a.best_tier || 0);
+        if (Number.isFinite(bestTier) && bestTier >= 1) {
+          // Индекс следующей цели соответствует best_tier (1→вторая ступень и т.д.)
+          nextTarget = (bestTier >= targets.length) ? null : Number(targets[bestTier]);
+        } else if (a.next_target !== undefined && a.next_target !== null) {
+          nextTarget = Number(a.next_target);
+        } else {
+          // Fallback: ближайшая цель больше текущего значения
+          for (let i=0; i<targets.length; i++){
+            const t = Number(targets[i]);
+            if (currentValue < t) { nextTarget = t; break; }
+          }
+          if (nextTarget === undefined) nextTarget = null;
+        }
         // Лестница целей для подробностей (перенесено под кнопку "Подробнее")
         const ladderText = `Цели: ${targets.join('/')}`;
 
         // Текст прогресса
         const baseDesc = descFor(a);
         if (nextTarget === null) {
-          req.textContent = `${baseDesc} ✅ Выполнено (${currentValue}).`;
+          req.textContent = `${baseDesc} ✅ Выполнено (${currentValue})`;
         } else {
-          req.textContent = `${baseDesc}: ${currentValue}/${nextTarget}.`;
+          req.textContent = `${baseDesc}: ${currentValue}/${nextTarget}`;
         }
 
         // Прогресс-бар относительно ближайшей цели
