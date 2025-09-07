@@ -9,6 +9,12 @@ from typing import Dict, List, Optional, Any
 from collections import defaultdict, deque
 import os
 
+# Optional psutil import (avoid hard dependency during dev environments)
+try:
+    import psutil as _psutil  # type: ignore
+except Exception:
+    _psutil = None
+
 class PerformanceMetrics:
     """Collects and tracks performance metrics"""
     
@@ -194,30 +200,30 @@ class SystemMonitor:
     def get_memory_usage() -> Dict[str, Any]:
         """Get memory usage information"""
         try:
-            import psutil
-            process = psutil.Process()
+            if _psutil is None:
+                return {'error': 'psutil not available'}
+            process = _psutil.Process()
             memory_info = process.memory_info()
-            
             return {
                 'rss_mb': round(memory_info.rss / 1024 / 1024, 2),
                 'vms_mb': round(memory_info.vms / 1024 / 1024, 2),
                 'percent': round(process.memory_percent(), 2)
             }
-        except ImportError:
+        except Exception:
             return {'error': 'psutil not available'}
     
     @staticmethod
     def get_cpu_usage() -> Dict[str, Any]:
         """Get CPU usage information"""
         try:
-            import psutil
-            process = psutil.Process()
-            
+            if _psutil is None:
+                return {'error': 'psutil not available'}
+            process = _psutil.Process()
             return {
                 'percent': round(process.cpu_percent(), 2),
                 'num_threads': process.num_threads()
             }
-        except ImportError:
+        except Exception:
             return {'error': 'psutil not available'}
 
 class HealthCheck:

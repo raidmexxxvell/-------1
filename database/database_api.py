@@ -19,8 +19,12 @@ logger = logging.getLogger(__name__)
 def get_tournaments():
     """Получить список турниров"""
     try:
+        status = (request.args.get('status') or 'active').strip()
         with db_manager.get_session() as session:
-            tournaments = session.query(Tournament).filter(Tournament.status == 'active').all()
+            q = session.query(Tournament)
+            if status != 'all':
+                q = q.filter(Tournament.status == 'active')
+            tournaments = q.order_by(Tournament.start_date.desc().nullslast(), Tournament.created_at.desc()).all()
             result = []
             for tournament in tournaments:
                 result.append({

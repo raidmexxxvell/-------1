@@ -234,6 +234,17 @@
                         <label style="display:flex; align-items:center; gap:4px; font-size:12px; background:#222; padding:4px 8px; border-radius:6px;">
                             <input type="checkbox" id="season-rollover-deep"> deep
                         </label>
+                        <div style="display:flex; align-items:center; gap:6px; background:#1a1a1a; padding:6px 8px; border-radius:6px;">
+                            <span style="font-size:12px; opacity:.8;">Активный сезон:</span>
+                            <span id="active-season-label" style="font-weight:600;">—</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px; background:#1a1a1a; padding:6px 8px; border-radius:6px;">
+                            <label for="season-picker" style="font-size:12px; opacity:.8;">Выбрать сезон:</label>
+                            <select id="season-picker" style="background:#111; color:#fff; border:1px solid #333; padding:4px 8px; border-radius:4px;">
+                                <option value="">Загрузка...</option>
+                            </select>
+                            <button id="apply-season-btn" class="action-btn" style="background:#444;">Активировать</button>
+                        </div>
                     </div>
                     <p class="help-text">Dry: только план. Мягкий: без очистки legacy и матчей. Полный: чистит legacy. Deep + Полный: ДОПОЛНИТЕЛЬНО удаляет матчи прошлого турнира (adv) + импортирует новое расписание (до 300 строк).</p>
                     <pre id="season-rollover-log" style="max-height:160px; overflow:auto; font-size:12px; background:#111; padding:8px; border:1px solid #333; border-radius:6px; display:none;"></pre>

@@ -121,6 +121,9 @@
   const btnRoll = document.getElementById('admin-season-roll');
   const btnRollback = document.getElementById('admin-season-rollback');
   const btnSheetsSelftest = document.getElementById('admin-google-selftest');
+  const seasonPicker = document.getElementById('season-picker');
+  const applySeasonBtn = document.getElementById('apply-season-btn');
+  const activeSeasonLabel = document.getElementById('active-season-label');
   if (btnDry) btnDry.onclick = ()=> seasonRollover('dry');
   if (btnSoft) btnSoft.onclick = ()=> seasonRollover('soft');
     if (btnRoll) btnRoll.onclick = ()=> {
@@ -132,6 +135,8 @@
     };
   if (btnRollback) btnRollback.onclick = ()=> seasonRollback();
   if (btnSheetsSelftest) btnSheetsSelftest.onclick = ()=> sheetsSelfTest();
+  if (seasonPicker) loadSeasonsIntoPicker();
+  if (applySeasonBtn) applySeasonBtn.onclick = ()=> applySelectedSeason();
   }
 
   // Match management functions
@@ -532,7 +537,7 @@
     fetch(url,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res=>{
       if(!res.ok || res.d.error){ throw new Error(res.d.error||'Ошибка'); }
       if(logEl){ logEl.textContent=JSON.stringify(res.d,null,2); }
-      if(!res.d.dry_run){ showToast('Новый сезон: '+res.d.new_season,'success'); }
+  if(!res.d.dry_run){ showToast('Новый сезон: '+res.d.new_season,'success'); loadSeasonsIntoPicker(true); }
     }).catch(e=>{ if(logEl){ logEl.textContent='Ошибка: '+e.message; } showToast('Ошибка: '+e.message,'error',6000); });
   }
 
@@ -554,7 +559,8 @@
       return fetch(url,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, status:r.status, d}))).then(res2=>{
         if(!res2.ok || res2.d.error){ throw new Error(res2.d.error||'Ошибка'); }
         if(logEl){ logEl.textContent=JSON.stringify(res2.d,null,2); }
-        showToast('Сезон откатан: активирован '+res2.d.activated_season,'success');
+  showToast('Сезон откатан: активирован '+res2.d.activated_season,'success');
+  loadSeasonsIntoPicker(true);
       });
     }).catch(e=>{
       let hint='';
@@ -566,6 +572,66 @@
       if(logEl){ logEl.textContent='Ошибка: '+msg+(hint?"\nПодсказка: "+hint:''); }
       showToast('Ошибка: '+msg,'error',6000);
     });
+  }
+
+  // Seasons UI helpers
+  function loadSeasonsIntoPicker(refreshActive=false){
+    const picker = document.getElementById('season-picker');
+    const label = document.getElementById('active-season-label');
+    if(!picker) return;
+    fetch('/api/tournaments?status=all').then(r=>r.json()).then(data=>{
+      const list = (data.tournaments||[]);
+      // Fill options
+      picker.innerHTML = '';
+      list.forEach(t=>{
+        const opt=document.createElement('option');
+        opt.value=String(t.id);
+        opt.textContent = `${t.season||t.name||t.id} (${t.status})`;
+        picker.appendChild(opt);
+      });
+      // Active label
+      const active = list.find(t=>t.status==='active');
+      if(label) label.textContent = active? (active.season||active.name||active.id) : '—';
+      // Select active by default
+      if(active) picker.value = String(active.id);
+    }).catch(()=>{
+      if(picker) { picker.innerHTML = '<option>Ошибка загрузки</option>'; }
+    });
+  }
+
+  function applySelectedSeason(){
+    const picker = document.getElementById('season-picker');
+    const id = picker && picker.value ? parseInt(picker.value,10) : 0;
+    if(!id){ showToast('Выберите сезон','error'); return; }
+    const confirmMsg = 'Сделать выбранный турнир активным? Текущий активный будет помечен завершённым.';
+    if(!confirm(confirmMsg)) return;
+    const fd = new FormData();
+    fd.append('initData', window.Telegram?.WebApp?.initData || '');
+    // Эндпоинт минимальный: используем откат/ролловер в зависимости от ситуации не меняя схему.
+    // Пытаемся вычислить: если выбран предыдущий от активного — можно нажать откат;
+    // иначе показываем подсказку (полный редактирующий эндпоинт не реализован в сервере).
+    fetch('/api/tournaments?status=all').then(r=>r.json()).then(data=>{
+      const list=data.tournaments||[];
+      const active=list.find(t=>t.status==='active');
+      const target=list.find(t=>String(t.id)===String(id));
+      if(!target){ showToast('Сезон не найден','error'); return; }
+      if(active && Number(id)===Number(active.id)){
+        showToast('Этот сезон уже активен','info'); return;
+      }
+      // Если целевой == предыдущий от активного по времени — запускаем откат с force=1
+      const sorted=[...list].sort((a,b)=> (new Date(b.start_date||0)) - (new Date(a.start_date||0)) );
+      const idx = active ? sorted.findIndex(t=>t.id===active.id) : -1;
+      const prev = idx>=0 ? sorted[idx+1] : null;
+      if(prev && prev.id===id){
+        const url='/api/admin/season/rollback?force=1';
+        return fetch(url,{method:'POST', body:fd}).then(r=>r.json().then(d=>({ok:r.ok,d}))).then(res=>{
+          if(!res.ok || res.d.error) throw new Error(res.d.error||'Ошибка');
+          showToast('Активирован сезон: '+res.d.activated_season,'success');
+          loadSeasonsIntoPicker(true);
+        });
+      }
+      alert('Для произвольного выбора сезона нужен отдельный админ‑эндпоинт активации. Сейчас поддержан откат к предыдущему (через кнопку/force).');
+    }).catch(()=> showToast('Ошибка применения сезона','error'));
   }
 
   // News management functions
