@@ -449,6 +449,33 @@
     });
   }
 
+  // Google Sheets sync
+  function importScheduleFromGoogle(){
+    const btn = document.getElementById('admin-google-import-schedule');
+    if(!btn) return;
+    btn.disabled = true; const t=btn.textContent; btn.textContent='Импорт...';
+    const fd=new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
+    fetch('/api/admin/google/import-schedule', { method:'POST', body: fd })
+      .then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res=>{
+        if(!res.ok || res.d.error) throw new Error(res.d.error||'Ошибка');
+        showToast('Расписание импортировано из Google','success');
+      }).catch(e=>{ showToast('Ошибка импорта: '+e.message,'error',6000); })
+      .finally(()=>{ btn.disabled=false; btn.textContent=t; });
+  }
+
+  function exportAllToGoogle(){
+    const btn = document.getElementById('admin-google-export-all');
+    if(!btn) return;
+    btn.disabled = true; const t=btn.textContent; btn.textContent='Выгружаю...';
+    const fd=new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
+    fetch('/api/admin/google/export-all', { method:'POST', body: fd })
+      .then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res=>{
+        if(!res.ok || res.d.error) throw new Error(res.d.error||'Ошибка');
+        showToast('Данные выгружены в Google','success');
+      }).catch(e=>{ showToast('Ошибка выгрузки: '+e.message,'error',6000); })
+      .finally(()=>{ btn.disabled=false; btn.textContent=t; });
+  }
+
   function loadStats() {
     console.log('[Admin] Loading stats...');
     const container = document.getElementById('admin-stats-display');
@@ -517,6 +544,12 @@
       container.innerHTML = '<div class="status-text">Ошибка загрузки новостей</div>';
     });
   }
+
+  // Init handlers for new buttons
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const ib=document.getElementById('admin-google-import-schedule'); if(ib) ib.addEventListener('click', importScheduleFromGoogle);
+    const eb=document.getElementById('admin-google-export-all'); if(eb) eb.addEventListener('click', exportAllToGoogle);
+  });
 
   function createNewsElement(news) {
     const newsEl = document.createElement('div');

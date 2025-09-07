@@ -862,8 +862,7 @@ def api_betting_place():
     if not home or not away:
         return jsonify({'error': 'Не указан матч'}), 400
 
-    # Проверка: матч существует в будущих турах и ещё не начался
-    # Сначала читаем туры из снапшота расписания (если есть)
+    # Проверка: матч существует в будущих турах и ещё не начался (без Sheets)
     tours = []
     if SessionLocal is not None:
         try:
@@ -876,8 +875,6 @@ def api_betting_place():
                 dbx.close()
         except Exception:
             tours = []
-    if not tours:
-        tours = _load_all_tours_from_sheet()
     match_dt = None
     found = False
     for t in tours:
@@ -1711,12 +1708,20 @@ def api_admin_matches_upcoming():
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'unauthorized'}), 401
-        # грузим туры
-        try:
-            tours = _load_all_tours_from_sheet()
-        except Exception as e:
-            app.logger.error(f"admin_upcoming: sheet error {e}")
-            return jsonify({'error': 'schedule_unavailable'}), 500
+        # грузим туры из снапшота (без Sheets)
+        tours = []
+        if SessionLocal is not None:
+            try:
+                dbs = get_db()
+                try:
+                    snap = _snapshot_get(dbs, 'schedule')
+                    payload = snap and snap.get('payload')
+                    tours = payload and payload.get('tours') or []
+                finally:
+                    dbs.close()
+            except Exception as e:
+                app.logger.error(f"admin_upcoming: schedule snapshot error {e}")
+                return jsonify({'error': 'schedule_unavailable'}), 500
         now = datetime.now()
         out = []
         import hashlib
@@ -1783,7 +1788,18 @@ def _resolve_match_by_id(match_id: str, tours=None):
     """Восстанавливает (home,away,dt) по match_id (sha1 первые 12)."""
     import hashlib
     if tours is None:
-        tours = _load_all_tours_from_sheet()
+        tours = []
+        if SessionLocal is not None:
+            try:
+                dbs = get_db()
+                try:
+                    snap = _snapshot_get(dbs, 'schedule')
+                    payload = snap and snap.get('payload')
+                    tours = payload and payload.get('tours') or []
+                finally:
+                    dbs.close()
+            except Exception:
+                tours = []
     for t in tours or []:
         for m in t.get('matches', []) or []:
             home = (m.get('home') or '').strip(); away = (m.get('away') or '').strip()
@@ -3537,6 +3553,33 @@ def _build_league_payload_from_sheet():
     }
     return payload
 
+def _build_league_payload_from_db():
+    """Собирает таблицу лиги из реляционной таблицы LeagueTableRow (без Google Sheets).
+    Возвращает payload того же формата, что и из листа: {'range','updated_at','values(A1:H10)'}.
+    """
+    values: list[list] = []
+    if SessionLocal is not None and 'LeagueTableRow' in globals():
+        db = get_db()
+        try:
+            rows = db.query(LeagueTableRow).order_by(LeagueTableRow.row_index.asc()).all()
+            for r in rows:
+                values.append([r.c1, r.c2, r.c3, r.c4, r.c5, r.c6, r.c7, r.c8])
+        except Exception:
+            values = []
+        finally:
+            db.close()
+    # Нормализуем до 10 строк x 8 колонок
+    normalized = []
+    for i in range(10):
+        row = values[i] if i < len(values) else []
+        row = list(row) + [''] * (8 - len(row))
+        normalized.append(row[:8])
+    return {
+        'range': 'A1:H10',
+        'updated_at': datetime.now(timezone.utc).isoformat(),
+        'values': normalized
+    }
+
 def _build_stats_payload_from_sheet():
     # Build stats payload from DB (TeamPlayerStats). Returns same shape as previous Sheets payload.
     header = ['Игрок', 'Матчи', 'Голы', 'Пасы', 'ЖК', 'КК', 'Очки']
@@ -3982,32 +4025,21 @@ def _sync_league_table():
     try:
         _metrics_inc('bg_runs_total', 1)
         t0 = time.time()
-        
-        # Используем оптимизированный Sheets менеджер
-        if sheets_manager:
-            values = sheets_manager.read_range('ТАБЛИЦА', 'A:H')
-            league_payload = {'values': values or [], 'updated_at': datetime.now(timezone.utc).isoformat()}
-        else:
-            league_payload = _build_league_payload_from_sheet()
-            
+        # DB-only: собираем из БД или оставляем предыдущий снапшот
+        league_payload = _build_league_payload_from_db()
         _snapshot_set(db, 'league-table', league_payload)
         _metrics_set('last_sync', 'league-table', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'league-table', 'ok')
         _metrics_set('last_sync_duration_ms', 'league-table', int((time.time()-t0)*1000))
-        
         # Инвалидируем соответствующий кэш
         if cache_manager:
             cache_manager.invalidate('league_table')
-            
         # Отправляем WebSocket уведомление
         if websocket_manager:
             websocket_manager.notify_data_change('league_table', league_payload)
-            
         # Сохраняем в реляционную таблицу (фоновая задача низкого приоритета)
         if task_manager:
-            task_manager.submit_task("persist_league_table", _persist_league_table, 
-                                   league_payload.get('values', []), priority=TaskPriority.BACKGROUND)
-            
+            task_manager.submit_task("persist_league_table", _persist_league_table, league_payload.get('values', []), priority=TaskPriority.BACKGROUND)
     except Exception as e:
         app.logger.warning(f"League table sync failed: {e}")
         _metrics_set('last_sync_status', 'league-table', 'error')
@@ -4050,27 +4082,18 @@ def _sync_stats_table():
     try:
         _metrics_inc('bg_runs_total', 1)
         t0 = time.time()
-        
-        # Используем оптимизированный Sheets менеджер
-        if sheets_manager:
-            values = sheets_manager.read_range('СТАТИСТИКА', 'A:G')
-            stats_payload = {'values': values or [], 'updated_at': datetime.now(timezone.utc).isoformat()}
-        else:
-            stats_payload = _build_stats_payload_from_sheet()
-            
+        # DB-first билдер уже использует БД, не читаем Sheets
+        stats_payload = _build_stats_payload_from_sheet()
         _snapshot_set(db, 'stats-table', stats_payload)
         _metrics_set('last_sync', 'stats-table', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'stats-table', 'ok')
         _metrics_set('last_sync_duration_ms', 'stats-table', int((time.time()-t0)*1000))
-        
         # Инвалидируем соответствующий кэш
         if cache_manager:
             cache_manager.invalidate('stats_table')
-            
         # Отправляем WebSocket уведомление
         if websocket_manager:
             websocket_manager.notify_data_change('stats_table', stats_payload)
-            
     except Exception as e:
         app.logger.warning(f"Stats table sync failed: {e}")
         _metrics_set('last_sync_status', 'stats-table', 'error')
@@ -4086,26 +4109,20 @@ def _sync_schedule():
     try:
         _metrics_inc('bg_runs_total', 1)
         t0 = time.time()
-        
-        # Используем оптимизированный Sheets менеджер
-        if sheets_manager:
-            schedule_payload = _build_schedule_payload_from_sheet()
-        else:
-            schedule_payload = _build_schedule_payload_from_sheet()
-            
+        # Больше не читаем Sheets в фоне. Полагаться на admin импорт.
+        # Если хотим auto-refresh — можно оставить предыдущий снапшот без изменений.
+        snap_prev = _snapshot_get(db, 'schedule') or {}
+        schedule_payload = snap_prev.get('payload') or {'tours': []}
         _snapshot_set(db, 'schedule', schedule_payload)
         _metrics_set('last_sync', 'schedule', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'schedule', 'ok')
         _metrics_set('last_sync_duration_ms', 'schedule', int((time.time()-t0)*1000))
-        
         # Инвалидируем соответствующий кэш
         if cache_manager:
             cache_manager.invalidate('schedule')
-            
         # Отправляем WebSocket уведомление
         if websocket_manager:
             websocket_manager.notify_data_change('schedule', schedule_payload)
-            
     except Exception as e:
         app.logger.warning(f"Schedule sync failed: {e}")
         _metrics_set('last_sync_status', 'schedule', 'error')
@@ -4121,21 +4138,19 @@ def _sync_results():
     try:
         _metrics_inc('bg_runs_total', 1)
         t0 = time.time()
-        
-        results_payload = _build_results_payload_from_sheet()
+        # Не читаем Sheets: используем предыдущий снапшот
+        snap_prev = _snapshot_get(db, 'results') or {}
+        results_payload = snap_prev.get('payload') or {'results': []}
         _snapshot_set(db, 'results', results_payload)
         _metrics_set('last_sync', 'results', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'results', 'ok')
         _metrics_set('last_sync_duration_ms', 'results', int((time.time()-t0)*1000))
-        
         # Инвалидируем соответствующий кэш
         if cache_manager:
             cache_manager.invalidate('results')
-            
         # Отправляем WebSocket уведомление
         if websocket_manager:
             websocket_manager.notify_data_change('results', results_payload)
-            
     except Exception as e:
         app.logger.warning(f"Results sync failed: {e}")
         _metrics_set('last_sync_status', 'results', 'error')
@@ -4151,21 +4166,17 @@ def _sync_betting_tours():
     try:
         _metrics_inc('bg_runs_total', 1)
         t0 = time.time()
-        
         tours_payload = _build_betting_tours_payload()
         _snapshot_set(db, 'betting-tours', tours_payload)
         _metrics_set('last_sync', 'betting-tours', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'betting-tours', 'ok')
         _metrics_set('last_sync_duration_ms', 'betting-tours', int((time.time()-t0)*1000))
-        
         # Инвалидируем соответствующий кэш
         if cache_manager:
             cache_manager.invalidate('betting_tours')
-            
         # Отправляем WebSocket уведомление
         if websocket_manager:
             websocket_manager.notify_data_change('betting_tours', tours_payload)
-            
     except Exception as e:
         app.logger.warning(f"Betting tours sync failed: {e}")
         _metrics_set('last_sync_status', 'betting-tours', 'error')
@@ -4384,7 +4395,19 @@ def start_background_sync():
 def _build_betting_tours_payload():
     # Build nearest tour with odds, markets, and locks for each match.
     # Также открываем следующий тур заранее, если до его первого матча осталось <= 2 дней.
-    all_tours = _load_all_tours_from_sheet()
+    # Источник матчей — snapshot 'schedule' (или пусто)
+    all_tours = []
+    if SessionLocal is not None:
+        try:
+            dbs = get_db()
+            try:
+                snap = _snapshot_get(dbs, 'schedule')
+                payload = snap and snap.get('payload')
+                all_tours = payload and payload.get('tours') or []
+            finally:
+                dbs.close()
+        except Exception:
+            all_tours = []
     today = datetime.now().date()
 
     def is_relevant(t):
@@ -5941,7 +5964,7 @@ def api_users_public_batch():
 
 @app.route('/api/league-table', methods=['GET'])
 def api_league_table():
-    """Возвращает таблицу лиги из снапшота БД; при отсутствии — bootstrap из Sheets. ETag/304 поддерживаются."""
+    """Возвращает таблицу лиги из снапшота БД; при отсутствии — собирает из БД (без Google Sheets). ETag/304 поддерживаются."""
     try:
         # 1) Пытаемся отдать снапшот
         if SessionLocal is not None:
@@ -5964,8 +5987,8 @@ def api_league_table():
                     return resp
             finally:
                 db.close()
-        # 2) Bootstrap из Sheets, если снапшот отсутствует
-        payload = _build_league_payload_from_sheet()
+        # 2) Bootstrap из БД, если снапшот отсутствует
+        payload = _build_league_payload_from_db()
         _core = {'range': 'A1:H10', 'values': payload.get('values')}
         _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
         # сохраним снапшот для будущих запросов
@@ -5985,7 +6008,7 @@ def api_league_table():
 
 @app.route('/api/schedule', methods=['GET'])
 def api_schedule():
-    """Расписание (до 3 туров) через etag_json: snapshot -> sheet bootstrap, с match_of_week логикой."""
+    """Расписание (до 3 туров) через etag_json: только snapshot (без чтения Sheets), с match_of_week логикой."""
     def _build():
         payload = None
         # 1) snapshot
@@ -6005,16 +6028,9 @@ def api_schedule():
                     total_matches = 0
                 if (not tours_in_snap) or total_matches == 0:
                     payload = None  # форсируем rebuild
-        # 2) bootstrap при отсутствии или пустоте
+        # 2) без fallback к Sheets — только пустой payload
         if payload is None:
-            try:
-                payload = _build_schedule_payload_from_sheet()
-                if SessionLocal is not None:
-                    dbs = get_db();
-                    try: _snapshot_set(dbs, 'schedule', payload)
-                    finally: dbs.close()
-            except Exception:
-                payload = {'tours': []}
+            payload = {'tours': []}
         # 3) match_of_week
         try:
             manual=None
@@ -6263,110 +6279,6 @@ def api_vote_aggregates_batch():
         app.logger.error(f"vote batch error: {e}")
         return jsonify({'error': 'Не удалось получить агрегаты'}), 500
 
-def _load_all_tours_from_sheet():
-    """Читает лист расписания и возвращает список всех туров с матчами.
-    Формат тура: { tour:int, title:str, start_at:iso, matches:[{home,away,date,time,datetime,score_home,score_away}] }
-    """
-    ws = get_schedule_sheet()
-    _metrics_inc('sheet_reads', 1)
-    try:
-        rows = ws.get_all_values() or []
-    except Exception as e:
-        _metrics_note_rate_limit(e)
-        raise
-
-    def parse_date(d: str):
-        d = (d or '').strip()
-        if not d:
-            return None
-        for fmt in ("%d.%m.%y", "%d.%m.%Y"):
-            try:
-                return datetime.strptime(d, fmt).date()
-            except Exception:
-                continue
-        return None
-
-    def parse_time(t: str):
-        t = (t or '').strip()
-        try:
-            return datetime.strptime(t, "%H:%M").time()
-        except Exception:
-            return None
-
-    tours = []
-    current_tour = None
-    current_title = None
-    current_matches = []
-
-    def close_current():
-        nonlocal current_tour, current_title, current_matches
-        if current_tour is not None and current_matches:
-            start_dts = []
-            for m in current_matches:
-                ds = m.get('datetime')
-                if ds:
-                    try:
-                        start_dts.append(datetime.fromisoformat(ds))
-                    except Exception:
-                        pass
-                elif m.get('date'):
-                    try:
-                        dd = datetime.fromisoformat(m['date']).date()
-                        tt = parse_time(m.get('time','00:00') or '00:00') or datetime.min.time()
-                        start_dts.append(datetime.combine(dd, tt))
-                    except Exception:
-                        pass
-            start_at = start_dts and min(start_dts).isoformat() or ''
-            tours.append({'tour': current_tour, 'title': current_title, 'start_at': start_at, 'matches': current_matches})
-        current_tour = None
-        current_title = None
-        current_matches = []
-
-    for r in rows:
-        a = (r[0] if len(r) > 0 else '').strip()
-        header_num = None
-        if a:
-            parts = a.replace('\u00A0', ' ').strip().split()
-            if len(parts) >= 2 and parts[0].isdigit() and parts[1].lower().startswith('тур'):
-                header_num = int(parts[0])
-        if header_num is not None:
-            # закрыть предыдущий
-            close_current()
-            current_tour = header_num
-            current_title = a
-            current_matches = []
-            continue
-
-        if current_tour is not None:
-            home = (r[0] if len(r) > 0 else '').strip()
-            score_home = (r[1] if len(r) > 1 else '').strip()
-            score_away = (r[3] if len(r) > 3 else '').strip()
-            away = (r[4] if len(r) > 4 else '').strip()
-            date_str = (r[5] if len(r) > 5 else '').strip()
-            time_str = (r[6] if len(r) > 6 else '').strip()
-            if not home and not away:
-                continue
-            d = parse_date(date_str)
-            tm = parse_time(time_str)
-            dt = None
-            if d:
-                try:
-                    dt = datetime.combine(d, tm or datetime.min.time())
-                except Exception:
-                    dt = None
-            current_matches.append({
-                'home': home,
-                'away': away,
-                'score_home': score_home,
-                'score_away': score_away,
-                'date': (d.isoformat() if d else ''),
-                'time': time_str,
-                'datetime': (dt.isoformat() if dt else '')
-            })
-
-    # закрыть последний
-    close_current()
-    return tours
 
 @app.route('/api/betting/tours', methods=['GET'])
 def api_betting_tours():
@@ -6452,7 +6364,7 @@ def api_betting_my_bets():
         rows, db = _db_retry_read(db, _q, attempts=2, backoff_base=0.1)
         try:
             data = []
-            # Соберём карту текущих дат матчей из снапшота betting-tours (фоллбэк к листу)
+            # Соберём карту текущих дат матчей из снапшота betting-tours
             match_dt_map = {}
             try:
                 snap = _snapshot_get(db, 'betting-tours')
@@ -6460,11 +6372,6 @@ def api_betting_my_bets():
                 tours_src = payload and payload.get('tours') or []
             except Exception:
                 tours_src = []
-            if not tours_src:
-                try:
-                    tours_src = _load_all_tours_from_sheet() or []
-                except Exception:
-                    tours_src = []
             for t in (tours_src or []):
                 tour_key = str(t.get('tour') or '')
                 for m in (t.get('matches') or []):
@@ -6606,12 +6513,6 @@ def _get_match_result(home: str, away: str):
                     return _winner_from_scores(m.get('score_home',''), m.get('score_away',''))
         finally:
             db.close()
-    # 2) Fallback: read from sheet (rare)
-    tours = _load_all_tours_from_sheet()
-    for t in tours:
-        for m in t.get('matches', []):
-            if (m.get('home') == home and m.get('away') == away):
-                return _winner_from_scores(m.get('score_home',''), m.get('score_away',''))
     return None
 
 def _get_match_total_goals(home: str, away: str):
@@ -6644,26 +6545,6 @@ def _get_match_total_goals(home: str, away: str):
                     return total
         finally:
             db.close()
-    # 2) Fallback to sheet
-    tours = _load_all_tours_from_sheet()
-    for t in tours:
-        for m in t.get('matches', []):
-            if (m.get('home') == home and m.get('away') == away):
-                h = _parse_score(m.get('score_home',''))
-                a = _parse_score(m.get('score_away',''))
-                if h is None or a is None:
-                    key=(home,away,m.get('score_home',''),m.get('score_away',''),'sheet')
-                    if key not in _INVALID_SCORE_WARNED:
-                        _INVALID_SCORE_WARNED.add(key)
-                        try:
-                            app.logger.warning(f"_get_match_total_goals: invalid scores (sheet) {home} vs {away}: {m.get('score_home','')} - {m.get('score_away','')}")
-                        except: pass
-                    return None
-                total = h + a
-                try:
-                    app.logger.info(f"_get_match_total_goals: Found {home} vs {away} in sheet: {h}+{a}={total}")
-                except: pass
-                return total
     try:
         app.logger.warning(f"_get_match_total_goals: No match found for {home} vs {away}")
     except: pass
@@ -6811,7 +6692,7 @@ def _get_special_result(home: str, away: str, market: str):
         db.close()
 
 def _get_match_datetime(home: str, away: str):
-    """Вернуть datetime матча из снапшота туров или из листа (ISO в naive datetime)."""
+    """Вернуть datetime матча из снапшота туров (ISO в naive datetime)."""
     # 1) betting-tours snapshot
     if SessionLocal is not None:
         db = get_db()
@@ -6830,17 +6711,6 @@ def _get_match_datetime(home: str, away: str):
                                 pass
         finally:
             db.close()
-    # 2) fallback to sheet
-    tours = _load_all_tours_from_sheet()
-    for t in tours:
-        for m in t.get('matches', []):
-            if m.get('home') == home and m.get('away') == away:
-                dt_str = m.get('datetime')
-                if dt_str:
-                    try:
-                        return datetime.fromisoformat(dt_str)
-                    except Exception:
-                        pass
     return None
 
 def _settle_open_bets():
@@ -6947,7 +6817,7 @@ def _settle_open_bets():
 
 @app.route('/api/results', methods=['GET'])
 def api_results():
-    """Результаты (прошедшие матчи) через etag_json: snapshot -> sheet bootstrap."""
+    """Результаты (прошедшие матчи) через etag_json: только snapshot (без чтения Sheets)."""
     def _build():
         payload=None
         if SessionLocal is not None:
@@ -6957,172 +6827,71 @@ def api_results():
             if snap and snap.get('payload'):
                 payload=snap['payload']
         if payload is None:
-            try:
-                payload=_build_results_payload_from_sheet()
-                if SessionLocal is not None:
-                    dbr=get_db();
-                    try: _snapshot_set(dbr,'results', payload)
-                    finally: dbr.close()
-            except Exception:
-                payload={'results': []}
+            payload={'results': []}
         return payload
     return etag_json('results', _build, cache_ttl=900, max_age=900, swr=600, core_filter=lambda p: {'results': (p.get('results') or [])[:200]})
 
 @app.route('/api/match-details', methods=['GET'])
 def api_match_details():
-    """Возвращает составы двух команд из листа 'СОСТАВЫ' по их названиям.
-    Параметры: home, away (строки). Ищем соответствующие колонки в первой строке.
+    """DB-only: составы и события по матчу без Google Sheets.
+    Параметры: home, away (строки). Возвращает { teams?, rosters, lineups?, events }.
     """
     try:
         home = (request.args.get('home') or '').strip()
         away = (request.args.get('away') or '').strip()
         if not home or not away:
             return jsonify({'error': 'home и away обязательны'}), 400
-
-        def norm(s: str) -> str:
-            """Нормализует название команды:
-            - нижний регистр, замена ё->е
-            - приведение латинских «похожих» букв к кириллице, если строка кириллическая (боремся с Звeзда и т.п.)
-            - удаление не буквенно-цифровых
-            - удаление префикса 'фк' / 'fc' / 'fk'
-            """
-            s = (s or '').lower().strip()
-            s = s.replace('\u00A0', ' ').replace('ё', 'е')
-            # Если строка содержит кириллицу, заменим похожие латинские символы на кириллицу
-            try:
-                has_cyr = any('а' <= ch <= 'я' or ch in ('ё') for ch in s)
-            except Exception:
-                has_cyr = False
-            if has_cyr:
-                # наиболее частые пары латиница -> кириллица
-                trans_map = str.maketrans({
-                    'a': 'а',  # a -> а
-                    'e': 'е',  # e -> е
-                    'o': 'о',  # o -> о
-                    'c': 'с',  # c -> с
-                    'p': 'р',  # p -> р
-                    'x': 'х',  # x -> х
-                    'y': 'у',  # y -> у
-                    'k': 'к',  # k -> к
-                    'b': 'в',  # b -> в
-                    'm': 'м',  # m -> м
-                    't': 'т',  # t -> т
-                    'h': 'н',  # h -> н
-                })
-                s = s.translate(trans_map)
-            # уберём пробелы и префикс 'фк'/'fc' в начале
-            s0 = s.replace(' ', '')
-            if s0.startswith('фк'):
-                s = s0[2:]
-            elif s0.startswith('fc') or s0.startswith('fk'):
-                s = s0[2:]
-            else:
-                s = s0
-            return ''.join(ch for ch in s if ch.isalnum())
-
-        def base_key(k: str) -> str:
-            """Базовая форма: без хвостовых цифр (Ювелиры2 -> Ювелиры)."""
-            k = k or ''
-            i = len(k)
-            while i > 0 and k[i-1].isdigit():
-                i -= 1
-            return k[:i]
-
-        # Ключ кеша по нормализованным названиям
-        home_key = norm(home)
-        away_key = norm(away)
-        cache_key = f"{home_key}|{away_key}"
+        cache_key = f"{home.strip().lower()}|{away.strip().lower()}"
         def _build():
             now_ts = int(time.time())
             cached = MATCH_DETAILS_CACHE.get(cache_key)
             if cached and (now_ts - cached['ts'] < MATCH_DETAILS_TTL):
                 return cached['payload']
-            # Пытаемся получить лист составов; если не удаётся — работаем без Sheets
-            ws = None
-            try:
-                ws = get_rosters_sheet()
-            except Exception:
-                ws = None
-            # Сначала попробуем получить фиксированный диапазон, чтобы сохранить реальные индексы колонок (A=1..ZZ)
-            headers = []
-            if ws is not None:
+            # Достаём lineups из БД
+            home_players = []
+            away_players = []
+            extended_lineups = None
+            if SessionLocal is not None:
                 try:
-                    _metrics_inc('sheet_reads', 1)
-                    arr = ws.get('A1:ZZ1') or [[]]
-                    headers = (arr[0] if arr and len(arr) > 0 else []) or []
-                except Exception:
-                    headers = []
-                # Фолбэк — row_values(1), если предыдущий способ не сработал
-                if not headers:
+                    dbx = get_db()
                     try:
-                        _metrics_inc('sheet_reads', 1)
-                        headers = ws.row_values(1) or []
-                    except Exception:
-                        headers = []
-            # карта нормализованных заголовков -> индекс (1-based)
-            idx_map = {}
-            if headers:
-                for i, h in enumerate(headers, start=1):
-                    key = norm(h)
-                    if not key:
-                        continue
-                    idx_map[key] = i
-                    bk = base_key(key)
-                    if bk and bk not in idx_map:
-                        idx_map[bk] = i
-                    try:
-                        simple = key.split('(')[0].strip()
-                        if simple and simple not in idx_map:
-                            idx_map[simple] = i
-                    except Exception:
-                        pass
-            def extract(team_name: str):
-                if ws is None:
-                    return {'team': team_name, 'players': []}
-                key = norm(team_name)
-                col_idx = idx_map.get(key)
-                if col_idx is None:
-                    bk = base_key(key)
-                    col_idx = idx_map.get(bk)
-                if col_idx is None:
-                    for k, i in idx_map.items():
-                        if key and (key in k or k in key):
-                            col_idx = i
-                            break
-                if col_idx is None:
-                    try:
-                        import difflib
-                        best_ratio = 0.0
-                        best_idx = None
-                        for k, i in idx_map.items():
-                            r = difflib.SequenceMatcher(None, key, k).ratio()
-                            if r > best_ratio:
-                                best_ratio = r
-                                best_idx = i
-                        if best_idx is not None and best_ratio >= 0.8:
-                            col_idx = best_idx
-                    except Exception:
-                        pass
-                if col_idx is None:
-                    return {'team': team_name, 'players': []}
-                try:
-                    _metrics_inc('sheet_reads', 1)
-                    col_vals = ws.col_values(col_idx)
+                        lrows, dbx = _db_retry_read(
+                            dbx,
+                            lambda s: s.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all(),
+                            attempts=2, backoff_base=0.1, label='lineups:details:db'
+                        )
+                        if lrows:
+                            ext = { 'home': {'starting_eleven': [], 'substitutes': []}, 'away': {'starting_eleven': [], 'substitutes': []} }
+                            for r in lrows:
+                                side = 'home' if (r.team or 'home')=='home' else 'away'
+                                bucket = 'starting_eleven' if r.position=='starting_eleven' else 'substitutes'
+                                rec = {
+                                    'player': r.player,
+                                    'jersey_number': r.jersey_number,
+                                    'is_captain': bool(r.is_captain)
+                                }
+                                ext[side][bucket].append(rec)
+                                # плоский список
+                                if side=='home':
+                                    home_players.append(r.player)
+                                else:
+                                    away_players.append(r.player)
+                            for s in ('home','away'):
+                                for b in ('starting_eleven','substitutes'):
+                                    ext[s][b].sort(key=lambda x: (999 if x['jersey_number'] is None else x['jersey_number'], (x['player'] or '').lower()))
+                            extended_lineups = ext
+                        else:
+                            # fallback: team_roster
+                            from sqlalchemy import text as _sa_text
+                            home_rows, dbx = _db_retry_read(dbx, lambda s: s.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': home}).fetchall(), attempts=2, backoff_base=0.1, label='lineups:details:roster-home')
+                            away_rows, dbx = _db_retry_read(dbx, lambda s: s.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': away}).fetchall(), attempts=2, backoff_base=0.1, label='lineups:details:roster-away')
+                            home_players = [r[0] for r in home_rows] if home_rows else []
+                            away_players = [r[0] for r in away_rows] if away_rows else []
+                    finally:
+                        dbx.close()
                 except Exception:
-                    col_vals = []
-                players = [v.strip() for v in col_vals[1:] if v and v.strip()]
-                try:
-                    team_label = headers[col_idx-1] if (headers and len(headers) >= col_idx) else team_name
-                except Exception:
-                    team_label = team_name
-                return {'team': team_label or team_name, 'players': players}
-            home_data = extract(home)
-            away_data = extract(away)
-            if not home_data['players'] and not away_data['players']:
-                alt_home = extract(away)
-                alt_away = extract(home)
-                if alt_home['players'] or alt_away['players']:
-                    home_data, away_data = alt_home, alt_away
+                    home_players = []
+                    away_players = []
             # Подтянем события игроков из БД (если доступна)
             events = {'home': [], 'away': []}
             if SessionLocal is not None:
@@ -7142,51 +6911,23 @@ def api_match_details():
                         dbx.close()
                 except Exception:
                     events = {'home': [], 'away': []}
-            extended_lineups = None
-            if SessionLocal is not None:
-                try:
-                    dbx = get_db()
-                    try:
-                        lrows, dbx = _db_retry_read(
-                            dbx,
-                            lambda s: s.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all(),
-                            attempts=2, backoff_base=0.1, label='lineups:details:extended'
-                        )
-                        if lrows:
-                            ext = { 'home': {'starting_eleven': [], 'substitutes': []}, 'away': {'starting_eleven': [], 'substitutes': []} }
-                            for r in lrows:
-                                side = 'home' if (r.team or 'home')=='home' else 'away'
-                                bucket = 'starting_eleven' if r.position=='starting_eleven' else 'substitutes'
-                                ext[side][bucket].append({
-                                    'player': r.player,
-                                    'jersey_number': r.jersey_number,
-                                    'is_captain': bool(r.is_captain)
-                                })
-                            for s in ('home','away'):
-                                for b in ('starting_eleven','substitutes'):
-                                    ext[s][b].sort(key=lambda x: (999 if x['jersey_number'] is None else x['jersey_number'], (x['player'] or '').lower()))
-                            extended_lineups = ext
-                    finally:
-                        dbx.close()
-                except Exception:
-                    extended_lineups = None
             if extended_lineups:
                 flat_home = [p['player'] for p in extended_lineups['home']['starting_eleven']] + [p['player'] for p in extended_lineups['home']['substitutes']]
                 flat_away = [p['player'] for p in extended_lineups['away']['starting_eleven']] + [p['player'] for p in extended_lineups['away']['substitutes']]
                 payload_core = {
-                    'teams': {'home': home_data['team'], 'away': away_data['team']},
+                    'teams': {'home': home, 'away': away},
                     'rosters': {'home': flat_home, 'away': flat_away},
                     'lineups': extended_lineups,
                     'events': events
                 }
             else:
                 payload_core = {
-                    'teams': {'home': home_data['team'], 'away': away_data['team']},
-                    'rosters': {'home': home_data['players'], 'away': away_data['players']},
+                    'teams': {'home': home, 'away': away},
+                    'rosters': {'home': home_players, 'away': away_players},
                     'events': events
                 }
             # лог для диагностики пустых составов
-            if not home_data['players'] and not away_data['players']:
+            if not home_players and not away_players:
                 try:
                     app.logger.info("Rosters not found for %s vs %s", home, away)
                 except Exception:
@@ -7554,6 +7295,95 @@ def api_results_refresh():
         app.logger.error(f"Ошибка принудительного обновления результатов: {e}")
         return jsonify({'error': 'Не удалось обновить результаты'}), 500
 
+# -------- Google Sheets Admin Sync (import/export) --------
+@app.route('/api/admin/google/import-schedule', methods=['POST'])
+def api_admin_google_import_schedule():
+    """Импорт расписания из Google Sheets (только админ): обновляет snapshot schedule. DB-only чтение для клиентов сохраняется."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        if SessionLocal is None:
+            return jsonify({'error': 'db_unavailable'}), 503
+        # Построить payload расписания из Sheets и сохранить как снапшот
+        try:
+            payload = _build_schedule_payload_from_sheet()
+        except Exception as e:
+            app.logger.error(f"import-schedule build failed: {e}")
+            return jsonify({'error': 'sheet_read_failed'}), 500
+        db = get_db()
+        try:
+            _snapshot_set(db, 'schedule', payload)
+        finally:
+            db.close()
+        # Инвалидируем кэши и уведомим клиентов
+        try:
+            if cache_manager: cache_manager.invalidate('schedule')
+            if websocket_manager: websocket_manager.notify_data_change('schedule', payload)
+        except Exception:
+            pass
+        return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
+    except Exception as e:
+        app.logger.error(f"admin import schedule error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
+@app.route('/api/admin/google/export-all', methods=['POST'])
+def api_admin_google_export_all():
+    """Выгрузка актуальных данных из БД в Google Sheets (только админ)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        # Требуются env: GOOGLE_CREDENTIALS_B64, SHEET_ID
+        creds_b64 = os.environ.get('GOOGLE_CREDENTIALS_B64', '')
+        sheet_id = os.environ.get('SHEET_ID', '')
+        if not creds_b64 or not sheet_id:
+            return jsonify({'error': 'sheets_not_configured'}), 400
+        # Собираем данные из БД
+        if SessionLocal is None:
+            return jsonify({'error': 'db_unavailable'}), 503
+        db: Session = get_db()
+        try:
+            # Примеры: пользователи, ставки, таблица лиги, статистика, результаты
+            users = db.query(User).all()
+            bets = db.query(Bet).all() if 'Bet' in globals() else []
+            lt_rows = db.query(LeagueTableRow).order_by(LeagueTableRow.row_index.asc()).all() if 'LeagueTableRow' in globals() else []
+        finally:
+            db.close()
+        # Пишем в Sheets
+        try:
+            from utils.sheets import SheetsManager
+            sm = SheetsManager(creds_b64, sheet_id)
+            # Лига: в лист ТАБЛИЦА, диапазон A:H — соберём values
+            if lt_rows:
+                values = [[r.c1, r.c2, r.c3, r.c4, r.c5, r.c6, r.c7, r.c8] for r in lt_rows]
+                sm.update_range('ТАБЛИЦА', 'A1:H'+str(max(1, len(values))), values)
+            # Пользователи: простой экспорт в лист users (A:F)
+            user_values = [['user_id','display_name','username','level','xp','credits']]
+            for u in users:
+                user_values.append([int(u.user_id or 0), u.display_name or '', u.tg_username or '', int(u.level or 1), int(u.xp or 0), int(u.credits or 0)])
+            sm.update_range('users', 'A1:F'+str(len(user_values)), user_values)
+            # Ставки: лист bets (минимальный набор)
+            bet_values = [['id','user_id','market','selection','odds','stake','status','placed_at']]
+            for b in bets:
+                bet_values.append([int(b.id or 0), int(b.user_id or 0), b.market or '1x2', b.selection or '', str(b.odds or ''), int(b.stake or 0), b.status or '', (b.placed_at.isoformat() if getattr(b,'placed_at', None) else '')])
+            sm.update_range('bets', 'A1:H'+str(len(bet_values)), bet_values)
+        except Exception as e:
+            app.logger.error(f"export-all to sheets failed: {e}")
+            return jsonify({'error': 'sheet_write_failed'}), 500
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        app.logger.error(f"admin export all error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
 @app.route('/api/betting/tours/refresh', methods=['POST'])
 def api_betting_tours_refresh():
     """Принудительно обновляет снапшот туров для ставок (только админ).
@@ -7725,8 +7555,7 @@ def api_streams_upcoming():
                 tours = payload and payload.get('tours') or []
             finally:
                 dbx.close()
-        if not tours:
-            tours = _load_all_tours_from_sheet()
+    # Без fallback к Sheets
         matches = []
         for t in tours or []:
             for m in (t.get('matches') or []):
@@ -7969,7 +7798,7 @@ def api_streams_get():
     except Exception as e:
         app.logger.error(f"streams/get immediate lookup error: {e}")
 
-    # --- 2. Загрузка расписания (snapshot -> fallback sheet) ---
+    # --- 2. Загрузка расписания (snapshot only) ---
     tours = []
     try:
         dbs = get_db()
@@ -7981,11 +7810,7 @@ def api_streams_get():
             dbs.close()
     except Exception:
         pass
-    if not tours:
-        try:
-            tours = _load_all_tours_from_sheet()
-        except Exception:
-            tours = []
+    # без fallback к Sheets
 
     # --- 3. Поиск матча в расписании ---
     start_ts = None
