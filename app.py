@@ -3629,16 +3629,16 @@ def api_team_overview():
                     return _team_overview_from_results_snapshot(db, raw_name)
                 # 2) Агрегация по таблице matches по всем сезонам
                 # Учитываем только завершённые матчи (status='finished')
-                                sql = text(
-                                        """
-                                        SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.tournament_id
-                                        FROM matches m
-                                        WHERE m.status = 'finished'
-                                            AND (
-                                                (m.home_team_id = :tid) OR (m.away_team_id = :tid)
-                                            )
-                                        """
-                                )
+                sql = text(
+                    """
+                    SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.tournament_id
+                    FROM matches m
+                    WHERE m.status = 'finished'
+                        AND (
+                            (m.home_team_id = :tid) OR (m.away_team_id = :tid)
+                        )
+                    """
+                )
                 # Если не нашли id — попробуем по имени, тогда условие будет по join'у
                 rows = None
                 if team_id:
