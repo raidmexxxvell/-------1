@@ -5170,6 +5170,76 @@ def api_match_status_set():
             app.logger.warning(f"Failed to build betting tours payload: {e}")
         if status == 'finished':
             try: 
+                # 1) Зафиксируем итоговый счёт в snapshot 'results' (если счёт внесён)
+                try:
+                    ms = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
+                    if ms and (ms.score_home is not None) and (ms.score_away is not None):
+                        snap = _snapshot_get(db, 'results') if SessionLocal is not None else None
+                        payload = (snap and snap.get('payload')) or {'results': [], 'updated_at': datetime.now(timezone.utc).isoformat()}
+                        results = payload.get('results') or []
+                        # Найдём запись, если уже была
+                        found_idx = None
+                        for i, r in enumerate(results):
+                            if (r.get('home') or '').strip() == home and (r.get('away') or '').strip() == away:
+                                found_idx = i
+                                break
+                        extra = _get_match_tour_and_dt(home, away)
+                        result_entry = {
+                            'home': home,
+                            'away': away,
+                            'score_home': int(ms.score_home),
+                            'score_away': int(ms.score_away),
+                            'tour': extra.get('tour'),
+                            'date': extra.get('date') or '',
+                            'time': extra.get('time') or '',
+                            'datetime': extra.get('datetime') or ''
+                        }
+                        if found_idx is not None:
+                            results[found_idx] = result_entry
+                        else:
+                            results.append(result_entry)
+                        payload['results'] = results
+                        payload['updated_at'] = datetime.now(timezone.utc).isoformat()
+                        _snapshot_set(db, 'results', payload)
+                        # Инвалидация кэшей и WS оповещение (best-effort)
+                        try:
+                            if cache_manager: cache_manager.invalidate('results')
+                        except Exception:
+                            pass
+                        try:
+                            if websocket_manager: websocket_manager.notify_data_change('results', payload)
+                        except Exception:
+                            pass
+                        # Отзеркалим счёт в Google Sheets (best-effort)
+                        try:
+                            mirror_match_score_to_schedule(home, away, int(ms.score_home), int(ms.score_away))
+                        except Exception:
+                            pass
+                except Exception as write_res_err:
+                    try: app.logger.warning(f"api_match_status_set: failed to upsert results snapshot for {home} vs {away}: {write_res_err}")
+                    except Exception: pass
+                # 2) Автофикс спецрынков как "Нет", если админ не устанавливал явно
+                try:
+                    spec_row = db.query(MatchSpecials).filter(MatchSpecials.home==home, MatchSpecials.away==away).first()
+                    auto_fixed = False
+                    if not spec_row:
+                        spec_row = MatchSpecials(home=home, away=away)
+                        db.add(spec_row)
+                        spec_row.penalty_yes = 0
+                        spec_row.redcard_yes = 0
+                        auto_fixed = True
+                    else:
+                        if spec_row.penalty_yes is None:
+                            spec_row.penalty_yes = 0; auto_fixed = True
+                        if spec_row.redcard_yes is None:
+                            spec_row.redcard_yes = 0; auto_fixed = True
+                    if auto_fixed:
+                        spec_row.updated_at = datetime.now(timezone.utc)
+                        db.flush()
+                except Exception as _spec_auto_err:
+                    try: app.logger.warning(f"api_match_status_set: auto specials fix failed: {_spec_auto_err}")
+                    except Exception: pass
+                # 3) После фиксации результата/спецрынков — расчёт ставок
                 _settle_open_bets()
                 # После расчёта обновим турнирную таблицу (сразу, без ожидания фонового цикла)
                 try:
