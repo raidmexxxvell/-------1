@@ -18,10 +18,10 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
     # Инициализация логгера админа
     try:
         from utils.admin_logger import AdminActionLogger
-        admin_logger = AdminActionLogger(SessionLocal)
+        admin_logger = AdminActionLogger()
         g.admin_logger = admin_logger
-    except ImportError:
-        app.logger.warning("Admin logger not available")
+    except ImportError as e:
+        app.logger.warning(f"Admin logger not available: {e}")
         g.admin_logger = None
 
     def _get_admin_id():

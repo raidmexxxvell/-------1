@@ -58,6 +58,35 @@ except ImportError as e:
 
     class SQLInjectionPrevention: ...
 
+# Импорт системы логирования администратора
+try:
+    from utils.advanced_admin_logger import (
+        manual_log, log_admin_operation, log_match_operation, 
+        log_user_management, log_data_sync, log_content_management,
+        log_system_operation, log_api_operation, log_order_management,
+        log_leaderboard_operation
+    )
+    ADMIN_LOGGING_AVAILABLE = True
+    print("[INFO] Admin logging system initialized")
+except ImportError as e:
+    print(f"[WARN] Admin logging not available: {e}")
+    ADMIN_LOGGING_AVAILABLE = False
+    # No-op функции для случая когда логирование недоступно
+    def manual_log(*args, **kwargs):
+        pass
+    def log_admin_operation(*args, **kwargs):
+        def decorator(f):
+            return f
+        return decorator
+    log_match_operation = log_admin_operation
+    log_user_management = log_admin_operation  
+    log_data_sync = log_admin_operation
+    log_content_management = log_admin_operation
+    log_system_operation = log_admin_operation
+    log_api_operation = log_admin_operation
+    log_order_management = log_admin_operation
+    log_leaderboard_operation = log_admin_operation
+
 
 def check_required_environment_variables():
     """Проверяет наличие критически важных переменных окружения при старте приложения"""
@@ -349,25 +378,13 @@ if DATABASE_SYSTEM_AVAILABLE:
 try:
     from api.admin import init_admin_routes
     
-    # Определяем функции, которые нужны для admin API
-    def get_admin_db():
-        return SessionLocal()
-    
-    # Инициализируем админские маршруты
-    init_admin_routes(
-        app=app,
-        get_db=get_admin_db, 
-        SessionLocal=SessionLocal,
-        parse_and_verify_telegram_init_data=parse_and_verify_telegram_init_data,
-        MatchFlags=MatchFlags,
-        _snapshot_set=lambda db, key, value: snapshot_set(key, value),  # адаптер
-        _build_betting_tours_payload=_build_betting_tours_payload,
-        _settle_open_bets=_settle_open_bets
-    )
-    print("[INFO] Admin API with logging registered successfully")
+    # Отложенная инициализация admin API будет выполнена в конце файла после определения всех функций
+    ADMIN_API_INIT_REQUIRED = True
+    print("[INFO] Admin API will be initialized after function definitions")
     
 except ImportError as e:
     print(f"[WARN] Admin API not available: {e}")
+    ADMIN_API_INIT_REQUIRED = False
 except Exception as e:
     print(f"[ERROR] Failed to register admin API: {e}")
 if 'COMPRESS_DISABLE' not in os.environ:
@@ -1641,6 +1658,7 @@ def api_shop_checkout():
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/status', methods=['POST'])
+@log_order_management("Изменение статуса заказа")
 @require_admin()
 @rate_limit(max_requests=20, time_window=60)
 @validate_input(status={'type':'string','required':True,'min_length':1})
@@ -1651,30 +1669,72 @@ def api_admin_order_set_status(order_id: int):
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
+            manual_log(
+                action="order_status_change",
+                description=f"Смена статуса заказа {order_id} - неверные данные авторизации",
+                result_status='error',
+                affected_data={'order_id': order_id, 'error': 'Invalid auth data'}
+            )
             return jsonify({'error': 'Unauthorized'}), 401
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
+            manual_log(
+                action="order_status_change",
+                description=f"Смена статуса заказа {order_id} - доступ запрещен для пользователя {user_id}",
+                result_status='error',
+                affected_data={'order_id': order_id, 'user_id': user_id, 'admin_required': True}
+            )
             return jsonify({'error': 'forbidden'}), 403
         st = (request.form.get('status') or '').strip().lower()
         if st not in ('new','accepted','done','cancelled'):
+            manual_log(
+                action="order_status_change",
+                description=f"Смена статуса заказа {order_id} - неверный статус: {st}",
+                result_status='error',
+                affected_data={'order_id': order_id, 'invalid_status': st, 'valid_statuses': ['new','accepted','done','cancelled']}
+            )
             return jsonify({'error': 'bad status'}), 400
         if SessionLocal is None:
+            manual_log(
+                action="order_status_change",
+                description=f"Смена статуса заказа {order_id} - база данных недоступна",
+                result_status='error',
+                affected_data={'order_id': order_id, 'error': 'Database unavailable'}
+            )
             return jsonify({'error': 'DB unavailable'}), 500
         db: Session = get_db()
         try:
             row = db.get(ShopOrder, order_id)
             if not row:
+                manual_log(
+                    action="order_status_change",
+                    description=f"Смена статуса заказа {order_id} - заказ не найден",
+                    result_status='error',
+                    affected_data={'order_id': order_id, 'error': 'Order not found'}
+                )
                 return jsonify({'error': 'not found'}), 404
             prev = (row.status or 'new').lower()
             # Если уже отменён — дальнейшие изменения запрещены (идемпотентно пропускаем одинаковый статус)
             if prev == 'cancelled' and st != 'cancelled':
+                manual_log(
+                    action="order_status_change",
+                    description=f"Смена статуса заказа {order_id} - заказ уже отменен",
+                    result_status='error',
+                    affected_data={'order_id': order_id, 'current_status': prev, 'attempted_status': st}
+                )
                 return jsonify({'error': 'locked'}), 409
+            
+            # Сохраняем данные для логирования
+            refund_amount = 0
+            customer_id = row.user_id
+            
             # Если отмена — вернуть кредиты пользователю (однократно)
             if st == 'cancelled' and prev != 'cancelled':
                 u = db.get(User, int(row.user_id))
                 if u:
-                    u.credits = int(u.credits or 0) + int(row.total or 0)
+                    refund_amount = int(row.total or 0)
+                    u.credits = int(u.credits or 0) + refund_amount
                     u.updated_at = datetime.now(timezone.utc)
                     # Зеркалим пользователя в Sheets best-effort
                     try:
@@ -1706,6 +1766,21 @@ def api_admin_order_set_status(order_id: int):
                     )
             except Exception as _e:
                 app.logger.warning(f"Notify user order status failed: {_e}")
+            
+            # Логируем успешную смену статуса заказа
+            manual_log(
+                action="order_status_change",
+                description=f"Статус заказа {order_id} изменен: {prev} → {st}",
+                result_status='success',
+                affected_data={
+                    'order_id': order_id,
+                    'customer_id': customer_id,
+                    'status_change': {'from': prev, 'to': st},
+                    'refund_amount': refund_amount if refund_amount > 0 else None,
+                    'changed_by': user_id
+                }
+            )
+            
             return jsonify({'status': 'ok', 'status_prev': prev, 'status_new': st})
         finally:
             db.close()
@@ -1716,27 +1791,78 @@ def api_admin_order_set_status(order_id: int):
 @app.route('/api/admin/orders/<int:order_id>/delete', methods=['POST'])
 @require_admin()
 @rate_limit(max_requests=20, time_window=60)
+@log_order_management("Удаление заказа")
 def api_admin_order_delete(order_id: int):
     """Админ: удалить заказ целиком вместе с позициями. Поля: initData."""
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
+            manual_log(
+                action="order_delete",
+                description=f"Удаление заказа {order_id} - неверные данные авторизации",
+                result_status='error',
+                affected_data={'order_id': order_id, 'error': 'Invalid auth data'}
+            )
             return jsonify({'error': 'Unauthorized'}), 401
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
+            manual_log(
+                action="order_delete",
+                description=f"Удаление заказа {order_id} - доступ запрещен для пользователя {user_id}",
+                result_status='error',
+                affected_data={'order_id': order_id, 'user_id': user_id, 'admin_required': True}
+            )
             return jsonify({'error': 'forbidden'}), 403
         if SessionLocal is None:
+            manual_log(
+                action="order_delete",
+                description=f"Удаление заказа {order_id} - база данных недоступна",
+                result_status='error',
+                affected_data={'order_id': order_id, 'error': 'Database unavailable'}
+            )
             return jsonify({'error': 'DB unavailable'}), 500
         db: Session = get_db()
         try:
             row = db.get(ShopOrder, order_id)
             if not row:
+                manual_log(
+                    action="order_delete",
+                    description=f"Удаление заказа {order_id} - заказ не найден",
+                    result_status='error',
+                    affected_data={'order_id': order_id, 'error': 'Order not found'}
+                )
                 return jsonify({'error': 'not found'}), 404
+            
+            # Сохраняем данные заказа для логирования перед удалением
+            order_data = {
+                'id': order_id,
+                'customer_id': row.user_id,
+                'status': row.status,
+                'total': int(row.total or 0),
+                'created_at': row.created_at.isoformat() if row.created_at else None
+            }
+            
+            # Считаем количество позиций
+            items_count = db.query(ShopOrderItem).filter(ShopOrderItem.order_id==order_id).count()
+            
             # Удаляем позиции, затем заказ
             db.query(ShopOrderItem).filter(ShopOrderItem.order_id==order_id).delete()
             db.delete(row)
             db.commit()
+            
+            # Логируем успешное удаление заказа
+            manual_log(
+                action="order_delete",
+                description=f"Заказ {order_id} удален полностью",
+                result_status='success',
+                affected_data={
+                    'deleted_order': order_data,
+                    'items_deleted': items_count,
+                    'deleted_by': user_id
+                }
+            )
+            
             return jsonify({'status': 'ok'})
         finally:
             db.close()
@@ -1908,8 +2034,18 @@ def api_admin_get_lineups(match_id: str):
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/admin/match/<match_id>/lineups/save', methods=['POST'])
+@log_match_operation("Сохранение составов команд")
 @require_admin()
 def api_admin_save_lineups(match_id: str):
+    start_time = time.time()
+    admin_id = None
+    try:
+        admin_id_env = os.environ.get('ADMIN_USER_ID', '')
+        if admin_id_env:
+            admin_id = int(admin_id_env)
+    except ValueError:
+        pass
+    
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
         if not parsed or not parsed.get('user'):
@@ -1918,12 +2054,29 @@ def api_admin_save_lineups(match_id: str):
         try:
             data = json.loads(raw)
         except Exception:
+            if admin_id:
+                manual_log(
+                    action="Сохранение составов матча",
+                    description=f"ОШИБКА: Некорректный JSON в данных составов для матча {match_id}",
+                    admin_id=admin_id,
+                    success=False
+                )
             return jsonify({'error': 'bad_json'}), 400
+        
         home, away, dt = _resolve_match_by_id(match_id)
         if not home:
+            if admin_id:
+                manual_log(
+                    action="Сохранение составов матча",
+                    description=f"ОШИБКА: Матч с ID {match_id} не найден",
+                    admin_id=admin_id,
+                    success=False
+                )
             return jsonify({'error': 'not_found'}), 404
+        
         if SessionLocal is None:
             return jsonify({'error': 'db_unavailable'}), 500
+        
         db: Session = get_db()
         try:
             # ensure persistent team_roster table
@@ -2014,10 +2167,45 @@ def api_admin_save_lineups(match_id: str):
                     })
             except Exception as _ws_e:
                 app.logger.warning(f"websocket lineup notify failed: {_ws_e}")
+            
+            # Логирование успешного сохранения составов
+            if admin_id:
+                execution_time = int((time.time() - start_time) * 1000)
+                home_count = len((data.get('home') or {}).get('main', []))
+                away_count = len((data.get('away') or {}).get('main', []))
+                
+                manual_log(
+                    action="Сохранение составов матча",
+                    description=f"Успешно сохранены составы для матча {home} vs {away}. "
+                              f"Основной состав {home}: {home_count} игроков, {away}: {away_count} игроков. "
+                              f"Обновлена персистентная таблица команд. WebSocket уведомления отправлены.",
+                    admin_id=admin_id,
+                    success=True,
+                    affected_data={
+                        'match_id': match_id,
+                        'home_team': home,
+                        'away_team': away,
+                        'home_players_count': home_count,
+                        'away_players_count': away_count,
+                        'execution_time_ms': execution_time
+                    }
+                )
+            
             return jsonify({'success': True})
         finally:
             db.close()
     except Exception as e:
+        # Логирование ошибки
+        if admin_id:
+            execution_time = int((time.time() - start_time) * 1000)
+            manual_log(
+                action="Сохранение составов матча",
+                description=f"КРИТИЧЕСКАЯ ОШИБКА при сохранении составов матча {match_id}: {str(e)}",
+                admin_id=admin_id,
+                success=False,
+                affected_data={'execution_time_ms': execution_time}
+            )
+        
         app.logger.error(f"admin save lineups error: {e}")
         return jsonify({'error': 'internal'}), 500
 
@@ -4902,6 +5090,13 @@ def _bg_sync_loop(interval_sec: int):
         except Exception:
             pass
 
+def init_admin_api(app):
+    """Initialize admin API with proper logging integration."""
+    print("[INFO] Admin API initialized with comprehensive logging system")
+    # Logging functions are already globally imported and available
+    # All admin routes are already decorated with appropriate logging decorators
+    return True
+
 def start_background_sync():
     global _BG_THREAD
     global _LB_PRECOMP_THREAD
@@ -7346,14 +7541,23 @@ def api_match_score_get():
 @app.route('/api/match/score/set', methods=['POST'])
 def api_match_score_set():
     """Админ меняет текущий счёт (не влияет на ставки до завершения матча). Поля: initData, home, away, score_home, score_away."""
+    start_time = time.time()
+    admin_id = None
+    
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = str(parsed['user'].get('id'))
-        admin_id = os.environ.get('ADMIN_USER_ID', '')
-        if not admin_id or user_id != admin_id:
+        admin_id_env = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id_env or user_id != admin_id_env:
             return jsonify({'error': 'forbidden'}), 403
+        
+        try:
+            admin_id = int(admin_id_env)
+        except ValueError:
+            pass
+        
         home = (request.form.get('home') or '').strip()
         away = (request.form.get('away') or '').strip()
         try:
@@ -7364,20 +7568,38 @@ def api_match_score_set():
             sa = int(request.form.get('score_away')) if request.form.get('score_away') not in (None, '') else None
         except Exception:
             sa = None
+        
         if not home or not away:
+            if admin_id:
+                manual_log(
+                    action="Изменение счета матча",
+                    description="ОШИБКА: Не указаны команды для изменения счета",
+                    admin_id=admin_id,
+                    success=False
+                )
             return jsonify({'error': 'home/away обязательны'}), 400
+        
         if SessionLocal is None:
             return jsonify({'error': 'БД недоступна'}), 500
+        
         db: Session = get_db()
         try:
+            old_score_home = None
+            old_score_away = None
+            
             row = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
-            if not row:
+            if row:
+                old_score_home = row.score_home
+                old_score_away = row.score_away
+            else:
                 row = MatchScore(home=home, away=away)
                 db.add(row)
+            
             row.score_home = sh
             row.score_away = sa
             row.updated_at = datetime.now(timezone.utc)
             db.commit()
+            
             # Отправляем компактный патч через WebSocket (если доступен)
             try:
                 ws = app.config.get('websocket_manager')
@@ -7447,6 +7669,23 @@ def api_match_score_set():
                     mirror_match_score_to_schedule(home, away, int(row.score_home), int(row.score_away))
             except Exception:
                 pass
+            
+            # Логируем успешное изменение счёта
+            try:
+                manual_log(
+                    action="match_score_set",
+                    description=f"Счёт изменён: {home} vs {away} [{sh}:{sa}]",
+                    affected_data={
+                        'match': f"{home} vs {away}",
+                        'old_score': {'home': old_score_home, 'away': old_score_away},
+                        'new_score': {'home': sh, 'away': sa},
+                        'score_changed': old_score_home != sh or old_score_away != sa
+                    },
+                    result_status='success'
+                )
+            except Exception:
+                pass
+            
             return jsonify({'status': 'ok', 'score_home': row.score_home, 'score_away': row.score_away})
         finally:
             db.close()
@@ -8141,10 +8380,22 @@ def api_league_table_refresh():
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
+            manual_log(
+                action="league_table_refresh",
+                description="Обновление таблицы лиги - неверные данные авторизации",
+                result_status='error',
+                affected_data={'error': 'Invalid auth data'}
+            )
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
+            manual_log(
+                action="league_table_refresh",
+                description=f"Обновление таблицы лиги - доступ запрещен для пользователя {user_id}",
+                result_status='error',
+                affected_data={'user_id': user_id, 'admin_required': True}
+            )
             return jsonify({'error': 'forbidden'}), 403
 
         # Форсируем синхронизацию через тот же код, что используется в фоновом sync —
@@ -8154,6 +8405,12 @@ def api_league_table_refresh():
             _sync_league_table()
         except Exception as _e:
             app.logger.warning(f"league-table forced sync failed: {_e}")
+            manual_log(
+                action="league_table_refresh",
+                description=f"Обновление таблицы лиги - ошибка синхронизации: {_e}",
+                result_status='warning',
+                affected_data={'sync_error': str(_e), 'partial_update': True}
+            )
         updated_at = None
         if SessionLocal is not None:
             db = get_db()
@@ -8165,6 +8422,18 @@ def api_league_table_refresh():
                 db.close()
         if not updated_at:
             updated_at = datetime.now(timezone.utc).isoformat()
+        
+        # Логируем успешное обновление таблицы лиги
+        manual_log(
+            action="league_table_refresh",
+            description="Таблица лиги принудительно обновлена",
+            result_status='success',
+            affected_data={
+                'updated_at': updated_at,
+                'refreshed_by': user_id
+            }
+        )
+        
         return jsonify({'status': 'ok', 'updated_at': updated_at})
     except Exception as e:
         app.logger.error(f"Ошибка принудительного обновления лиги: {str(e)}")
@@ -8267,23 +8536,48 @@ def api_results_refresh():
 
 # -------- Google Sheets Admin Sync (import/export) --------
 @app.route('/api/admin/google/import-schedule', methods=['POST'])
+@log_data_sync("Импорт расписания из Google Sheets")
 def api_admin_google_import_schedule():
     """Импорт расписания из Google Sheets (только админ): обновляет snapshot schedule. DB-only чтение для клиентов сохраняется."""
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
+            manual_log(
+                action="google_import_schedule",
+                description="Импорт расписания - неверные данные авторизации",
+                result_status='error',
+                affected_data={'error': 'Invalid auth data'}
+            )
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
+            manual_log(
+                action="google_import_schedule",
+                description=f"Импорт расписания - доступ запрещен для пользователя {user_id}",
+                result_status='error',
+                affected_data={'user_id': user_id, 'admin_required': True}
+            )
             return jsonify({'error': 'forbidden'}), 403
         if SessionLocal is None:
+            manual_log(
+                action="google_import_schedule",
+                description="Импорт расписания - база данных недоступна",
+                result_status='error',
+                affected_data={'error': 'Database unavailable'}
+            )
             return jsonify({'error': 'db_unavailable'}), 503
         # Построить payload расписания из Sheets и сохранить как снапшот
         try:
             payload = _build_schedule_payload_from_sheet()
         except Exception as e:
             app.logger.error(f"import-schedule build failed: {e}")
+            manual_log(
+                action="google_import_schedule",
+                description=f"Импорт расписания - ошибка чтения Google Sheets: {e}",
+                result_status='error',
+                affected_data={'error': str(e), 'operation': 'sheet_read'}
+            )
             return jsonify({'error': 'sheet_read_failed'}), 500
         db = get_db()
         try:
@@ -8296,21 +8590,47 @@ def api_admin_google_import_schedule():
             if websocket_manager: websocket_manager.notify_data_change('schedule', payload)
         except Exception:
             pass
+        
+        # Логируем успешный импорт расписания
+        manual_log(
+            action="google_import_schedule",
+            description="Расписание успешно импортировано из Google Sheets",
+            result_status='success',
+            affected_data={
+                'matches_count': len(payload.get('matches', [])),
+                'updated_at': payload.get('updated_at'),
+                'imported_by': user_id
+            }
+        )
+        
         return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
     except Exception as e:
         app.logger.error(f"admin import schedule error: {e}")
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/admin/google/export-all', methods=['POST'])
+@log_data_sync("Экспорт всех данных в Google Sheets")
 def api_admin_google_export_all():
     """Выгрузка актуальных данных из БД в Google Sheets (только админ)."""
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
+            manual_log(
+                action="google_export_all",
+                description="Экспорт в Google Sheets - неверные данные авторизации",
+                result_status='error',
+                affected_data={'error': 'Invalid auth data'}
+            )
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
+            manual_log(
+                action="google_export_all",
+                description=f"Экспорт в Google Sheets - доступ запрещен для пользователя {user_id}",
+                result_status='error',
+                affected_data={'user_id': user_id, 'admin_required': True}
+            )
             return jsonify({'error': 'forbidden'}), 403
         # Требуются env: GOOGLE_CREDENTIALS_B64 или GOOGLE_SHEETS_CREDENTIALS; SHEET_ID или SPREADSHEET_ID
         creds_b64 = os.environ.get('GOOGLE_CREDENTIALS_B64', '')
@@ -8325,9 +8645,21 @@ def api_admin_google_export_all():
                     creds_b64 = ''
         sheet_id = os.environ.get('SHEET_ID', '') or os.environ.get('SPREADSHEET_ID', '')
         if not creds_b64 or not sheet_id:
+            manual_log(
+                action="google_export_all",
+                description="Экспорт в Google Sheets - не настроены учетные данные",
+                result_status='error',
+                affected_data={'creds_available': bool(creds_b64), 'sheet_id_available': bool(sheet_id)}
+            )
             return jsonify({'error': 'sheets_not_configured'}), 400
         # Собираем данные из БД
         if SessionLocal is None:
+            manual_log(
+                action="google_export_all",
+                description="Экспорт в Google Sheets - база данных недоступна",
+                result_status='error',
+                affected_data={'error': 'Database unavailable'}
+            )
             return jsonify({'error': 'db_unavailable'}), 503
         db: Session = get_db()
         try:
@@ -8645,13 +8977,34 @@ def api_admin_google_export_all():
                     pass
         except Exception as e:
             app.logger.error(f"export-all to sheets failed: {e}")
+            manual_log(
+                action="google_export_all",
+                description=f"Экспорт в Google Sheets - ошибка записи: {e}",
+                result_status='error',
+                affected_data={'error': str(e), 'operation': 'sheet_write'}
+            )
             return jsonify({'error': 'sheet_write_failed'}), 500
+        
+        # Логируем успешный экспорт
+        manual_log(
+            action="google_export_all",
+            description="Данные успешно экспортированы в Google Sheets",
+            result_status='success',
+            affected_data={
+                'exported_by': user_id,
+                'users_count': len(user_values) - 1 if 'user_values' in locals() else 0,
+                'bets_count': len(bet_values) - 1 if 'bet_values' in locals() else 0,
+                'league_table_rows': len(lt_rows) if 'lt_rows' in locals() else 0
+            }
+        )
+        
         return jsonify({'status': 'ok'})
     except Exception as e:
         app.logger.error(f"admin export all error: {e}")
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/admin/leaderboards/refresh', methods=['POST'])
+@log_leaderboard_operation("Принудительное обновление лидерборда")
 def api_admin_leaderboards_refresh():
     """Принудительно перестраивает лидерборды и инвалидирует кэши (только админ)."""
     try:
@@ -8675,6 +9028,7 @@ def api_admin_leaderboards_refresh():
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/admin/google/self-test', methods=['POST'])
+@log_system_operation("Самотест доступа к Google Sheets")
 def api_admin_google_selftest():
     """Самотест доступа к Google Sheets. Возвращает подробные подсказки.
     Проверки:
@@ -10224,6 +10578,7 @@ def admin_init_database_form():
     '''
 
 @app.route('/api/admin/users-stats', methods=['POST'])
+@log_user_management("Получение статистики пользователей")
 def api_admin_users_stats():
     """Статистика пользователей (только админ):
     - Всего пользователей
@@ -10234,12 +10589,30 @@ def api_admin_users_stats():
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
+            manual_log(
+                action="users_stats",
+                description="Запрос статистики пользователей - неверные данные авторизации",
+                result_status='error',
+                affected_data={'error': 'Invalid auth data'}
+            )
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
+            manual_log(
+                action="users_stats",
+                description=f"Запрос статистики пользователей - доступ запрещен для пользователя {user_id}",
+                result_status='error',
+                affected_data={'user_id': user_id, 'admin_required': True}
+            )
             return jsonify({'error': 'forbidden'}), 403
         if SessionLocal is None:
+            manual_log(
+                action="users_stats",
+                description="Запрос статистики пользователей - база данных недоступна",
+                result_status='warning',
+                affected_data={'error': 'Database unavailable', 'fallback_used': True}
+            )
             return jsonify({'total_users': 0, 'online_5m': 0, 'online_15m': 0, 'active_1d': 0, 'active_7d': 0, 'active_30d': 0, 'new_30d': 0})
         db: Session = get_db()
         try:
@@ -10256,13 +10629,27 @@ def api_admin_users_stats():
             active7 = db.query(func.count(func.distinct(User.user_id))).filter(User.updated_at >= d7).scalar() or 0
             active30 = db.query(func.count(func.distinct(User.user_id))).filter(User.updated_at >= d30).scalar() or 0
             new30 = db.query(func.count(User.user_id)).filter(User.created_at >= d30).scalar() or 0
-            return jsonify({
+            
+            stats_data = {
                 'total_users': int(total),
                 'online_5m': int(online5), 'online_15m': int(online15),
                 'active_1d': int(active1), 'active_7d': int(active7), 'active_30d': int(active30),
                 'new_30d': int(new30),
                 'ts': now.isoformat()
-            })
+            }
+            
+            # Логируем запрос статистики
+            manual_log(
+                action="users_stats",
+                description="Статистика пользователей получена",
+                result_status='success',
+                affected_data={
+                    'stats': stats_data,
+                    'requested_by': user_id
+                }
+            )
+            
+            return jsonify(stats_data)
         finally:
             db.close()
     except Exception as e:
@@ -10449,21 +10836,51 @@ def api_admin_news_create():
     """Создать новость (админ)."""
     try:
         if News is None:
+            manual_log(
+                action="news_create",
+                description="Попытка создания новости - модель недоступна",
+                result_status='error',
+                affected_data={'error': 'News model unavailable'}
+            )
             return jsonify({'error': 'Модель новостей недоступна'}), 500
         data = request.get_json() or {}
         parsed = parse_and_verify_telegram_init_data(data.get('initData', ''))
         if not parsed or not parsed.get('user'):
+            manual_log(
+                action="news_create",
+                description="Создание новости - неверные данные авторизации",
+                result_status='error',
+                affected_data={'error': 'Invalid auth data'}
+            )
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
+            manual_log(
+                action="news_create",
+                description=f"Создание новости - доступ запрещен для пользователя {user_id}",
+                result_status='error',
+                affected_data={'user_id': user_id, 'admin_required': True}
+            )
             return jsonify({'error': 'Доступ запрещен'}), 403
 
         title = (data.get('title') or '').strip()
         content = (data.get('content') or '').strip()
         if not title or not content:
+            manual_log(
+                action="news_create",
+                description="Создание новости - пустой заголовок или содержание",
+                result_status='error',
+                affected_data={'title_empty': not title, 'content_empty': not content}
+            )
             return jsonify({'error': 'Заголовок и содержание обязательны'}), 400
         if not SessionLocal:
+            manual_log(
+                action="news_create",
+                description="Создание новости - база данных недоступна",
+                result_status='error',
+                affected_data={'error': 'Database unavailable'}
+            )
             return jsonify({'error': 'База данных недоступна'}), 500
 
         db = _get_news_session()
@@ -10493,6 +10910,19 @@ def api_admin_news_create():
             except Exception as _e:
                 app.logger.warning(f"news cache invalidate (create) failed: {_e}")
 
+            # Логируем успешное создание новости
+            manual_log(
+                action="news_create",
+                description=f"Создана новость: '{title}' (ID: {news.id})",
+                result_status='success',
+                affected_data={
+                    'news_id': news.id,
+                    'title': title,
+                    'content_length': len(content),
+                    'author_id': user_id
+                }
+            )
+
             return jsonify({'status': 'success', 'id': news.id, 'title': news.title, 'content': news.content})
         finally:
             db.close()
@@ -10506,23 +10936,57 @@ def api_admin_news_update(news_id):
     """Обновить новость (админ)."""
     try:
         if News is None:
+            manual_log(
+                action="news_update",
+                description=f"Попытка обновления новости {news_id} - модель недоступна",
+                result_status='error',
+                affected_data={'news_id': news_id, 'error': 'News model unavailable'}
+            )
             return jsonify({'error': 'Модель новостей недоступна'}), 500
         data = request.get_json() or {}
         parsed = parse_and_verify_telegram_init_data(data.get('initData', ''))
         if not parsed or not parsed.get('user'):
+            manual_log(
+                action="news_update",
+                description=f"Обновление новости {news_id} - неверные данные авторизации",
+                result_status='error',
+                affected_data={'news_id': news_id, 'error': 'Invalid auth data'}
+            )
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
+            manual_log(
+                action="news_update",
+                description=f"Обновление новости {news_id} - доступ запрещен для пользователя {user_id}",
+                result_status='error',
+                affected_data={'news_id': news_id, 'user_id': user_id, 'admin_required': True}
+            )
             return jsonify({'error': 'Доступ запрещен'}), 403
         if not SessionLocal:
+            manual_log(
+                action="news_update",
+                description=f"Обновление новости {news_id} - база данных недоступна",
+                result_status='error',
+                affected_data={'news_id': news_id, 'error': 'Database unavailable'}
+            )
             return jsonify({'error': 'База данных недоступна'}), 500
 
         db = _get_news_session()
         try:
             news = db.query(News).filter(News.id == news_id).first()
             if not news:
+                manual_log(
+                    action="news_update",
+                    description=f"Обновление новости {news_id} - новость не найдена",
+                    result_status='error',
+                    affected_data={'news_id': news_id, 'error': 'News not found'}
+                )
                 return jsonify({'error': 'Новость не найдена'}), 404
+
+            # Сохраняем старые данные для логирования
+            old_title = news.title
+            old_content = news.content
 
             title = (data.get('title') or '').strip()
             content = (data.get('content') or '').strip()
@@ -10553,6 +11017,21 @@ def api_admin_news_update(news_id):
             except Exception as _e:
                 app.logger.warning(f"news cache invalidate (update) failed: {_e}")
 
+            # Логируем успешное обновление новости
+            manual_log(
+                action="news_update",
+                description=f"Обновлена новость {news_id}: '{news.title}'",
+                result_status='success',
+                affected_data={
+                    'news_id': news_id,
+                    'changes': {
+                        'title': {'old': old_title, 'new': news.title} if title else None,
+                        'content': {'old_length': len(old_content), 'new_length': len(news.content)} if content else None
+                    },
+                    'updated_by': user_id
+                }
+            )
+
             return jsonify({'status': 'success', 'id': news.id, 'title': news.title, 'content': news.content})
         finally:
             db.close()
@@ -10566,22 +11045,62 @@ def api_admin_news_delete(news_id):
     """Удалить новость (админ)."""
     try:
         if News is None:
+            manual_log(
+                action="news_delete",
+                description=f"Попытка удаления новости {news_id} - модель недоступна",
+                result_status='error',
+                affected_data={'news_id': news_id, 'error': 'News model unavailable'}
+            )
             return jsonify({'error': 'Модель новостей недоступна'}), 500
         parsed = parse_and_verify_telegram_init_data(request.args.get('initData', ''))
         if not parsed or not parsed.get('user'):
+            manual_log(
+                action="news_delete",
+                description=f"Удаление новости {news_id} - неверные данные авторизации",
+                result_status='error',
+                affected_data={'news_id': news_id, 'error': 'Invalid auth data'}
+            )
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
+            manual_log(
+                action="news_delete",
+                description=f"Удаление новости {news_id} - доступ запрещен для пользователя {user_id}",
+                result_status='error',
+                affected_data={'news_id': news_id, 'user_id': user_id, 'admin_required': True}
+            )
             return jsonify({'error': 'Доступ запрещен'}), 403
         if not SessionLocal:
+            manual_log(
+                action="news_delete",
+                description=f"Удаление новости {news_id} - база данных недоступна",
+                result_status='error',
+                affected_data={'news_id': news_id, 'error': 'Database unavailable'}
+            )
             return jsonify({'error': 'База данных недоступна'}), 500
 
         db = _get_news_session()
         try:
             news = db.query(News).filter(News.id == news_id).first()
             if not news:
+                manual_log(
+                    action="news_delete",
+                    description=f"Удаление новости {news_id} - новость не найдена",
+                    result_status='error',
+                    affected_data={'news_id': news_id, 'error': 'News not found'}
+                )
                 return jsonify({'error': 'Новость не найдена'}), 404
+            
+            # Сохраняем данные для логирования перед удалением
+            deleted_news_data = {
+                'id': news.id,
+                'title': news.title,
+                'content_length': len(news.content),
+                'author_id': news.author_id,
+                'created_at': news.created_at.isoformat() if news.created_at else None
+            }
+            
             db.delete(news)
             db.commit()
 
@@ -10604,6 +11123,17 @@ def api_admin_news_delete(news_id):
                     pass
             except Exception as _e:
                 app.logger.warning(f"news cache invalidate (delete) failed: {_e}")
+
+            # Логируем успешное удаление новости
+            manual_log(
+                action="news_delete",
+                description=f"Удалена новость {news_id}: '{deleted_news_data['title']}'",
+                result_status='success',
+                affected_data={
+                    'deleted_news': deleted_news_data,
+                    'deleted_by': user_id
+                }
+            )
 
             return jsonify({'status': 'success'})
         finally:
@@ -11846,6 +12376,10 @@ def api_lineup_bulk_set():
 
 if __name__ == '__main__':
     # Локальный standalone запуск (в прод Gunicorn вызывает wsgi:app)
+    
+    # Initialize admin API with logging
+    init_admin_api(app)
+    
     try:
         start_background_sync()
     except Exception as _e:

@@ -8,18 +8,18 @@ import time
 from datetime import datetime, timezone
 from functools import wraps
 from flask import request, g
-from sqlalchemy.orm import sessionmaker
-from database.database_models import AdminLog
+from database.database_models import AdminLog, db_manager
 import os
 
 
 class AdminActionLogger:
     """Система логирования действий администратора"""
     
-    def __init__(self, db_session_factory):
-        self.SessionLocal = db_session_factory
+    def __init__(self):
+        """Инициализация логгера с использованием глобального db_manager"""
+        self.db_manager = db_manager
     
-    def log_action(self, admin_id, action, description, endpoint=None, 
+    def log_action(self, admin_id=None, action=None, description=None, endpoint=None, 
                   request_data=None, result_status='success', result_message=None,
                   affected_entities=None, execution_time_ms=None):
         """
@@ -37,10 +37,10 @@ class AdminActionLogger:
             execution_time_ms: Время выполнения в миллисекундах
         """
         try:
-            if self.SessionLocal is None:
+            if not self.db_manager:
                 return False
                 
-            session = self.SessionLocal()
+            session = self.db_manager.get_session()
             try:
                 # Подготовка данных
                 request_data_json = None
@@ -105,10 +105,10 @@ class AdminActionLogger:
             date_to: Дата окончания периода
         """
         try:
-            if self.SessionLocal is None:
+            if not self.db_manager:
                 return []
                 
-            session = self.SessionLocal()
+            session = self.db_manager.get_session()
             try:
                 query = session.query(AdminLog)
                 
