@@ -215,11 +215,11 @@
             <div id="admin-pane-service" class="admin-pane" style="display: none;">
                 <div class="admin-section">
                     <h3>Обновление данных</h3>
-                    <button id="admin-refresh-all" class="action-btn">Обновить все данные</button>
-                    <p class="help-text">Обновляет турнирную таблицу, статистику, расписание и результаты</p>
+                    <button id="admin-refresh-all" class="action-btn">Обновить всё</button>
+                    <p class="help-text">Пересчитывает таблицу, статистику, расписание и результаты.</p>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;">
-                        <button id="admin-google-import-schedule" class="action-btn" style="background:#2b6cb0;">Загрузить из Google (расписание)</button>
-                        <button id="admin-google-export-all" class="action-btn" style="background:#2f855a;">Выгрузить в Google (всё)</button>
+                        <button id="admin-google-import-schedule" class="action-btn" style="background:#2b6cb0;">Импорт из Google (расписание)</button>
+                        <button id="admin-google-export-all" class="action-btn" style="background:#2f855a;">Экспорт в Google (всё)</button>
                         <div style="display:flex; gap:6px; align-items:center;">
                             <select id="repair-sheet-select" style="background:#111; color:#fff; border:1px solid #333; padding:6px 8px; border-radius:6px;">
                                 <option value="users" selected>users</option>
@@ -241,22 +241,20 @@
                         <button id="admin-season-soft" class="action-btn" style="background:#6a5acd;">Мягкий старт</button>
                         <button id="admin-season-roll" class="action-btn danger" style="background:#b22222;">Полный сброс</button>
                         <button id="admin-season-rollback" class="action-btn" style="background:#2d3748;">Откат сезона</button>
-                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; background:#222; padding:4px 8px; border-radius:6px;">
-                            <input type="checkbox" id="season-rollover-deep"> deep
+                        <label style="display:flex; align-items:center; gap:6px; font-size:12px; background:#1a1a1a; padding:6px 8px; border-radius:6px;">
+                            <input type="checkbox" id="season-rollover-deep"> Глубоко (deep)
                         </label>
-                        <div style="display:flex; align-items:center; gap:6px; background:#1a1a1a; padding:6px 8px; border-radius:6px;">
-                            <span style="font-size:12px; opacity:.8;">Активный сезон:</span>
-                            <span id="active-season-label" style="font-weight:600;">—</span>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:6px; background:#1a1a1a; padding:6px 8px; border-radius:6px;">
-                            <label for="season-picker" style="font-size:12px; opacity:.8;">Выбрать сезон:</label>
-                            <select id="season-picker" style="background:#111; color:#fff; border:1px solid #333; padding:4px 8px; border-radius:4px;">
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <button type="button" class="action-btn action-btn-ghost" title="Текущий активный турнир" style="cursor:default;">
+                                Активный сезон: <span id="active-season-label" style="font-weight:700; margin-left:6px;">—</span>
+                            </button>
+                            <select id="season-picker" class="select-like">
                                 <option value="">Загрузка...</option>
                             </select>
-                            <button id="apply-season-btn" class="action-btn" style="background:#444;">Активировать</button>
+                            <button id="apply-season-btn" class="action-btn" style="background:#444;">Сделать активным</button>
                         </div>
                     </div>
-                    <p class="help-text">Dry: только план. Мягкий: без очистки legacy и матчей. Полный: чистит legacy. Deep + Полный: ДОПОЛНИТЕЛЬНО удаляет матчи прошлого турнира (adv) + импортирует новое расписание (до 300 строк).</p>
+                    <p class="help-text">План — пробный запуск без изменений. Мягкий — без очистки старых данных. Полный — удаляет старые служебные данные. Deep + Полный — дополнительно удаляет матчи прошлого турнира и импортирует новое расписание.</p>
                     <pre id="season-rollover-log" style="max-height:160px; overflow:auto; font-size:12px; background:#111; padding:8px; border:1px solid #333; border-radius:6px; display:none;"></pre>
                     <div class="help-text" style="margin-top:6px; line-height:1.4;">
                         Подсказки по ошибкам отката:

@@ -371,6 +371,28 @@
     cursor: not-allowed;
 }
 
+/* Ghost-variant: визуально как кнопка, но без яркой заливки */
+.action-btn-ghost {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+/* Селект в стиле кнопки той же высоты */
+.select-like {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-size: 14px;
+    min-width: 160px;
+    line-height: 1.2;
+}
+
 .cancel-btn {
     background: var(--text-secondary);
     color: white;
