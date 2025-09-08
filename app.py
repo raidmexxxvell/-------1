@@ -231,17 +231,14 @@ if SECURITY_SYSTEM_AVAILABLE:
 # Инициализация логгера действий администратора
 try:
     from utils.admin_logger import AdminActionLogger
-    from database.database_models import SessionLocal
-    
-    # Создаем глобальный логгер для админских действий
-    admin_logger = AdminActionLogger(SessionLocal)
+    # Логгер использует глобальный db_manager из database.database_models
+    admin_logger = AdminActionLogger()
     app.config['admin_logger'] = admin_logger
-    
-    # Делаем логгер доступным в контексте запроса
+
     @app.before_request
     def before_request():
         g.admin_logger = admin_logger
-    
+
     print('[INFO] Admin action logger initialized')
 except ImportError as e:
     print(f'[WARN] Admin logger not available: {e}')

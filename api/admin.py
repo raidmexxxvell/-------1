@@ -15,14 +15,8 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                      MatchFlags, _snapshot_set, _build_betting_tours_payload, _settle_open_bets):
     """Initialize admin routes with dependencies"""
 
-    # Инициализация логгера админа
-    try:
-        from utils.admin_logger import AdminActionLogger
-        admin_logger = AdminActionLogger()
-        g.admin_logger = admin_logger
-    except ImportError as e:
-        app.logger.warning(f"Admin logger not available: {e}")
-        g.admin_logger = None
+    # Инициализация логгера выполняется в app.before_request (см. app.py)
+    # Здесь ничего не делаем, чтобы не обращаться к g вне контекста запроса
 
     def _get_admin_id():
         """Получение ID админа из запроса"""
@@ -729,12 +723,15 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
             
             # Импорт логгера
             try:
-                from utils.admin_logger import AdminActionLogger
-                admin_logger = AdminActionLogger(SessionLocal)
-                
+                # Используем логгер из g если он инициализирован, иначе создаём локальный
+                admin_logger = getattr(g, 'admin_logger', None)
+                if admin_logger is None:
+                    from utils.admin_logger import AdminActionLogger
+                    admin_logger = AdminActionLogger()
+
                 # Вычисление offset
                 offset = (page - 1) * per_page
-                
+
                 # Получение логов с фильтрацией
                 logs = admin_logger.get_logs(
                     limit=per_page,
@@ -742,11 +739,11 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                     action_filter=action_filter if action_filter else None,
                     status_filter=status_filter if status_filter else None
                 )
-                
+
                 # Подсчёт общего количества (для пагинации)
                 total_count = len(admin_logger.get_logs(limit=10000))  # Приблизительный подсчёт
                 total_pages = (total_count + per_page - 1) // per_page
-                
+
                 return jsonify({
                     'ok': True,
                     'logs': logs,
@@ -759,7 +756,7 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                         'has_prev': page > 1
                     }
                 })
-                
+
             except ImportError as e:
                 app.logger.error(f"Failed to import admin logger: {e}")
                 return jsonify({'error': 'Система логирования недоступна'}), 500
