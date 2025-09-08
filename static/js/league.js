@@ -488,5 +488,32 @@
     pane.dataset.hasContent = '1';
   }
 
-  window.League = { batchAppend, renderLeagueTable, renderStatsTable, renderSchedule, renderResults, setUpdatedLabelSafely };
+  // Добавим публичные рефреши, чтобы realtime-updates мог инициировать перезагрузку
+  function refreshTable(){
+    try {
+      const table = document.getElementById('league-table');
+      const updatedText = document.getElementById('league-updated-text');
+      if (!table || !window.fetchEtag) return;
+      window.fetchEtag('/api/league-table', { cacheKey: 'league:table', swrMs: 5000, extract: j=>j })
+        .then(({ data, headerUpdatedAt }) => {
+          try { renderLeagueTable(table, updatedText, data); } catch(_) {}
+          if (updatedText && headerUpdatedAt) {
+            try { setUpdatedLabelSafely(updatedText, headerUpdatedAt); } catch(_) {}
+          }
+        })
+        .catch(()=>{});
+    } catch(_) {}
+  }
+
+  function refreshSchedule(){
+    try {
+      const pane = document.getElementById('league-pane-schedule');
+      if (!pane || !window.fetchEtag) return;
+      window.fetchEtag('/api/schedule', { cacheKey: 'league:schedule', swrMs: 8000, extract: j=> (j?.data||j) })
+        .then(({ data }) => { try { renderSchedule(pane, data); } catch(_) {} })
+        .catch(()=>{});
+    } catch(_) {}
+  }
+
+  window.League = { batchAppend, renderLeagueTable, renderStatsTable, renderSchedule, renderResults, setUpdatedLabelSafely, refreshTable, refreshSchedule };
 })();

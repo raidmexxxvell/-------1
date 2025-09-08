@@ -3857,9 +3857,133 @@ def _build_league_payload_from_sheet():
     return payload
 
 def _build_league_payload_from_db():
-    """Собирает таблицу лиги из реляционной таблицы LeagueTableRow (без Google Sheets).
-    Возвращает payload того же формата, что и из листа: {'range','updated_at','values(A1:H10)'}.
+    """Строит турнирную таблицу по завершённым матчам активного сезона.
+    Приоритет источников:
+      1) Расширенная схема (tournaments, matches, teams) — если инициализирована
+      2) Snapshot 'results' (если есть), считаем очки/разницу по строкам
+      3) Fallback: старая таблица LeagueTableRow (на случай, если нет ни матчей, ни снапшота)
+    Формат вывода совместим с существующей таблицей A1:H10.
     """
+    # Попробуем расширенную схему
+    try:
+        if adv_db_manager and getattr(adv_db_manager, 'SessionLocal', None):
+            sess = adv_db_manager.get_session()
+            try:
+                from database.database_models import Tournament, Match, Team
+                # Активный турнир (последний по start_date / created_at)
+                active = (sess.query(Tournament)
+                          .filter(Tournament.status=='active')
+                          .order_by(Tournament.start_date.desc().nullslast(), Tournament.created_at.desc())
+                          .first())
+                # Соберём все завершённые матчи активного турнира
+                q = (sess.query(Match, Team.name.label('home_name'), Team.name.label('away_name'))
+                     .join(Team, Match.home_team_id==Team.id)
+                     .join(Team, Match.away_team_id==Team.id)
+                    )
+                # Из-за двукратного join нужно алиасы — перепишем с алиасами
+            except Exception:
+                try:
+                    from sqlalchemy.orm import aliased
+                    from database.database_models import Tournament, Match, Team
+                    active = (sess.query(Tournament)
+                              .filter(Tournament.status=='active')
+                              .order_by(Tournament.start_date.desc().nullslast(), Tournament.created_at.desc())
+                              .first())
+                    HomeTeam = aliased(Team)
+                    AwayTeam = aliased(Team)
+                    q = (sess.query(Match, HomeTeam.name.label('home_name'), AwayTeam.name.label('away_name'))
+                         .join(HomeTeam, Match.home_team_id==HomeTeam.id)
+                         .join(AwayTeam, Match.away_team_id==AwayTeam.id))
+                except Exception:
+                    q = None
+            table = None
+            try:
+                if q is not None:
+                    if active:
+                        q = q.filter(Match.tournament_id==active.id)
+                    q = q.filter(Match.status=='finished')
+                    rows = q.all()
+                    # Агрегация по командам
+                    from collections import defaultdict
+                    agg = defaultdict(lambda: {'P':0,'W':0,'D':0,'L':0,'GF':0,'GA':0,'PTS':0})
+                    def upd(team, gf, ga):
+                        a = agg[team]; a['P']+=1; a['GF']+=gf; a['GA']+=ga
+                        if gf>ga: a['W']+=1; a['PTS']+=3
+                        elif gf==ga: a['D']+=1; a['PTS']+=1
+                        else: a['L']+=1
+                    for m, hname, aname in rows:
+                        h = int(m.home_score or 0); a = int(m.away_score or 0)
+                        if not hname or not aname:
+                            continue
+                        upd(hname, h, a)
+                        upd(aname, a, h)
+                    # Список активных команд: если активный турнир есть — возьмём все команды, участвовавшие в матчах
+                    teams = list(agg.keys())
+                    # Сортировка: PTS desc, GD desc, GF desc, Name asc
+                    def sort_key(name):
+                        a = agg[name]; gd = a['GF']-a['GA']
+                        return (-a['PTS'], -gd, -a['GF'], (name or '').lower())
+                    teams.sort(key=sort_key)
+                    # Построим 10 строк (заголовок + до 9 команд)
+                    header = ['№','Команда','И','В','Н','П','Р','О']
+                    values = [header]
+                    for i, name in enumerate(teams[:9], start=1):
+                        a = agg[name]; gd = a['GF']-a['GA']
+                        values.append([str(i), name, str(a['P']), str(a['W']), str(a['D']), str(a['L']), str(gd), str(a['PTS'])])
+                    # Нормализуем до 10 строк
+                    while len(values) < 10:
+                        values.append(['']*8)
+                    return {'range':'A1:H10','updated_at': datetime.now(timezone.utc).isoformat(),'values': values[:10]}
+            finally:
+                try: sess.close()
+                except Exception: pass
+    except Exception:
+        pass
+
+    # 2) Snapshot results → считаем таблицу
+    try:
+        if SessionLocal is not None:
+            dbs = get_db()
+            try:
+                snap = _snapshot_get(dbs, 'results')
+                payload = snap and snap.get('payload') or {}
+                res = payload.get('results') or []
+                from collections import defaultdict
+                agg = defaultdict(lambda: {'P':0,'W':0,'D':0,'L':0,'GF':0,'GA':0,'PTS':0})
+                def upd(team, gf, ga):
+                    a = agg[team]; a['P']+=1; a['GF']+=gf; a['GA']+=ga
+                    if gf>ga: a['W']+=1; a['PTS']+=3
+                    elif gf==ga: a['D']+=1; a['PTS']+=1
+                    else: a['L']+=1
+                for m in res:
+                    try:
+                        hname = (m.get('home') or '').strip(); aname = (m.get('away') or '').strip()
+                        sh = int((m.get('score_home') or '0').strip() or 0)
+                        sa = int((m.get('score_away') or '0').strip() or 0)
+                        if hname and aname and (m.get('tour') is not None):
+                            upd(hname, sh, sa)
+                            upd(aname, sa, sh)
+                    except Exception:
+                        continue
+                teams = list(agg.keys())
+                def sort_key(name):
+                    a = agg[name]; gd = a['GF']-a['GA']
+                    return (-a['PTS'], -gd, -a['GF'], (name or '').lower())
+                teams.sort(key=sort_key)
+                header = ['№','Команда','И','В','Н','П','Р','О']
+                values = [header]
+                for i, name in enumerate(teams[:9], start=1):
+                    a = agg[name]; gd = a['GF']-a['GA']
+                    values.append([str(i), name, str(a['P']), str(a['W']), str(a['D']), str(a['L']), str(gd), str(a['PTS'])])
+                while len(values) < 10:
+                    values.append(['']*8)
+                return {'range':'A1:H10','updated_at': datetime.now(timezone.utc).isoformat(),'values': values[:10]}
+            finally:
+                dbs.close()
+    except Exception:
+        pass
+
+    # 3) Fallback к старой реляционной таблице (как было)
     values: list[list] = []
     if SessionLocal is not None and 'LeagueTableRow' in globals():
         db = get_db()
@@ -3871,17 +3995,12 @@ def _build_league_payload_from_db():
             values = []
         finally:
             db.close()
-    # Нормализуем до 10 строк x 8 колонок
     normalized = []
     for i in range(10):
         row = values[i] if i < len(values) else []
         row = list(row) + [''] * (8 - len(row))
         normalized.append(row[:8])
-    return {
-        'range': 'A1:H10',
-        'updated_at': datetime.now(timezone.utc).isoformat(),
-        'values': normalized
-    }
+    return {'range': 'A1:H10','updated_at': datetime.now(timezone.utc).isoformat(),'values': normalized}
 
 def _build_stats_payload_from_sheet():
     # Build stats payload from DB (TeamPlayerStats). Returns same shape as previous Sheets payload.
@@ -6328,43 +6447,35 @@ def api_users_public_batch():
 
 @app.route('/api/league-table', methods=['GET'])
 def api_league_table():
-    """Возвращает таблицу лиги из снапшота БД; при отсутствии — собирает из БД (без Google Sheets). ETag/304 поддерживаются."""
+    """Свежая таблица лиги, рассчитанная от завершённых матчей активного сезона.
+    - Строим payload на лету из БД (расширенная схема, если доступна), без чтения Sheets.
+    - Храним снапшот для наблюдения в админке/отладки, но не полагаемся на него для ответа.
+    - ETag/304 поддерживаются по core полям.
+    """
     try:
-        # 1) Пытаемся отдать снапшот
-        if SessionLocal is not None:
-            db: Session = get_db()
-            try:
-                snap = _snapshot_get(db, 'league-table')
-                if snap and snap.get('payload'):
-                    payload = snap['payload']
-                    _core = {'range': payload.get('range'), 'values': payload.get('values')}
-                    _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-                    inm = request.headers.get('If-None-Match')
-                    if inm and inm == _etag:
-                        resp = app.response_class(status=304)
-                        resp.headers['ETag'] = _etag
-                        resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
-                        return resp
-                    resp = _json_response({**payload, 'version': _etag})
-                    resp.headers['ETag'] = _etag
-                    resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
-                    return resp
-            finally:
-                db.close()
-        # 2) Bootstrap из БД, если снапшот отсутствует
+        # 1) Построим свежий payload
         payload = _build_league_payload_from_db()
-        _core = {'range': 'A1:H10', 'values': payload.get('values')}
+        _core = {'range': payload.get('range'), 'values': payload.get('values')}
         _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        # сохраним снапшот для будущих запросов
-        if SessionLocal is not None:
-            db = get_db()
-            try:
-                _snapshot_set(db, 'league-table', payload)
-            finally:
-                db.close()
+        inm = request.headers.get('If-None-Match')
+        if inm and inm == _etag:
+            resp = app.response_class(status=304)
+            resp.headers['ETag'] = _etag
+            resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=120'
+            return resp
+        # 2) Параллельно (best-effort) сохраним снапшот
+        try:
+            if SessionLocal is not None:
+                db = get_db()
+                try:
+                    _snapshot_set(db, 'league-table', payload)
+                finally:
+                    db.close()
+        except Exception:
+            pass
         resp = _json_response({**payload, 'version': _etag})
         resp.headers['ETag'] = _etag
-        resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
+        resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=120'
         return resp
     except Exception as e:
         app.logger.error(f"Ошибка загрузки таблицы лиги: {str(e)}")
@@ -7023,6 +7134,15 @@ def api_match_score_set():
                             'id': {'home': home, 'away': away},
                             'fields': {'score_home': row.score_home, 'score_away': row.score_away, 'odds_version': new_ver}
                         }, priority=1)
+                        # Дополнительно: инвалидация таблицы и расписания при live‑счёте (без расчёта ставок)
+                        try:
+                            inv.invalidate_for_change('league_table_update', {})
+                        except Exception:
+                            pass
+                        try:
+                            inv.invalidate_for_change('schedule_update', {})
+                        except Exception:
+                            pass
                 except Exception:
                     pass
             except Exception:

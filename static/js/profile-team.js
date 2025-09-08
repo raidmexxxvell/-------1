@@ -170,7 +170,15 @@
               window.__TEAM_BACK_CTX__ = { from: 'ufo', subtab: subKey };
             }
             e.preventDefault(); e.stopPropagation();
-            openTeam(name.trim());
+            // Если мы не на вкладке «Лига», переключимся на неё прежде чем открыть экран команды
+            const ufoTab = document.getElementById('tab-ufo');
+            const isUfoVisible = ufoTab && ufoTab.style.display !== 'none';
+            if (!isUfoVisible){
+              try { document.querySelector('.nav-item[data-tab="ufo"]').click(); } catch(_) {}
+              setTimeout(() => { try { openTeam(name.trim()); } catch(_) {} }, 30);
+            } else {
+              openTeam(name.trim());
+            }
           }
         }
       } catch(_) {}

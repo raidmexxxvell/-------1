@@ -67,6 +67,12 @@
                         if (sched) sched.style.display = '';
                         const st = document.getElementById('ufo-subtabs'); if (st) st.style.display = '';
                     }
+                    // При смене вкладки скрываем экран команды, если он был открыт
+                    const teamPane = document.getElementById('ufo-team');
+                    if (teamPane && teamPane.style.display !== 'none') {
+                        teamPane.style.display = 'none';
+                        const st = document.getElementById('ufo-subtabs'); if (st) st.style.display = '';
+                    }
                 } catch(_) {}
                 // если уходим с профиля — вернуть верхнюю панель и общий отступ сверху
                 try { const cont = document.querySelector('.container'); if (cont) cont.classList.remove('profile-hide-top'); const ph = document.querySelector('.profile-header'); if (ph) ph.classList.remove('profile-centered'); document.body.classList.remove('profile-mode'); } catch(_) {}
@@ -201,6 +207,9 @@
                     const mdPane = document.getElementById('ufo-match-details');
                     const sched = document.getElementById('ufo-schedule');
                     if (mdPane && mdPane.style.display !== 'none') { mdPane.style.display = 'none'; if (sched) sched.style.display=''; const st = document.getElementById('ufo-subtabs'); if (st) st.style.display=''; }
+                    // И скрываем экран команды при смене сабвкладки лиги
+                    const teamPane = document.getElementById('ufo-team');
+                    if (teamPane && teamPane.style.display !== 'none') { teamPane.style.display = 'none'; const st = document.getElementById('ufo-subtabs'); if (st) st.style.display=''; }
                 } catch(_) {}
                 const key = btn.getAttribute('data-subtab');
                 subtabItems.forEach(b => b.classList.remove('active'));

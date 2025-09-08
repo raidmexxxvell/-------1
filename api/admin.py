@@ -96,6 +96,29 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                         if match_obj:
                             if match_obj.status != 'finished':
                                 match_obj.status = 'finished'
+                                # Если в оперативной таблице хранится текущий счёт — перенесём как финальный
+                                # Попробуем считать финальный счёт из легаси-таблицы текущих счётов,
+                                # чтобы перенести в расширенную модель как итоговый
+                                try:
+                                    from app import MatchScore as _LegacyMatchScore
+                                    from app import SessionLocal as _SessLocal, get_db as _get_db
+                                except Exception:
+                                    _LegacyMatchScore = None; _SessLocal = None; _get_db = None
+                                try:
+                                    sh = sa = None
+                                    if _LegacyMatchScore is not None and _SessLocal is not None and _get_db is not None:
+                                        _db0 = _get_db()
+                                        try:
+                                            row = _db0.query(_LegacyMatchScore).filter(_LegacyMatchScore.home==home, _LegacyMatchScore.away==away).first()
+                                            if row:
+                                                sh = row.score_home; sa = row.score_away
+                                        finally:
+                                            _db0.close()
+                                    if sh is not None and sa is not None:
+                                        match_obj.home_score = int(sh)
+                                        match_obj.away_score = int(sa)
+                                except Exception:
+                                    pass
                             tournament_id = match_obj.tournament_id
                             player_ids = [pid for (pid,) in db.query(TeamComposition.player_id).filter(TeamComposition.match_id==match_obj.id).all()]
                             for pid in player_ids:
@@ -131,6 +154,15 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                                 get_cache().invalidate('stats_table')
                             except Exception as _inv_err:
                                 app.logger.warning(f"stats_table cache invalidate failed: {_inv_err}")
+                            # Уведомления и инвалидация таблицы/результатов
+                            try:
+                                from optimizations.smart_invalidator import SmartCacheInvalidator
+                                from app import invalidator as _inv
+                                if _inv:
+                                    _inv.invalidate_for_change('league_table_update', {})
+                                    _inv.invalidate_for_change('schedule_update', {})
+                            except Exception:
+                                pass
                         else:
                             app.logger.warning(f"Finished status set but Match not resolved for pair {home} vs {away}")
                     except Exception as stats_err:
