@@ -1179,6 +1179,10 @@ body.theme-blb .share-btn {
 .team { font-weight: 600; text-align: center; display:flex; flex-direction: column; align-items: center; gap: 6px; }
 .team .logo { width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); border-radius: 0; background: transparent; image-rendering: -webkit-optimize-contrast; backface-visibility: hidden; }
 .team .team-name { max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Кликабельные элементы с data-team-name */
+[data-team-name] { cursor: pointer; }
+/* В Прогнозах не гасим клики внутри карточки матчей */
+#tab-predictions .match-card [data-team-name] { pointer-events: auto; }
 .score { color: var(--secondary); font-weight: 800; font-size: 18px; }
 .match-footer { margin-top: 10px; display: flex; justify-content: center; gap: 8px; }
 .details-btn {
