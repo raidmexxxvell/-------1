@@ -102,11 +102,19 @@
     if (elements.userName) elements.userName.textContent = user.display_name || 'User';
     tryDispatch();
     if (elements.credits) elements.credits.textContent = (user.credits||0).toLocaleString();
-    if (elements.level) elements.level.textContent = user.level || 1;
-    const lvl = user.level || 1; if (elements.currentLevel) elements.currentLevel.textContent = lvl;
+  // Анти‑регресс отрисовки: не показываем ниже, чем уже было отрисовано (уровень/XP)
+  const prev = _lastUser || {};
+  const incomingLevel = user.level || 1;
+  const safeLevel = Math.max(incomingLevel, prev.level || 1);
+  if (elements.level) elements.level.textContent = safeLevel;
+  const lvl = safeLevel; if (elements.currentLevel) elements.currentLevel.textContent = lvl;
     // Используем производные поля, если они пришли с бэкенда; иначе считаем через XPUtils
     let cur = (user.current_xp != null) ? user.current_xp : (user.xp || 0);
     let need = (user.next_xp != null) ? user.next_xp : (window.XPUtils ? XPUtils.threshold(lvl) : (lvl*100));
+    // Если уровень не снизился, но пришел меньший current_xp — удерживаем максимум
+    if ((prev.level||1) === lvl && prev.current_xp != null) {
+      cur = Math.max(cur, prev.current_xp|0);
+    }
     if (window.XPUtils && (user.current_xp == null || user.next_xp == null)){
       const p = XPUtils.getProgress(lvl, user.xp||0); cur = p.cur; need = p.need;
     }
@@ -114,7 +122,7 @@
     if (elements.currentXp) elements.currentXp.textContent = cur;
     if (elements.xpNeeded) elements.xpNeeded.textContent = need;
     if (elements.xpProgress) elements.xpProgress.style.width = `${Math.min(Math.max(need ? (cur/need)*100 : 0,0),100)}%`;
-    _lastUser = user;
+  _lastUser = Object.assign({}, user, { level: lvl, current_xp: cur, next_xp: need });
     try { window.dispatchEvent(new CustomEvent('profile:user-loaded',{ detail: user })); } catch(_) {}
   }
 

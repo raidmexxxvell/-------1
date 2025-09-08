@@ -3930,7 +3930,7 @@ def _build_league_payload_from_db():
                     for i, name in enumerate(teams[:9], start=1):
                         a = agg[name]; gd = a['GF']-a['GA']
                         values.append([str(i), name, str(a['P']), str(a['W']), str(a['D']), str(a['L']), str(gd), str(a['PTS'])])
-                    # Нормализуем до 10 строк
+                    try:
                     while len(values) < 10:
                         values.append(['']*8)
                     return {'range':'A1:H10','updated_at': datetime.now(timezone.utc).isoformat(),'values': values[:10]}
@@ -3983,8 +3983,30 @@ def _build_league_payload_from_db():
     except Exception:
         pass
 
+                                    # Дополнительно инициализируем список команд из snapshot расписания,
+                                    # чтобы при отсутствии завершённых матчей были показаны все участники сезона с нулями
+                                    try:
+                                        if SessionLocal is not None:
+                                            dbsched = get_db()
+                                            try:
+                                                snap = _snapshot_get(dbsched, 'schedule')
+                                                payload = snap and snap.get('payload') or {}
+                                                tours = payload.get('tours') or []
+                                                for t in tours:
+                                                    for mt in (t.get('matches') or []):
+                                                        hn = (mt.get('home') or '').strip()
+                                                        an = (mt.get('away') or '').strip()
+                                                        if hn:
+                                                            _ = agg[hn]  # создаст нули, если не было
+                                                        if an:
+                                                            _ = agg[an]
+                                            finally:
+                                                dbsched.close()
+                                    except Exception:
+                                        pass
+
     # 3) Fallback к старой реляционной таблице (как было)
-    values: list[list] = []
+                                    teams = list(agg.keys())
     if SessionLocal is not None and 'LeagueTableRow' in globals():
         db = get_db()
         try:
@@ -4713,7 +4735,7 @@ def _bg_sync_once_legacy():
                         sched_map[key] = dt
                 open_bets = db.query(Bet).filter(Bet.status=='open').all()
                 updates = 0
-                for b in open_bets:
+                for m in res:
                     new_dt = sched_map.get((b.home, b.away))
                     if new_dt is None:
                         continue
@@ -4723,6 +4745,27 @@ def _bg_sync_once_legacy():
                         updates += 1
                 if updates:
                     db.commit()
+
+                # Инициализация команд из snapshot расписания (если нет/мало результатов — добавим всех участников с нулевой статистикой)
+                try:
+                    if SessionLocal is not None:
+                        dbsched = get_db()
+                        try:
+                            snap_s = _snapshot_get(dbsched, 'schedule')
+                            payload_s = snap_s and snap_s.get('payload') or {}
+                            tours_s = payload_s.get('tours') or []
+                            for t in tours_s:
+                                for mt in (t.get('matches') or []):
+                                    hn = (mt.get('home') or '').strip()
+                                    an = (mt.get('away') or '').strip()
+                                    if hn:
+                                        _ = agg[hn]
+                                    if an:
+                                        _ = agg[an]
+                        finally:
+                            dbsched.close()
+                except Exception:
+                    pass
                     app.logger.info(f"BG sync: updated match_datetime for {updates} open bets")
             except Exception as _e:
                 app.logger.warning(f"BG bet sync failed: {_e}")
@@ -5613,7 +5656,16 @@ def get_user():
             finally:
                 dbf.close()
         u=serialize_user(db_user); u['favorite_team']=fav
-        return _json_response(u)
+        resp = _json_response(u)
+        try:
+            # Профиль персональный — запрещаем кэширование прокси/браузером
+            resp.headers['Cache-Control'] = 'no-store, private, max-age=0'
+            # Для прозрачности вариаций по init-data (если когда-либо будет GET)
+            prev_vary = resp.headers.get('Vary', '')
+            resp.headers['Vary'] = (prev_vary + ', X-Telegram-Init-Data').strip(', ')
+        except Exception:
+            pass
+        return resp
     except Exception as e:
         app.logger.error(f"Ошибка получения пользователя: {e}")
         return jsonify({'error':'Внутренняя ошибка сервера'}),500
@@ -5930,7 +5982,7 @@ def daily_checkin():
         new_xp = int(user['xp']) + xp_reward
         new_credits = int(user['credits']) + credits_reward
 
-        # Расчет уровня
+        # Расчет уровня (прогресс внутри текущего уровня)
         new_level = int(user['level'])
         while new_xp >= new_level * 100:
             new_xp -= new_level * 100
@@ -5953,6 +6005,18 @@ def daily_checkin():
                 db_user = db.get(User, int(user_id))
                 if not db_user:
                     return jsonify({'error': 'Пользователь не найден'}), 404
+                # Защитный guard: запрещаем регресс уровня/XP из-за любых рассинхронов
+                prev_level = int(db_user.level or 1)
+                prev_xp = int(db_user.xp or 0)
+                if new_level < prev_level:
+                    app.logger.warning(f"Monotonic guard: attempted level decrease for user {user_id}: {prev_level}->{new_level}; keeping {prev_level}")
+                    new_level = prev_level
+                    # при сохранённом уровне — не снижать XP в полосе
+                    new_xp = max(new_xp, prev_xp)
+                elif new_level == prev_level and new_xp < prev_xp:
+                    app.logger.warning(f"Monotonic guard: attempted xp decrease for user {user_id} at level {prev_level}: {prev_xp}->{new_xp}; keeping {prev_xp}")
+                    new_xp = prev_xp
+
                 db_user.last_checkin_date = today
                 db_user.consecutive_days = new_consecutive
                 db_user.xp = new_xp
