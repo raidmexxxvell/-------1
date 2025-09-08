@@ -10710,6 +10710,122 @@ def api_admin_bump_version():
         app.logger.error(f"bump-version error: {e}")
         return jsonify({'error': 'Не удалось обновить версию'}), 500
 
+@app.route('/api/admin/full-reset', methods=['POST'])
+def api_admin_full_reset():
+    """Полный сброс приложения до состояния "с нуля".
+    Удаляет служебные таблицы и данные (снимки, ставки, заказы, кэши),
+    но сохраняет пользователей и административные логи.
+    Доступно только администратору (по Telegram initData).
+
+    Возвращает краткую сводку по очищенным объектам.
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+
+        summary = {
+            'db_deleted': {},
+            'caches': {'memory': 0, 'redis': 'unknown'},
+            'snapshots_cleared': True,
+            'users_preserved': True,
+            'admin_logs_preserved': True,
+        }
+
+        db: Session = get_db()
+        try:
+            # Последовательно очищаем таблицы доменной логики (кроме users)
+            def _safe_delete(q):
+                try:
+                    cnt = q.delete(synchronize_session=False)
+                    return int(cnt or 0)
+                except Exception:
+                    return 0
+
+            summary['db_deleted']['league_table'] = _safe_delete(db.query(LeagueTableRow))
+            summary['db_deleted']['stats_table'] = _safe_delete(db.query(StatsTableRow))
+            summary['db_deleted']['match_votes'] = _safe_delete(db.query(MatchVote))
+            summary['db_deleted']['shop_order_items'] = _safe_delete(db.query(ShopOrderItem))
+            summary['db_deleted']['shop_orders'] = _safe_delete(db.query(ShopOrder))
+            summary['db_deleted']['bets'] = _safe_delete(db.query(Bet))
+            summary['db_deleted']['referrals'] = _safe_delete(db.query(Referral))
+            summary['db_deleted']['match_streams'] = _safe_delete(db.query(MatchStream))
+            summary['db_deleted']['match_comments'] = _safe_delete(db.query(MatchComment))
+            summary['db_deleted']['weekly_credit_baselines'] = _safe_delete(db.query(WeeklyCreditBaseline))
+            summary['db_deleted']['monthly_credit_baselines'] = _safe_delete(db.query(MonthlyCreditBaseline))
+            summary['db_deleted']['user_limits'] = _safe_delete(db.query(UserLimits))
+            summary['db_deleted']['snapshots'] = _safe_delete(db.query(Snapshot))
+
+            db.commit()
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+        # Очистка in-memory структур
+        try:
+            # Версии коэффициентов ставок
+            try:
+                _ODDS_VERSION.clear()
+            except Exception:
+                pass
+
+            # Локальные кэши лидерборда
+            try:
+                LEADER_PRED_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
+                LEADER_RICH_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
+                LEADER_SERVER_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
+                LEADER_PRIZES_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        # Полная инвалидация многоуровневого кэша (memory + redis)
+        try:
+            cm = globals().get('cache_manager')
+            if cm is None:
+                try:
+                    from optimizations.multilevel_cache import get_cache
+                    cm = get_cache()
+                except Exception:
+                    cm = None
+            if cm is not None:
+                try:
+                    summary['caches']['memory'] = cm.invalidate_pattern('cache:')
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Широковещательное уведомление через WebSocket/Redis о полном сбросе
+        try:
+            invalidator = globals().get('invalidator')
+            if invalidator is not None:
+                payload = {'reason': 'full_reset', 'ts': datetime.now(timezone.utc).isoformat()}
+                try:
+                    invalidator.publish_topic('global', 'topic_update', payload, priority=2)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return jsonify({'status': 'ok', 'summary': summary})
+    except Exception as e:
+        try:
+            app.logger.error(f"full-reset error: {e}")
+        except Exception:
+            pass
+        return jsonify({'error': 'Не удалось выполнить полный сброс'}), 500
+
 @app.route('/api/admin/bulk-lineups', methods=['POST'])
 def api_admin_bulk_lineups():
     """Массовый импорт составов для матча"""

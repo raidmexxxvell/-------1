@@ -10,6 +10,7 @@
     const btnUsers = document.getElementById('admin-users-refresh');
     const btnSync = document.getElementById('admin-sync-refresh');
   const btnBump = document.getElementById('admin-bump-version');
+  const btnFullReset = document.getElementById('admin-full-reset');
     const lblUsers = document.getElementById('admin-users-stats');
     const lblSync = document.getElementById('admin-sync-summary');
     try {
@@ -63,6 +64,20 @@
         try { window.showAlert?.(msg, 'info'); } catch(_) { alert(msg); }
       } finally {
         btnBump.disabled = false; btnBump.textContent = 'Применить';
+      }
+    });
+    if (btnFullReset) btnFullReset.addEventListener('click', async () => {
+      try {
+        const ok = confirm('Полный сброс данных за сезон 25-26? Это удалит временные данные (снимки, ставки, заказы, стримы, комментарии). Пользователи и логи останутся.');
+        if (!ok) return;
+        btnFullReset.disabled = true; const o = btnFullReset.textContent; btnFullReset.textContent = '...';
+        const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+        const r = await fetch('/api/admin/full-reset', { method: 'POST', body: fd });
+        const d = await r.json().catch(()=>({}));
+        const msg = r.ok ? ('Готово. Очищено: ' + JSON.stringify(d.summary||{})) : (d?.error || 'Ошибка');
+        try { window.showAlert?.(msg, r.ok?'info':'error'); } catch(_) { alert(msg); }
+      } finally {
+        btnFullReset.disabled = false; btnFullReset.textContent = 'Сбросить';
       }
     });
   }
