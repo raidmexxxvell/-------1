@@ -1651,3 +1651,207 @@
     border-color: var(--border-color-dark, #404040);
     color: var(--text-primary-dark, #f7fafc);
 }
+
+/* ============== ADMIN LOGS STYLES ============== */
+
+.logs-container {
+    max-height: 600px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--card-bg);
+}
+
+.log-item {
+    border-bottom: 1px solid var(--border-color);
+    padding: 15px;
+    transition: background-color 0.2s ease;
+}
+
+.log-item:last-child {
+    border-bottom: none;
+}
+
+.log-item:hover {
+    background: var(--card-hover-bg);
+}
+
+.log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.log-action {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.log-status {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.log-status.success {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.log-status.error {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.log-description {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.4;
+    margin-bottom: 8px;
+}
+
+.log-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+.log-meta {
+    display: flex;
+    gap: 15px;
+}
+
+.log-time {
+    color: var(--text-tertiary);
+}
+
+.log-endpoint {
+    color: var(--primary);
+    font-family: monospace;
+}
+
+.log-execution-time {
+    color: var(--text-tertiary);
+}
+
+.log-expand {
+    cursor: pointer;
+    color: var(--primary);
+    text-decoration: none;
+    font-size: 11px;
+}
+
+.log-expand:hover {
+    text-decoration: underline;
+}
+
+.log-extra-details {
+    margin-top: 10px;
+    padding: 10px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: monospace;
+    border-left: 3px solid var(--primary);
+    display: none;
+}
+
+.log-extra-details.expanded {
+    display: block;
+}
+
+.log-extra-details pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-secondary);
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.pagination-controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+}
+
+.pagination-controls button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Loading состояние */
+.loading-indicator {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* Responsive для логов */
+@media (max-width: 768px) {
+    .log-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .log-details {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .log-meta {
+        flex-direction: column;
+        gap: 5px;
+    }
+    
+    .logs-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .pagination-controls {
+        flex-direction: column;
+        gap: 5px;
+    }
+}
+
+/* Dark theme для логов */
+.dark-theme .logs-container {
+    background: var(--card-bg-dark);
+    border-color: var(--border-color-dark);
+}
+
+.dark-theme .log-item {
+    border-bottom-color: var(--border-color-dark);
+}
+
+.dark-theme .log-item:hover {
+    background: var(--card-hover-bg-dark);
+}
+
+.dark-theme .log-action {
+    color: var(--text-primary-dark);
+}
+
+.dark-theme .log-description {
+    color: var(--text-secondary-dark);
+}
+
+.dark-theme .log-details {
+    color: var(--text-tertiary-dark);
+}
+
+.dark-theme .log-extra-details {
+    background: var(--bg-secondary-dark);
+    border-left-color: var(--primary-dark);
+}

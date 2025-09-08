@@ -381,6 +381,23 @@ class DatabaseOperations:
             session.commit()
             return composition.id
 
+class AdminLog(Base):
+    __tablename__ = 'admin_logs'
+    
+    id = Column(Integer, primary_key=True)
+    admin_id = Column(BigInteger, nullable=False)  # Telegram user ID админа
+    action = Column(String(100), nullable=False)  # Краткое описание действия
+    description = Column(Text, nullable=False)  # Подробное описание
+    endpoint = Column(String(200))  # API endpoint
+    request_data = Column(Text)  # JSON данных запроса
+    result_status = Column(String(20), nullable=False)  # 'success' или 'error'
+    result_message = Column(Text)  # Детали результата
+    affected_entities = Column(Text)  # JSON со списком затронутых сущностей
+    execution_time_ms = Column(Integer)  # Время выполнения в миллисекундах
+    ip_address = Column(String(45))  # IP адрес
+    user_agent = Column(Text)  # User-Agent
+    created_at = Column(DateTime, default=func.current_timestamp())
+
 class News(Base):
     __tablename__ = 'news'
     
@@ -399,6 +416,6 @@ db_ops = DatabaseOperations(db_manager)
 
 # Export for use in main app
 __all__ = [
-    'Tournament', 'Team', 'Player', 'Match', 'TeamComposition', 'MatchEvent', 'PlayerStatistics', 'News',
+    'Tournament', 'Team', 'Player', 'Match', 'TeamComposition', 'MatchEvent', 'PlayerStatistics', 'AdminLog', 'News',
     'DatabaseManager', 'DatabaseOperations', 'db_manager', 'db_ops', 'Base'
 ]

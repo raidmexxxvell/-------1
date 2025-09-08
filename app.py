@@ -198,6 +198,28 @@ if SECURITY_SYSTEM_AVAILABLE:
         SECURITY_SYSTEM_AVAILABLE = False
 
 # Инициализация оптимизаций
+
+# Инициализация логгера действий администратора
+try:
+    from utils.admin_logger import AdminActionLogger
+    from database.database_models import SessionLocal
+    
+    # Создаем глобальный логгер для админских действий
+    admin_logger = AdminActionLogger(SessionLocal)
+    app.config['admin_logger'] = admin_logger
+    
+    # Делаем логгер доступным в контексте запроса
+    @app.before_request
+    def before_request():
+        g.admin_logger = admin_logger
+    
+    print('[INFO] Admin action logger initialized')
+except ImportError as e:
+    print(f'[WARN] Admin logger not available: {e}')
+    app.config['admin_logger'] = None
+except Exception as e:
+    print(f'[ERROR] Failed to initialize admin logger: {e}')
+    app.config['admin_logger'] = None
 if OPTIMIZATIONS_AVAILABLE:
     try:
         # Многоуровневый кэш
@@ -322,6 +344,32 @@ if DATABASE_SYSTEM_AVAILABLE:
     except Exception as e:
         print(f"[ERROR] Failed to register database API: {e}")
         DATABASE_SYSTEM_AVAILABLE = False
+
+# Регистрация админского API с логированием
+try:
+    from api.admin import init_admin_routes
+    
+    # Определяем функции, которые нужны для admin API
+    def get_admin_db():
+        return SessionLocal()
+    
+    # Инициализируем админские маршруты
+    init_admin_routes(
+        app=app,
+        get_db=get_admin_db, 
+        SessionLocal=SessionLocal,
+        parse_and_verify_telegram_init_data=parse_and_verify_telegram_init_data,
+        MatchFlags=MatchFlags,
+        _snapshot_set=lambda db, key, value: snapshot_set(key, value),  # адаптер
+        _build_betting_tours_payload=_build_betting_tours_payload,
+        _settle_open_bets=_settle_open_bets
+    )
+    print("[INFO] Admin API with logging registered successfully")
+    
+except ImportError as e:
+    print(f"[WARN] Admin API not available: {e}")
+except Exception as e:
+    print(f"[ERROR] Failed to register admin API: {e}")
 if 'COMPRESS_DISABLE' not in os.environ:
     if Compress is not None:
         try:

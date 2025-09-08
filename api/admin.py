@@ -2,17 +2,37 @@
 Admin API routes for Liga Obninska
 Handles all admin-related endpoints and operations
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from datetime import datetime, timezone
 import os
+import time
 from sqlalchemy import text
-import hashlib, json, time
+import hashlib, json
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
 def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_data, 
                      MatchFlags, _snapshot_set, _build_betting_tours_payload, _settle_open_bets):
     """Initialize admin routes with dependencies"""
+
+    # Инициализация логгера админа
+    try:
+        from utils.admin_logger import AdminActionLogger
+        admin_logger = AdminActionLogger(SessionLocal)
+        g.admin_logger = admin_logger
+    except ImportError:
+        app.logger.warning("Admin logger not available")
+        g.admin_logger = None
+
+    def _get_admin_id():
+        """Получение ID админа из запроса"""
+        admin_id_env = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id_env:
+            return None
+        try:
+            return int(admin_id_env)
+        except ValueError:
+            return None
 
     def _is_admin_request():
         """Проверка: либо валидный Telegram initData, либо cookie admin_auth."""
@@ -43,6 +63,9 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
     @admin_bp.route('/match/status/set', methods=['POST'])
     def api_match_status_set():
         """Установка статуса матча админом: scheduled|live|finished"""
+        start_time = time.time()
+        admin_id = _get_admin_id()
+        
         try:
             if not _is_admin_request():
                 return jsonify({'error': 'Недействительные данные'}), 401
@@ -57,9 +80,24 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
             if SessionLocal is None:
                 return jsonify({'error': 'БД недоступна'}), 500
 
+            # Подготовка данных для лога
+            request_data = {
+                'home': home,
+                'away': away,
+                'status': status
+            }
+            
+            affected_entities = {
+                'match': f"{home} vs {away}",
+                'new_status': status
+            }
+
             db = get_db()
             try:
                 row = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
+                old_status = row.status if row else 'not_exists'
+                affected_entities['old_status'] = old_status
+                
                 if not row:
                     row = MatchFlags(home=home, away=away, status=status)
                     db.add(row)
@@ -72,16 +110,21 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                 try:
                     payload = _build_betting_tours_payload()
                     _snapshot_set(db, 'betting-tours', payload)
+                    affected_entities['betting_tours_updated'] = True
                 except Exception as e:
                     app.logger.warning(f"Failed to build betting tours payload: {e}")
+                    affected_entities['betting_tours_error'] = str(e)
 
                 if status == 'finished':
                     # Расчёт открытых ставок
                     try:
                         _settle_open_bets()
+                        affected_entities['bets_settled'] = True
                     except Exception as e:
                         app.logger.error(f"Failed to settle open bets: {e}")
-                    # Корректный пересчёт статистики игроков учаcтвовавших в ИМЕННО этом матче
+                        affected_entities['bets_settlement_error'] = str(e)
+                    
+                    # Корректный пересчёт статистики игроков
                     try:
                         from database.database_models import Team, Match, TeamComposition, PlayerStatistics
                         # Точное сопоставление названий с Team
@@ -96,8 +139,8 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                         if match_obj:
                             if match_obj.status != 'finished':
                                 match_obj.status = 'finished'
-                                # Если в оперативной таблице хранится текущий счёт — перенесём как финальный
-                                # Попробуем считать финальный счёт из легаси-таблицы текущих счётов,
+                                affected_entities['match_status_updated'] = True
+                            # Здесь идет остальная логика...
                                 # чтобы перенести в расширенную модель как итоговый
                                 try:
                                     from app import MatchScore as _LegacyMatchScore
@@ -165,13 +208,49 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                                 pass
                         else:
                             app.logger.warning(f"Finished status set but Match not resolved for pair {home} vs {away}")
+                            affected_entities['warning'] = f"Match not resolved for pair {home} vs {away}"
                     except Exception as stats_err:
                         app.logger.error(f"Failed to update matches_played stats: {stats_err}")
+                        affected_entities['stats_error'] = str(stats_err)
+
+                # Логирование успешной операции
+                execution_time = int((time.time() - start_time) * 1000)
+                if admin_id and hasattr(g, 'admin_logger') and g.admin_logger:
+                    action_name = "Изменение статуса матча"
+                    description = f"Изменен статус матча {home} vs {away} с '{old_status}' на '{status}'"
+                    if status == 'finished':
+                        description += ". Выполнена автоматическая обработка: расчёт ставок, обновление статистики игроков, инвалидация кэшей"
+                    
+                    g.admin_logger.log_action(
+                        admin_id=admin_id,
+                        action=action_name,
+                        description=description,
+                        endpoint=f"POST {request.path}",
+                        request_data=request_data,
+                        result_status='success',
+                        result_message='Статус матча успешно обновлен',
+                        affected_entities=affected_entities,
+                        execution_time_ms=execution_time
+                    )
 
                 return jsonify({'ok': True, 'status': status})
             finally:
                 db.close()
         except Exception as e:
+            # Логирование ошибки
+            execution_time = int((time.time() - start_time) * 1000)
+            if admin_id and hasattr(g, 'admin_logger') and g.admin_logger:
+                g.admin_logger.log_action(
+                    admin_id=admin_id,
+                    action="Изменение статуса матча",
+                    description=f"ОШИБКА при изменении статуса матча {request.form.get('home', 'N/A')} vs {request.form.get('away', 'N/A')}",
+                    endpoint=f"POST {request.path}",
+                    request_data=dict(request.form),
+                    result_status='error',
+                    result_message=str(e),
+                    execution_time_ms=execution_time
+                )
+            
             app.logger.error(f"Match status set error: {e}")
             return jsonify({'error': 'Не удалось установить статус матча'}), 500
 
@@ -182,10 +261,12 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
           ?dry=1  — только показать, что будет сделано, без изменений
           ?soft=1 — не очищать legacy таблицы, только переключить сезон
         Аудит пишется в season_rollovers."""
+        start_time = time.time()
+        admin_id = _get_admin_id()
+        
         try:
             if not _is_admin_request():
                 return jsonify({'error': 'Недействительные данные'}), 401
-            admin_id = os.environ.get('ADMIN_USER_ID','')
 
             # Работаем с расширенной схемой (tournaments)
             try:
@@ -199,6 +280,16 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
 
             dry_run = request.args.get('dry') in ('1','true','yes')
             soft_mode = request.args.get('soft') in ('1','true','yes')
+            
+            # Подготовка данных для лога
+            request_data = {
+                'dry_run': dry_run,
+                'soft_mode': soft_mode
+            }
+            
+            affected_entities = {
+                'operation_type': 'dry_run' if dry_run else ('soft_rollover' if soft_mode else 'full_rollover')
+            }
 
             adv_sess = adv_db_manager.get_session()
             try:
@@ -402,8 +493,41 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                     for key in ('league_table','stats_table','results','schedule','tours','betting-tours'):
                         try: cache.invalidate(key)
                         except Exception: pass
+                    affected_entities['cache_invalidated'] = True
                 except Exception as _c_err:
                     app.logger.warning(f"cache invalidate failed season rollover: {_c_err}")
+                    affected_entities['cache_error'] = str(_c_err)
+
+                # Логирование успешной операции
+                execution_time = int((time.time() - start_time) * 1000)
+                if admin_id and hasattr(g, 'admin_logger') and g.admin_logger:
+                    action_name = "Переход к новому сезону" + (" (пробный)" if dry_run else "")
+                    description = f"Выполнен переход с сезона '{prev_season}' на '{new_season}'"
+                    if dry_run:
+                        description += " (пробный режим - без изменений)"
+                    elif soft_mode:
+                        description += " (мягкий режим - legacy данные сохранены)"
+                    else:
+                        description += " (полный режим - legacy данные очищены)"
+                    
+                    affected_entities.update({
+                        'previous_season': prev_season,
+                        'new_season': new_season,
+                        'tournament_id': new_tournament.id,
+                        'legacy_cleanup_done': legacy_cleanup_done
+                    })
+                    
+                    g.admin_logger.log_action(
+                        admin_id=admin_id,
+                        action=action_name,
+                        description=description,
+                        endpoint=f"POST {request.path}",
+                        request_data=request_data,
+                        result_status='success',
+                        result_message='Переход к новому сезону выполнен успешно',
+                        affected_entities=affected_entities,
+                        execution_time_ms=execution_time
+                    )
 
                 return jsonify({
                     'ok': True,
@@ -421,6 +545,20 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                 except Exception:
                     pass
         except Exception as e:
+            # Логирование ошибки
+            execution_time = int((time.time() - start_time) * 1000)
+            if admin_id and hasattr(g, 'admin_logger') and g.admin_logger:
+                g.admin_logger.log_action(
+                    admin_id=admin_id,
+                    action="Переход к новому сезону",
+                    description=f"ОШИБКА при переходе к новому сезону: {str(e)}",
+                    endpoint=f"POST {request.path}",
+                    request_data=request_data if 'request_data' in locals() else dict(request.args),
+                    result_status='error',
+                    result_message=str(e),
+                    execution_time_ms=execution_time
+                )
+            
             app.logger.error(f"Season rollover error: {e}")
             return jsonify({'error': 'season rollover failed'}), 500
 
@@ -433,6 +571,9 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
           ?force=1 — выполнить, даже если активный турнир не совпадает с последним new_tournament_id в журнале
         Примечание: если при прошлом rollover выполнялась очистка legacy-таблиц (full/deep), данные не восстанавливаются.
         """
+        start_time = time.time()
+        admin_id = _get_admin_id()
+        
         try:
             if not _is_admin_request():
                 return jsonify({'error': 'Недействительные данные'}), 401
@@ -449,6 +590,16 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
 
             dry_run = request.args.get('dry') in ('1','true','yes')
             force = request.args.get('force') in ('1','true','yes')
+            
+            # Подготовка данных для лога
+            request_data = {
+                'dry_run': dry_run,
+                'force': force
+            }
+            
+            affected_entities = {
+                'operation_type': 'dry_run' if dry_run else 'rollback'
+            }
 
             adv_sess = adv_db_manager.get_session()
             try:
@@ -497,8 +648,38 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                     for key in ('league_table','stats_table','results','schedule','tours','betting-tours'):
                         try: cache.invalidate(key)
                         except Exception: pass
+                    affected_entities['cache_invalidated'] = True
                 except Exception as _c_err:
                     app.logger.warning(f"cache invalidate failed season rollback: {_c_err}")
+                    affected_entities['cache_error'] = str(_c_err)
+
+                # Логирование успешной операции
+                execution_time = int((time.time() - start_time) * 1000)
+                if admin_id and hasattr(g, 'admin_logger') and g.admin_logger:
+                    action_name = "Откат к предыдущему сезону"
+                    description = f"Выполнен откат с сезона '{cur_t.season}' на предыдущий сезон '{prev_t.season}'"
+                    if legacy_cleanup_done:
+                        description += ". ВНИМАНИЕ: legacy данные были очищены при предыдущем rollover и не восстановлены"
+                    
+                    affected_entities.update({
+                        'activated_season': prev_t.season,
+                        'deactivated_season': cur_t.season,
+                        'activated_tournament_id': prev_t.id,
+                        'deactivated_tournament_id': cur_t.id,
+                        'legacy_cleanup_was_done': bool(legacy_cleanup_done)
+                    })
+                    
+                    g.admin_logger.log_action(
+                        admin_id=admin_id,
+                        action=action_name,
+                        description=description,
+                        endpoint=f"POST {request.path}",
+                        request_data=request_data,
+                        result_status='success',
+                        result_message='Откат к предыдущему сезону выполнен успешно',
+                        affected_entities=affected_entities,
+                        execution_time_ms=execution_time
+                    )
 
                 return jsonify({
                     'ok': True,
@@ -516,8 +697,76 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                 except Exception:
                     pass
         except Exception as e:
+            # Логирование ошибки
+            execution_time = int((time.time() - start_time) * 1000)
+            if admin_id and hasattr(g, 'admin_logger') and g.admin_logger:
+                g.admin_logger.log_action(
+                    admin_id=admin_id,
+                    action="Откат к предыдущему сезону",
+                    description=f"ОШИБКА при откате к предыдущему сезону: {str(e)}",
+                    endpoint=f"POST {request.path}",
+                    request_data=request_data if 'request_data' in locals() else dict(request.args),
+                    result_status='error',
+                    result_message=str(e),
+                    execution_time_ms=execution_time
+                )
+            
             app.logger.error(f"Season rollback error: {e}")
             return jsonify({'error': 'season rollback failed'}), 500
+
+    @admin_bp.route('/logs', methods=['GET'])
+    def api_admin_logs():
+        """Получение логов действий администратора"""
+        try:
+            if not _is_admin_request():
+                return jsonify({'error': 'Недействительные данные'}), 401
+
+            # Параметры запроса
+            page = int(request.args.get('page', 1))
+            per_page = min(int(request.args.get('per_page', 50)), 100)  # Максимум 100 записей
+            action_filter = request.args.get('action', '').strip()
+            status_filter = request.args.get('status', '').strip()
+            
+            # Импорт логгера
+            try:
+                from utils.admin_logger import AdminActionLogger
+                admin_logger = AdminActionLogger(SessionLocal)
+                
+                # Вычисление offset
+                offset = (page - 1) * per_page
+                
+                # Получение логов с фильтрацией
+                logs = admin_logger.get_logs(
+                    limit=per_page,
+                    offset=offset,
+                    action_filter=action_filter if action_filter else None,
+                    status_filter=status_filter if status_filter else None
+                )
+                
+                # Подсчёт общего количества (для пагинации)
+                total_count = len(admin_logger.get_logs(limit=10000))  # Приблизительный подсчёт
+                total_pages = (total_count + per_page - 1) // per_page
+                
+                return jsonify({
+                    'ok': True,
+                    'logs': logs,
+                    'pagination': {
+                        'page': page,
+                        'per_page': per_page,
+                        'total_count': total_count,
+                        'total_pages': total_pages,
+                        'has_next': page < total_pages,
+                        'has_prev': page > 1
+                    }
+                })
+                
+            except ImportError as e:
+                app.logger.error(f"Failed to import admin logger: {e}")
+                return jsonify({'error': 'Система логирования недоступна'}), 500
+            
+        except Exception as e:
+            app.logger.error(f"Admin logs error: {e}")
+            return jsonify({'error': 'Ошибка получения логов'}), 500
 
     app.register_blueprint(admin_bp)
     return admin_bp

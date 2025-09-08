@@ -47,7 +47,8 @@
       'players': document.getElementById('admin-pane-players'),
       'news': document.getElementById('admin-pane-news'),
       'service': document.getElementById('admin-pane-service'),
-      'stats': document.getElementById('admin-pane-stats')
+      'stats': document.getElementById('admin-pane-stats'),
+      'logs': document.getElementById('admin-pane-logs')
     };
     
     tabs.forEach(tab => {
@@ -74,6 +75,8 @@
           loadNews();
         } else if (targetPane === 'stats') {
           loadStats();
+        } else if (targetPane === 'logs') {
+          loadAdminLogs();
         }
       });
     });
@@ -113,6 +116,51 @@
     const statsRefreshBtn = document.getElementById('admin-stats-refresh');
     if (statsRefreshBtn) {
       statsRefreshBtn.addEventListener('click', loadStats);
+    }
+
+    // Logs management buttons
+    const logsRefreshBtn = document.getElementById('admin-logs-refresh');
+    if (logsRefreshBtn) {
+      logsRefreshBtn.addEventListener('click', () => loadAdminLogs());
+    }
+
+    const logsClearFiltersBtn = document.getElementById('admin-logs-clear-filters');
+    if (logsClearFiltersBtn) {
+      logsClearFiltersBtn.addEventListener('click', () => {
+        document.getElementById('logs-action-filter').value = '';
+        document.getElementById('logs-status-filter').value = '';
+        loadAdminLogs();
+      });
+    }
+
+    const logsActionFilter = document.getElementById('logs-action-filter');
+    if (logsActionFilter) {
+      logsActionFilter.addEventListener('input', debounce(() => loadAdminLogs(), 500));
+    }
+
+    const logsStatusFilter = document.getElementById('logs-status-filter');
+    if (logsStatusFilter) {
+      logsStatusFilter.addEventListener('change', () => loadAdminLogs());
+    }
+
+    const logsPrevBtn = document.getElementById('logs-prev-page');
+    if (logsPrevBtn) {
+      logsPrevBtn.addEventListener('click', () => {
+        if (window.adminLogsCurrentPage > 1) {
+          window.adminLogsCurrentPage--;
+          loadAdminLogs();
+        }
+      });
+    }
+
+    const logsNextBtn = document.getElementById('logs-next-page');
+    if (logsNextBtn) {
+      logsNextBtn.addEventListener('click', () => {
+        if (window.adminLogsCurrentPage < window.adminLogsTotalPages) {
+          window.adminLogsCurrentPage++;
+          loadAdminLogs();
+        }
+      });
     }
 
   // Season rollover buttons
@@ -875,6 +923,222 @@
     });
   }
 
+  // ================== ADMIN LOGS MANAGEMENT ==================
+
+  // Global variables for logs pagination
+  window.adminLogsCurrentPage = 1;
+  window.adminLogsTotalPages = 1;
+
+  function loadAdminLogs(page = null) {
+    console.log('[Admin] Loading admin logs...');
+    
+    if (page) {
+      window.adminLogsCurrentPage = page;
+    } else if (!window.adminLogsCurrentPage) {
+      window.adminLogsCurrentPage = 1;
+    }
+    
+    const container = document.getElementById('admin-logs-display');
+    if (!container) return;
+    
+    // Показываем индикатор загрузки
+    container.innerHTML = '<div class="loading-indicator">Загрузка логов...</div>';
+    
+    // Получаем фильтры
+    const actionFilter = document.getElementById('logs-action-filter')?.value?.trim() || '';
+    const statusFilter = document.getElementById('logs-status-filter')?.value || '';
+    
+    // Формируем URL с параметрами
+    const params = new URLSearchParams({
+      page: window.adminLogsCurrentPage,
+      per_page: 20
+    });
+    
+    if (actionFilter) params.append('action', actionFilter);
+    if (statusFilter) params.append('status', statusFilter);
+    
+    const initData = window.Telegram?.WebApp?.initData || '';
+    if (initData) params.append('initData', initData);
+    
+    fetch(`/api/admin/logs?${params.toString()}`)
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(data => {
+      console.log('[Admin] Logs loaded:', data);
+      
+      if (data.ok && data.logs) {
+        displayLogs(data.logs);
+        updateLogsPagination(data.pagination);
+      } else {
+        container.innerHTML = '<div class="status-text">Ошибка загрузки логов</div>';
+      }
+    })
+    .catch(err => {
+      console.error('[Admin] Error loading logs:', err);
+      container.innerHTML = '<div class="status-text">Ошибка загрузки логов</div>';
+    });
+  }
+
+  function displayLogs(logs) {
+    const container = document.getElementById('admin-logs-display');
+    if (!container) return;
+    
+    if (!logs || logs.length === 0) {
+      container.innerHTML = '<div class="status-text">Логи не найдены</div>';
+      return;
+    }
+    
+    container.innerHTML = '';
+    
+    logs.forEach(log => {
+      const logEl = createLogElement(log);
+      container.appendChild(logEl);
+    });
+  }
+
+  function createLogElement(log) {
+    const logEl = document.createElement('div');
+    logEl.className = 'log-item';
+    
+    // Форматирование времени
+    const createdAt = new Date(log.created_at);
+    const timeStr = createdAt.toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    
+    // Показать время выполнения если есть
+    const executionTime = log.execution_time_ms ? `${log.execution_time_ms}ms` : '';
+    
+    // Создание содержимого лога
+    logEl.innerHTML = `
+      <div class="log-header">
+        <div class="log-action">${escapeHtml(log.action)}</div>
+        <div class="log-status ${log.result_status}">${log.result_status.toUpperCase()}</div>
+      </div>
+      <div class="log-description">${escapeHtml(log.description)}</div>
+      <div class="log-details">
+        <div class="log-meta">
+          <span class="log-time">${timeStr}</span>
+          ${log.endpoint ? `<span class="log-endpoint">${escapeHtml(log.endpoint)}</span>` : ''}
+          ${executionTime ? `<span class="log-execution-time">${executionTime}</span>` : ''}
+        </div>
+        ${hasExtraDetails(log) ? '<a href="#" class="log-expand" onclick="toggleLogDetails(this)">Подробнее ↓</a>' : ''}
+      </div>
+      ${createExtraDetailsElement(log)}
+    `;
+    
+    return logEl;
+  }
+
+  function hasExtraDetails(log) {
+    return log.request_data || log.result_message || log.affected_entities || log.ip_address;
+  }
+
+  function createExtraDetailsElement(log) {
+    if (!hasExtraDetails(log)) return '';
+    
+    let details = '';
+    
+    if (log.result_message && log.result_message !== 'Операция выполнена успешно') {
+      details += `<strong>Результат:</strong>\n${log.result_message}\n\n`;
+    }
+    
+    if (log.request_data) {
+      details += `<strong>Данные запроса:</strong>\n${formatJsonForDisplay(log.request_data)}\n\n`;
+    }
+    
+    if (log.affected_entities) {
+      details += `<strong>Затронутые сущности:</strong>\n${formatJsonForDisplay(log.affected_entities)}\n\n`;
+    }
+    
+    if (log.ip_address) {
+      details += `<strong>IP адрес:</strong> ${log.ip_address}\n`;
+    }
+    
+    return `<div class="log-extra-details"><pre>${escapeHtml(details.trim())}</pre></div>`;
+  }
+
+  function formatJsonForDisplay(jsonStr) {
+    if (!jsonStr) return '';
+    
+    try {
+      const obj = JSON.parse(jsonStr);
+      return JSON.stringify(obj, null, 2);
+    } catch (e) {
+      return jsonStr;
+    }
+  }
+
+  function updateLogsPagination(pagination) {
+    if (!pagination) return;
+    
+    window.adminLogsTotalPages = pagination.total_pages;
+    
+    const paginationEl = document.getElementById('logs-pagination');
+    const pageInfo = document.getElementById('logs-page-info');
+    const prevBtn = document.getElementById('logs-prev-page');
+    const nextBtn = document.getElementById('logs-next-page');
+    
+    if (paginationEl && pagination.total_pages > 1) {
+      paginationEl.style.display = 'block';
+      
+      if (pageInfo) {
+        pageInfo.textContent = `Страница ${pagination.page} из ${pagination.total_pages}`;
+      }
+      
+      if (prevBtn) {
+        prevBtn.disabled = !pagination.has_prev;
+      }
+      
+      if (nextBtn) {
+        nextBtn.disabled = !pagination.has_next;
+      }
+    } else if (paginationEl) {
+      paginationEl.style.display = 'none';
+    }
+  }
+
+  // Utility functions
+  function escapeHtml(text) {
+    if (typeof text !== 'string') return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  // Global function to toggle log details
+  window.toggleLogDetails = function(link) {
+    const logItem = link.closest('.log-item');
+    const detailsEl = logItem.querySelector('.log-extra-details');
+    
+    if (detailsEl.classList.contains('expanded')) {
+      detailsEl.classList.remove('expanded');
+      link.textContent = 'Подробнее ↓';
+    } else {
+      detailsEl.classList.add('expanded');
+      link.textContent = 'Скрыть ↑';
+    }
+  };
+
   // Global functions for HTML onclick handlers
   window.AdminEnhanced = {
     openMatchModal,
@@ -888,7 +1152,8 @@
     closeNewsModal,
     saveNews,
     deleteNews,
-    loadNews
+    loadNews,
+    loadAdminLogs
   };
 
   // Initialize when DOM is ready

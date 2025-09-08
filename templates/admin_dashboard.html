@@ -29,6 +29,7 @@
                 <div class="subtab-item" data-atab="news">Новости</div>
                 <div class="subtab-item" data-atab="service">Сервис</div>
                 <div class="subtab-item" data-atab="stats">Статистика</div>
+                <div class="subtab-item" data-atab="logs">Логи</div>
             </div>
 
             <!-- Matches and Lineups Pane -->
@@ -275,6 +276,39 @@
                     <button id="admin-stats-refresh" class="action-btn">Обновить статистику</button>
                     <div id="admin-stats-display" class="stats-container">
                         <!-- Статистика матчей и составов -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs Pane -->
+            <div id="admin-pane-logs" class="admin-pane" style="display: none;">
+                <div class="admin-section">
+                    <h3>Логи действий администратора</h3>
+                    
+                    <!-- Фильтры и управление -->
+                    <div class="logs-controls" style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
+                        <input type="text" id="logs-action-filter" placeholder="Фильтр по действию..." class="search-input" style="max-width: 200px;">
+                        <select id="logs-status-filter" class="team-select" style="max-width: 150px;">
+                            <option value="">Все статусы</option>
+                            <option value="success">Успешные</option>
+                            <option value="error">Ошибки</option>
+                        </select>
+                        <button id="admin-logs-refresh" class="action-btn">Обновить</button>
+                        <button id="admin-logs-clear-filters" class="action-btn" style="background: #666;">Сбросить фильтры</button>
+                    </div>
+                    
+                    <!-- Контейнер для логов -->
+                    <div id="admin-logs-display" class="logs-container">
+                        <div class="loading-indicator" style="text-align: center; padding: 20px;">
+                            Загрузка логов...
+                        </div>
+                    </div>
+                    
+                    <!-- Пагинация -->
+                    <div id="logs-pagination" class="pagination-controls" style="display: none; margin-top: 15px; text-align: center;">
+                        <button id="logs-prev-page" class="action-btn" style="background: #444;">← Предыдущая</button>
+                        <span id="logs-page-info" style="margin: 0 15px; color: #ccc;">Страница 1 из 1</span>
+                        <button id="logs-next-page" class="action-btn" style="background: #444;">Следующая →</button>
                     </div>
                 </div>
             </div>
