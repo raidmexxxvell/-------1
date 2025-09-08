@@ -3738,6 +3738,12 @@ def api_team_overview():
                 except Exception:
                     pass
                 tournaments = len(tournaments_set) if tournaments_set else 0
+                # Если по БД нет ни одного сыгранного матча — используем snapshot fallback, чтобы не показывать нули
+                if matches == 0:
+                    try:
+                        return _team_overview_from_results_snapshot(db, name_final)
+                    except Exception:
+                        pass
                 return {
                     'team': {'id': team_id, 'name': name_final},
                     'stats': {'matches':matches,'wins':w,'draws':d,'losses':l,'goals_for':gf,'goals_against':ga,'clean_sheets':cs,'last5':last5},
@@ -3952,7 +3958,10 @@ def _build_league_payload_from_db():
                         values.append([str(i), name, str(a['P']), str(a['W']), str(a['D']), str(a['L']), str(gd), str(a['PTS'])])
                     while len(values) < 10:
                         values.append(['']*8)
-                    return {'range':'A1:H10','updated_at': datetime.now(timezone.utc).isoformat(),'values': values[:10]}
+                    # Если вообще не было матчей — не возвращаем здесь, дадим шанс snapshot-пути ниже
+                    total_p = sum(int((agg[n]['P'] or 0)) for n in teams) if teams else 0
+                    if total_p > 0 or teams:
+                        return {'range':'A1:H10','updated_at': datetime.now(timezone.utc).isoformat(),'values': values[:10]}
             finally:
                 try: sess.close()
                 except Exception: pass
@@ -7086,6 +7095,72 @@ def _get_match_total_goals(home: str, away: str):
             app.logger.info(f"_get_match_total_goals: No match found for {home} vs {away}")
     except: pass
     return None
+
+def _get_match_tour_and_dt(home: str, away: str):
+    """Попытаться определить номер тура и дату/время матча по снапшотам.
+    Возвращает dict: { 'tour': int|None, 'date': str|'', 'time': str|'', 'datetime': str|'' }
+    """
+    tour = None; date = ''; time_s = ''; dt_iso = ''
+    if SessionLocal is not None:
+        db = get_db()
+        try:
+            # 1) Сначала snapshot расписания (предпочтительнее для тура)
+            snap = _snapshot_get(db, 'schedule')
+            payload = snap and snap.get('payload') or {}
+            tours = payload.get('tours') or []
+            for t in tours:
+                for m in (t.get('matches') or []):
+                    if (m.get('home') or '').strip() == home and (m.get('away') or '').strip() == away:
+                        try:
+                            if t.get('tour') is not None:
+                                tour = int(t.get('tour')) if isinstance(t.get('tour'), int) else tour
+                        except Exception:
+                            pass
+                        date = (m.get('date') or '')
+                        time_s = (m.get('time') or '')
+                        dt_iso = (m.get('datetime') or '')
+                        break
+                if tour is not None:
+                    break
+            # 2) Если не нашли в расписании — попробуем betting-tours
+            if tour is None:
+                snap_bt = _snapshot_get(db, 'betting-tours')
+                payload_bt = snap_bt and snap_bt.get('payload') or {}
+                for t in (payload_bt.get('tours') or []):
+                    for m in (t.get('matches') or []):
+                        if (m.get('home') or '').strip() == home and (m.get('away') or '').strip() == away:
+                            try:
+                                if t.get('tour') is not None:
+                                    tour = int(t.get('tour')) if isinstance(t.get('tour'), int) else tour
+                            except Exception:
+                                pass
+                            date = (m.get('date') or '')
+                            time_s = (m.get('time') or '')
+                            dt_iso = (m.get('datetime') or '')
+                            break
+                    if tour is not None:
+                        break
+            # 3) В крайнем случае — возьмём из уже имеющихся результатов
+            if tour is None:
+                snap_res = _snapshot_get(db, 'results')
+                payload_res = snap_res and snap_res.get('payload') or {}
+                for r in (payload_res.get('results') or []):
+                    if (r.get('home') or '').strip() == home and (r.get('away') or '').strip() == away:
+                        tr = r.get('tour')
+                        try:
+                            tour = int(tr) if isinstance(tr, int) else tour
+                        except Exception:
+                            pass
+                        if not dt_iso:
+                            dt_iso = r.get('datetime') or ''
+                        if not date:
+                            date = r.get('date') or ''
+                        if not time_s:
+                            time_s = r.get('time') or ''
+                        break
+        finally:
+            db.close()
+    return { 'tour': tour, 'date': date, 'time': time_s, 'datetime': dt_iso }
 
 @app.route('/api/match/score/get', methods=['GET'])
 def api_match_score_get():
@@ -10551,12 +10626,17 @@ def api_match_settle():
                         found_idx = i
                         break
                 
-                # Обновляем или добавляем
+                # Обновляем или добавляем (с определением тура и даты/времени)
+                extra = _get_match_tour_and_dt(home, away)
                 result_entry = {
-                    'home': home, 
-                    'away': away, 
-                    'score_home': int(ms.score_home), 
-                    'score_away': int(ms.score_away)
+                    'home': home,
+                    'away': away,
+                    'score_home': int(ms.score_home),
+                    'score_away': int(ms.score_away),
+                    'tour': extra.get('tour'),
+                    'date': extra.get('date') or '',
+                    'time': extra.get('time') or '',
+                    'datetime': extra.get('datetime') or ''
                 }
                 if found_idx is not None:
                     results[found_idx] = result_entry
@@ -10566,6 +10646,14 @@ def api_match_settle():
                 payload['results'] = results
                 payload['updated_at'] = datetime.now(timezone.utc).isoformat()
                 _snapshot_set(db, 'results', payload)
+                try:
+                    if cache_manager: cache_manager.invalidate('results')
+                except Exception:
+                    pass
+                try:
+                    if websocket_manager: websocket_manager.notify_data_change('results', payload)
+                except Exception:
+                    pass
                 
                 # Также записываем в Google Sheets
                 try:
@@ -10886,6 +10974,22 @@ def api_match_settle():
                 except: pass
             except Exception as schedule_err:
                 try: app.logger.warning(f"schedule snapshot update failed: {schedule_err}")
+                except Exception: pass
+            
+            # --- Пересчитываем таблицу лиги и нотифицируем фронт ---
+            try:
+                league_payload = _build_league_payload_from_db()
+                _snapshot_set(db, 'league-table', league_payload)
+                try:
+                    if cache_manager: cache_manager.invalidate('league_table')
+                except Exception:
+                    pass
+                try:
+                    if websocket_manager: websocket_manager.notify_data_change('league_table', league_payload)
+                except Exception:
+                    pass
+            except Exception as lt_err:
+                try: app.logger.warning(f"league table rebuild after settle failed: {lt_err}")
                 except Exception: pass
             
             return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt, 'total_bets': total_bets_cnt, 'open_before': open_before_cnt})
