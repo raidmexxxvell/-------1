@@ -3735,6 +3735,20 @@ def api_team_overview():
                         for et, cnt in cr:
                             if str(et) == 'yellow_card': cards['yellow'] = int(cnt or 0)
                             if str(et) == 'red_card': cards['red'] = int(cnt or 0)
+                        # Если событий нет, попробуем заполнить из TeamPlayerStats (сумма по игрокам этой команды)
+                        if cards['yellow'] == 0 and cards['red'] == 0 and 'TeamPlayerStats' in globals():
+                            try:
+                                # Получим имя команды по id и агрегируем
+                                trow = db.execute(text("SELECT name FROM teams WHERE id=:id"), { 'id': team_id }).first()
+                                tname = (trow and trow[0]) or None
+                                if tname:
+                                    ys = db.query(TeamPlayerStats).with_entities(func.sum(TeamPlayerStats.yellows), func.sum(TeamPlayerStats.reds)).filter(TeamPlayerStats.team==tname).first()
+                                    if ys:
+                                        ysum = int(ys[0] or 0); rsum = int(ys[1] or 0)
+                                        if ysum or rsum:
+                                            cards['yellow'] = ysum; cards['red'] = rsum
+                            except Exception:
+                                pass
                 except Exception:
                     pass
                 tournaments = len(tournaments_set) if tournaments_set else 0
@@ -4225,20 +4239,27 @@ def _build_schedule_payload_from_sheet():
         finally:
             dbx.close()
     def tour_is_upcoming(t):
-        # 1) по времени
+        # Тур считаем актуальным, если есть хотя бы один незавершённый матч:
+        #  - с будущим временем старта
+        #  - или в live-окне (dt <= now < dt + BET_MATCH_DURATION_MINUTES)
+        # Также, если тур > последнего полностью завершённого — показываем как будущий.
         for m in t.get('matches', []):
             try:
+                trn = t.get('tour')
+                finished_key = ((m.get('home') or ''), (m.get('away') or ''), int(trn) if isinstance(trn, int) else trn)
+                if finished_key in finished_triples:
+                    continue  # уже завершён
                 if m.get('datetime'):
                     dt = datetime.fromisoformat(m['datetime'])
-                    # Убираем 3-часовой буфер: матч остаётся в расписании только до времени начала
-                    if dt >= now_local:
+                    end_dt = dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES)
+                    if dt >= now_local or now_local < end_dt:
                         return True
                 elif m.get('date'):
+                    # без времени: ориентируемся по дате (>= сегодня считаем актуальным)
                     if datetime.fromisoformat(m['date']).date() >= today:
                         return True
             except Exception:
                 continue
-        # 2) fallback: если тур строго больше последнего завершённого, показываем его даже без дат
         try:
             trn = t.get('tour')
             if isinstance(trn, int) and last_finished_tour and trn > last_finished_tour:
@@ -4255,8 +4276,9 @@ def _build_schedule_payload_from_sheet():
                 keep = False
                 if m.get('datetime'):
                     dt = datetime.fromisoformat(m['datetime'])
-                    # Убираем 3-часовой буфер: матч остаётся в расписании только до времени начала
-                    keep = (dt >= now_local)
+                    end_dt = dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES)
+                    # Держим в расписании до окончания live-окна
+                    keep = (dt >= now_local) or (now_local < end_dt)
                 elif m.get('date'):
                     d = datetime.fromisoformat(m['date']).date()
                     keep = (d >= today)
@@ -4906,33 +4928,49 @@ def _build_betting_tours_payload():
     tours.sort(key=sort_key)
     # Выбираем ближайший тур
     primary = tours[:1]
-    # Логика раннего открытия следующего тура: берём второй по порядку, если он стартует в ближайшие 2 дня
+    # Логика раннего открытия следующего тура: открываем второй тур только если ближайший тур полностью завершён
     early_open = []
-    if len(tours) >= 2:
-        try:
-            next_t = tours[1]
-            # Вычислим самое раннее время среди матчей следующего тура
-            earliest = None
-            for m in next_t.get('matches', []):
-                dt = None
-                if m.get('datetime'):
-                    dt = datetime.fromisoformat(m['datetime'])
-                elif m.get('date'):
-                    try:
+    if len(tours) >= 2 and primary:
+        def _tour_has_unfinished_matches(tour_obj):
+            now_local = datetime.now()
+            for m in (tour_obj.get('matches') or []):
+                try:
+                    if m.get('datetime'):
+                        dt = datetime.fromisoformat(m['datetime'])
+                        end_dt = dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES)
+                        if dt > now_local or now_local < end_dt:
+                            return True
+                    elif m.get('date'):
                         d = datetime.fromisoformat(m['date']).date()
-                        tm_str = (m.get('time') or '00:00')
-                        tm = datetime.strptime(tm_str, "%H:%M").time()
-                        dt = datetime.combine(d, tm)
-                    except Exception:
-                        dt = None
-                if dt is not None:
-                    if earliest is None or dt < earliest:
-                        earliest = dt
-            if earliest is not None:
-                if earliest - datetime.now() <= timedelta(days=2):
+                        if d >= now_local.date():
+                            return True
+                except Exception:
+                    continue
+            return False
+        if not _tour_has_unfinished_matches(primary[0]):
+            try:
+                next_t = tours[1]
+                # Вычислим самое раннее время среди матчей следующего тура
+                earliest = None
+                for m in next_t.get('matches', []):
+                    dt = None
+                    if m.get('datetime'):
+                        dt = datetime.fromisoformat(m['datetime'])
+                    elif m.get('date'):
+                        try:
+                            d = datetime.fromisoformat(m['date']).date()
+                            tm_str = (m.get('time') or '00:00')
+                            tm = datetime.strptime(tm_str, "%H:%M").time()
+                            dt = datetime.combine(d, tm)
+                        except Exception:
+                            dt = None
+                    if dt is not None:
+                        if earliest is None or dt < earliest:
+                            earliest = dt
+                if earliest is not None and (earliest - datetime.now() <= timedelta(days=2)):
                     early_open = [next_t]
-        except Exception:
-            early_open = []
+            except Exception:
+                early_open = []
     tours = primary + early_open
 
     now_local = datetime.now()
@@ -5133,6 +5171,11 @@ def api_match_status_set():
         if status == 'finished':
             try: 
                 _settle_open_bets()
+                # После расчёта обновим турнирную таблицу (сразу, без ожидания фонового цикла)
+                try:
+                    _sync_league_table()
+                except Exception:
+                    pass
             except Exception as e:
                 app.logger.error(f"Failed to settle open bets: {e}")
         return jsonify({'ok': True, 'status': status})
@@ -10852,6 +10895,11 @@ def api_specials_settle():
                 changed += 1
             if changed:
                 db.commit()
+            # После расчёта — форсируем обновление турнирной таблицы (безопасно)
+            try:
+                _sync_league_table()
+            except Exception:
+                pass
             return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt})
         finally:
             db.close()

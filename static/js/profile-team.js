@@ -37,14 +37,18 @@
     const section = document.createElement('div'); section.className = 'team-overview-section';
     const title = document.createElement('div'); title.className = 'section-title'; title.textContent = 'Форма';
     const form = document.createElement('div'); form.className = 'team-form';
-    const last2 = Array.isArray(payload?.recent) && payload.recent.length ? payload.recent.slice(0,2) : (stats.last5||[]).slice(0,2);
+  const last2 = Array.isArray(payload?.recent) && payload.recent.length ? payload.recent.slice(0,2) : (stats.last5||[]).slice(0,2);
     last2.forEach((r) => {
       const cell = document.createElement('div'); cell.className='form-cell';
       const dt = document.createElement('div'); dt.className='form-date';
       const item = document.createElement('div'); item.className='form-item';
       const logoWrap = document.createElement('div'); logoWrap.className='logo-wrap';
       const logo = document.createElement('img'); logo.className='logo'; logo.alt='';
-      try { (window.setTeamLogo||window.TeamUtils?.setTeamLogo)?.(logo, payload?.team?.name || ''); } catch(_) {}
+      try {
+        const oppName = (typeof r === 'object' && r && r.opponent) ? r.opponent : null;
+        const logoTeam = oppName || (payload?.team?.name || '');
+        (window.setTeamLogo||window.TeamUtils?.setTeamLogo)?.(logo, logoTeam);
+      } catch(_) {}
       const scoreOverlay = document.createElement('div'); scoreOverlay.className='score-badge';
       const score = document.createElement('div'); score.className='score';
       const badge = document.createElement('div'); badge.className = 'badge';
