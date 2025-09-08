@@ -494,7 +494,17 @@
       const table = document.getElementById('league-table');
       const updatedText = document.getElementById('league-updated-text');
       if (!table || !window.fetchEtag) return;
-      window.fetchEtag('/api/league-table', { cacheKey: 'league:table', swrMs: 5000, extract: j=>j })
+      // Сначала пробуем живую проекцию (без ETag), затем стандартную таблицу
+      fetch('/api/league-table/live', { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : Promise.reject('no_live'))
+        .then(data => {
+          try { renderLeagueTable(table, updatedText, data); } catch(_) {}
+          if (updatedText && data?.updated_at) {
+            try { setUpdatedLabelSafely(updatedText, data.updated_at); } catch(_) {}
+          }
+        })
+        .catch(() => {
+          window.fetchEtag('/api/league-table', { cacheKey: 'league:table', swrMs: 5000, extract: j=>j })
         .then(({ data, headerUpdatedAt }) => {
           try { renderLeagueTable(table, updatedText, data); } catch(_) {}
           if (updatedText && headerUpdatedAt) {
@@ -502,6 +512,7 @@
           }
         })
         .catch(()=>{});
+        });
     } catch(_) {}
   }
 

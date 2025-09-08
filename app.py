@@ -7334,6 +7334,194 @@ def _get_match_datetime(home: str, away: str):
             db.close()
     return None
 
+def _compute_table_agg_base():
+    """Собирает агрегат таблицы по завершённым матчам активного сезона.
+    Возвращает (agg: dict[name->{P,W,D,L,GF,GA,PTS}], teams: list[str]).
+    Источники: расширенная схема (если доступна) или snapshot 'results'.
+    В agg также добавляются все участники из snapshot 'schedule' с нулевой статистикой.
+    """
+    from collections import defaultdict
+    agg = defaultdict(lambda: {'P':0,'W':0,'D':0,'L':0,'GF':0,'GA':0,'PTS':0})
+    def upd(team, gf, ga):
+        a = agg[team]; a['P']+=1; a['GF']+=gf; a['GA']+=ga
+        if gf>ga: a['W']+=1; a['PTS']+=3
+        elif gf==ga: a['D']+=1; a['PTS']+=1
+        else: a['L']+=1
+    # 1) Попробуем расширенную схему
+    try:
+        if adv_db_manager and getattr(adv_db_manager, 'SessionLocal', None):
+            sess = adv_db_manager.get_session()
+            try:
+                from sqlalchemy.orm import aliased
+                from database.database_models import Tournament, Match, Team
+                active = (sess.query(Tournament)
+                          .filter(Tournament.status=='active')
+                          .order_by(Tournament.start_date.desc().nullslast(), Tournament.created_at.desc())
+                          .first())
+                HomeTeam = aliased(Team)
+                AwayTeam = aliased(Team)
+                q = (sess.query(Match, HomeTeam.name.label('home_name'), AwayTeam.name.label('away_name'))
+                     .join(HomeTeam, Match.home_team_id==HomeTeam.id)
+                     .join(AwayTeam, Match.away_team_id==AwayTeam.id))
+                if active:
+                    q = q.filter(Match.tournament_id==active.id)
+                q = q.filter(Match.status=='finished')
+                rows = q.all()
+                for m, hname, aname in rows:
+                    if not hname or not aname:
+                        continue
+                    h = int(m.home_score or 0); a = int(m.away_score or 0)
+                    upd(hname, h, a)
+                    upd(aname, a, h)
+            finally:
+                try: sess.close()
+                except Exception: pass
+    except Exception:
+        pass
+    # 2) Snapshot results
+    try:
+        if SessionLocal is not None:
+            dbs = get_db()
+            try:
+                snap = _snapshot_get(dbs, 'results')
+                payload = snap and snap.get('payload') or {}
+                for m in (payload.get('results') or []):
+                    try:
+                        hname = (m.get('home') or '').strip(); aname = (m.get('away') or '').strip()
+                        if not hname or not aname:
+                            continue
+                        if m.get('tour') is None:
+                            continue
+                        sh = int((m.get('score_home') or 0))
+                        sa = int((m.get('score_away') or 0))
+                        upd(hname, sh, sa)
+                        upd(aname, sa, sh)
+                    except Exception:
+                        continue
+            finally:
+                dbs.close()
+    except Exception:
+        pass
+    # 3) Участники из расписания
+    try:
+        if SessionLocal is not None:
+            dbsched = get_db()
+            try:
+                snap = _snapshot_get(dbsched, 'schedule')
+                payload = snap and snap.get('payload') or {}
+                for t in (payload.get('tours') or []):
+                    for mt in (t.get('matches') or []):
+                        hn = (mt.get('home') or '').strip(); an = (mt.get('away') or '').strip()
+                        if hn: _ = agg[hn]
+                        if an: _ = agg[an]
+            finally:
+                dbsched.close()
+    except Exception:
+        pass
+    return agg, list(agg.keys())
+
+def _build_league_payload_live():
+    """Лёгкая проекция таблицы с учётом текущих live‑счётов (MatchScore) для матчей,
+    которые идут сейчас по расписанию. Не изменяет базовые данные, только накладывает overlay.
+    """
+    agg, teams = _compute_table_agg_base()
+    now = datetime.now()
+    # Определим live‑матчи из расписания (окно: от начала до +BET_MATCH_DURATION_MINUTES)
+    live_pairs = []  # [(home, away)]
+    try:
+        if SessionLocal is not None:
+            db = get_db()
+            try:
+                snap = _snapshot_get(db, 'schedule')
+                payload = snap and snap.get('payload') or {}
+                for t in (payload.get('tours') or []):
+                    for m in (t.get('matches') or []):
+                        home = (m.get('home') or '').strip(); away = (m.get('away') or '').strip()
+                        if not home or not away:
+                            continue
+                        dt_str = m.get('datetime') or m.get('date')
+                        dt = None
+                        if dt_str:
+                            try:
+                                dt = datetime.fromisoformat(str(dt_str))
+                            except Exception:
+                                dt = None
+                        if not dt:
+                            continue
+                        end_dt = dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES)
+                        if dt <= now <= end_dt:
+                            live_pairs.append((home, away))
+                # Исключим уже учтённые в results (на случай ручной правки)
+                try:
+                    snap_res = _snapshot_get(db, 'results')
+                    payload_res = snap_res and snap_res.get('payload') or {}
+                    finished_set = set()
+                    for r in (payload_res.get('results') or []):
+                        finished_set.add(((r.get('home') or '').strip(), (r.get('away') or '').strip()))
+                    live_pairs = [p for p in live_pairs if p not in finished_set]
+                except Exception:
+                    pass
+                # Наложим overlay по текущим счётам
+                if live_pairs:
+                    scores = { (s.home, s.away): (s.score_home, s.score_away) for s in db.query(MatchScore).all() }
+                    for home, away in live_pairs:
+                        sc = scores.get((home, away))
+                        if sc is None:  # попробуем обратный порядок на всякий случай
+                            sc = scores.get((home.strip(), away.strip()))
+                        if not sc:
+                            continue
+                        sh, sa = sc
+                        if sh is None or sa is None:
+                            continue
+                        try:
+                            sh = int(sh); sa = int(sa)
+                        except Exception:
+                            continue
+                        # Обеспечим присутствие команд
+                        _ = agg[home]; _ = agg[away]
+                        # Overlay: добавляем как будто матч завершён текущим счётом
+                        a_h = dict(agg[home]); a_a = dict(agg[away])
+                        # Чтобы не мутировать исходные значения при неоднократных вызовах
+                        # мы просто инкрементируем в агрегате
+                        agg[home]['P'] += 1; agg[home]['GF'] += sh; agg[home]['GA'] += sa
+                        agg[away]['P'] += 1; agg[away]['GF'] += sa; agg[away]['GA'] += sh
+                        if sh>sa:
+                            agg[home]['W'] += 1; agg[home]['PTS'] += 3; agg[away]['L'] += 1
+                        elif sh==sa:
+                            agg[home]['D'] += 1; agg[home]['PTS'] += 1; agg[away]['D'] += 1; agg[away]['PTS'] += 1
+                        else:
+                            agg[away]['W'] += 1; agg[away]['PTS'] += 3; agg[home]['L'] += 1
+            finally:
+                db.close()
+    except Exception:
+        pass
+    # Формируем финальный payload как в основной таблице
+    def sort_key(name):
+        a = agg[name]; gd = a['GF']-a['GA']
+        return (-a['PTS'], -gd, -a['GF'], (name or '').lower())
+    teams = list(agg.keys())
+    teams.sort(sort_key)
+    header = ['№','Команда','И','В','Н','П','Р','О']
+    values = [header]
+    for i, name in enumerate(teams[:9], start=1):
+        a = agg[name]; gd = a['GF']-a['GA']
+        values.append([str(i), name, str(a['P']), str(a['W']), str(a['D']), str(a['L']), str(gd), str(a['PTS'])])
+    while len(values) < 10:
+        values.append(['']*8)
+    return {'range': 'A1:H10', 'updated_at': datetime.now(timezone.utc).isoformat(), 'values': values[:10], 'live': True}
+
+@app.route('/api/league-table/live', methods=['GET'])
+def api_league_table_live():
+    try:
+        payload = _build_league_payload_live()
+        resp = _json_response(payload)
+        # Живая таблица не кэшируется агрессивно
+        resp.headers['Cache-Control'] = 'no-store, max-age=0'
+        return resp
+    except Exception as e:
+        app.logger.error(f"live league table error: {e}")
+        return jsonify({'error':'internal'}), 500
+
 def _settle_open_bets():
     if SessionLocal is None:
         return
@@ -7988,7 +8176,7 @@ def api_admin_google_export_all():
             lt_rows = db.query(LeagueTableRow).order_by(LeagueTableRow.row_index.asc()).all() if 'LeagueTableRow' in globals() else []
         finally:
             db.close()
-        # Пишем в Sheets
+    # Пишем в Sheets
         try:
             from utils.sheets import SheetsManager
             sm = SheetsManager(creds_b64, sheet_id)
@@ -8210,6 +8398,90 @@ def api_admin_google_export_all():
                         pass
             except Exception as adv_err:
                 app.logger.warning(f"advanced export skipped: {adv_err}")
+
+            # Fallback/overlay: если есть агрегированная таблица TeamPlayerStats — используем её для обновления листов команд
+            # и вкладки «ГОЛ+ПАС», чтобы исключить нули при отсутствии расширенной схемы.
+            try:
+                if SessionLocal is not None and 'TeamPlayerStats' in globals():
+                    db2: Session = get_db()
+                    try:
+                        # Собираем все записи статистики по игрокам
+                        trows = db2.query(TeamPlayerStats).all()
+                        # Помощники: сплит имени и запись листа
+                        def _split_name(full: str):
+                            try:
+                                parts = [p for p in (full or '').strip().split() if p]
+                                if not parts:
+                                    return '', ''
+                                if len(parts) == 1:
+                                    return parts[0], ''
+                                if len(parts) == 2:
+                                    # Частый формат: Фамилия Имя
+                                    return parts[1], parts[0]
+                                first = parts[1]
+                                last = ' '.join([parts[0]] + parts[2:])
+                                return first, last
+                            except Exception:
+                                return full or '', ''
+                        def _write_sheet(title, rows):
+                            try:
+                                sm.clear_worksheet(title)
+                            except Exception:
+                                pass
+                            ncols = max((len(r) for r in rows), default=0)
+                            end_col = chr(ord('A') + max(0, ncols-1))
+                            sm.update_range(title, f'A1:{end_col}{len(rows)}', rows)
+
+                        # Группируем по командам и формируем листы team_{name}
+                        by_team = {}
+                        for r in trows:
+                            team = (r.team or '').strip()
+                            if not team:
+                                continue
+                            by_team.setdefault(team, []).append(r)
+                        for team, arr in by_team.items():
+                            # Пишем только если есть сыгранные матчи или очки — чтобы не затирать ранее выгруженные данные нулями
+                            has_any = any(((x.games or 0) > 0) or ((x.goals or 0) > 0) or ((x.assists or 0) > 0) for x in arr)
+                            if not has_any:
+                                continue
+                            rows = [['player_id','first_name','last_name','matches','yellow','red','assists','goals','goal+assist']]
+                            for x in arr:
+                                fn, ln = _split_name(x.player or '')
+                                rows.append([
+                                    '', fn, ln,
+                                    int(x.games or 0), int(x.yellows or 0), int(x.reds or 0), int(x.assists or 0), int(x.goals or 0), int((x.goals or 0) + (x.assists or 0))
+                                ])
+                            hdr, body = rows[0], rows[1:]
+                            try:
+                                body.sort(key=lambda r: (-int(r[8] or 0), int(r[3] or 0), -int(r[7] or 0)))
+                            except Exception:
+                                pass
+                            rows = [hdr] + body
+                            _write_sheet(f"team_{team}"[:90], rows)
+
+                        # Глобальная вкладка «ГОЛ+ПАС» по TeamPlayerStats
+                        if trows:
+                            rows = [['player_id','first_name','last_name','matches','goals','assists','goal+assist']]
+                            for x in trows:
+                                fn, ln = _split_name(x.player or '')
+                                rows.append(['', fn, ln, int(x.games or 0), int(x.goals or 0), int(x.assists or 0), int((x.goals or 0) + (x.assists or 0))])
+                            hdr, body = rows[0], rows[1:]
+                            try:
+                                body.sort(key=lambda r: (-int(r[6] or 0), int(r[3] or 0), -int(r[4] or 0)))
+                            except Exception:
+                                pass
+                            rows = [hdr] + body
+                            _write_sheet('ГОЛ+ПАС', rows)
+                    finally:
+                        try:
+                            db2.close()
+                        except Exception:
+                            pass
+            except Exception as tp_err:
+                try:
+                    app.logger.warning(f"export-all: TeamPlayerStats fallback failed: {tp_err}")
+                except Exception:
+                    pass
         except Exception as e:
             app.logger.error(f"export-all to sheets failed: {e}")
             return jsonify({'error': 'sheet_write_failed'}), 500
