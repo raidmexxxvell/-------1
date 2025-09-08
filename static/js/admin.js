@@ -1,7 +1,11 @@
 // static/js/admin.js
 // Admin module: admin subtabs, refresh, orders, streams. Exposes window.Admin
 (function(){
+  // Одноразовая инициализация и защита от параллельных обновлений
+  let __adminInitDone = false;
+  let __ordersReqSeq = 0;
   function ensureAdminInit() {
+    if (__adminInitDone) return; // уже инициализировано
     const btnAll = document.getElementById('admin-refresh-all');
     const btnUsers = document.getElementById('admin-users-refresh');
     const btnSync = document.getElementById('admin-sync-refresh');
@@ -25,6 +29,7 @@
         });
       });
     } catch(_) {}
+  __adminInitDone = true;
     if (btnAll) btnAll.addEventListener('click', () => {
       const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
       btnAll.disabled = true; const orig = btnAll.textContent; btnAll.textContent = 'Обновляю...';
@@ -65,15 +70,23 @@
     const table = document.getElementById('admin-orders-table');
     const updated = document.getElementById('admin-orders-updated');
     if (!table) return; const tbody = table.querySelector('tbody');
-    // Чтобы избежать мерцания и дубликатов, соберём новые строки во фрагмент
+    // Счётчик запросов: учитываем только самый последний ответ
+    const mySeq = ++__ordersReqSeq;
+    // Чтобы избежать мерцания: показываем лоадер и чистим перед применением свежего результата
     tbody.innerHTML = '';
     const seen = new Set();
     try {
       const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
       const r = await fetch('/api/admin/orders', { method: 'POST', body: fd }); const data = await r.json();
+      // Если пришёл устаревший ответ — игнорируем
+      if (mySeq !== __ordersReqSeq) return;
       (data.orders||[]).forEach((o, idx) => {
-        const oid = o.id || o.order_id || ('idx_'+idx);
-        if (seen.has(oid)) return; seen.add(oid);
+        // Устойчивый ключ дедупликации на случай дублей в ответе
+        const oid = String(
+          (o.id != null ? o.id : (o.order_id != null ? o.order_id : ''))
+        );
+        const composite = oid || [o.user_id||'', o.created_at||'', o.total||'', o.items_preview||''].join('|');
+        if (seen.has(composite)) return; seen.add(composite);
         const tr = document.createElement('tr');
         let created = o.created_at || '';
         try { created = new Date(created).toLocaleDateString('ru-RU'); } catch(_) {}

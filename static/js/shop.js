@@ -1,6 +1,9 @@
 // static/js/shop.js
 // Shop module: store UI, cart, orders. Exposes window.Shop
 (function(){
+  function escapeHtml(s){
+    try { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])); } catch(_) { return String(s||''); }
+  }
   function updateCartBadge() {
     try {
       const navItem = document.querySelector('.nav-item[data-tab="shop"]');
@@ -90,7 +93,7 @@
       host.innerHTML=''; const list = data?.orders || [];
       if (!list.length) { host.innerHTML = '<div style="padding:12px; color: var(--gray);">Заказов нет.</div>'; return; }
       const table = document.createElement('table'); table.className='league-table';
-      const thead = document.createElement('thead'); thead.innerHTML = '<tr><th>№</th><th>Сумма</th><th>Создан</th><th>Статус</th></tr>';
+      const thead = document.createElement('thead'); thead.innerHTML = '<tr><th>№</th><th>Сумма</th><th>Создан</th><th>Статус</th><th>Товары</th></tr>';
       const tbody = document.createElement('tbody');
       list.forEach((o, i) => {
         const tr = document.createElement('tr');
@@ -99,7 +102,14 @@
         try { created = new Date(created).toLocaleDateString('ru-RU'); } catch(_) {}
   const stMap = { new: 'новый', accepted: 'принят', done: 'завершен', cancelled: 'отменен' };
   const st = stMap[(o.status||'').toLowerCase()] || (o.status||'');
-  tr.innerHTML = `<td>${i+1}</td><td>${sum.toLocaleString()}</td><td>${created}</td><td>${st}</td>`;
+        // Строка товаров: берём items_preview или собираем из items [{name, qty}]
+        let itemsStr = '';
+        if (o.items_preview) {
+          itemsStr = String(o.items_preview);
+        } else if (Array.isArray(o.items)) {
+          itemsStr = o.items.map(it => `${it.name||'Товар'}×${it.qty||1}`).join(', ');
+        }
+        tr.innerHTML = `<td>${i+1}</td><td>${sum.toLocaleString()}</td><td>${created}</td><td>${st}</td><td>${escapeHtml(itemsStr)}</td>`;
         tbody.appendChild(tr);
       });
       table.append(thead, tbody); host.appendChild(table);
