@@ -3917,6 +3917,26 @@ def _build_league_payload_from_db():
                             continue
                         upd(hname, h, a)
                         upd(aname, a, h)
+                    # Инициализация команд из snapshot расписания (если нет/мало результатов — добавим всех участников с нулевой статистикой)
+                    try:
+                        if SessionLocal is not None:
+                            dbsched = get_db()
+                            try:
+                                snap = _snapshot_get(dbsched, 'schedule')
+                                payload = snap and snap.get('payload') or {}
+                                tours = payload.get('tours') or []
+                                for t in tours:
+                                    for mt in (t.get('matches') or []):
+                                        hn = (mt.get('home') or '').strip()
+                                        an = (mt.get('away') or '').strip()
+                                        if hn:
+                                            _ = agg[hn]  # создаст нули, если не было
+                                        if an:
+                                            _ = agg[an]
+                            finally:
+                                dbsched.close()
+                    except Exception:
+                        pass
                     # Список активных команд: если активный турнир есть — возьмём все команды, участвовавшие в матчах
                     teams = list(agg.keys())
                     # Сортировка: PTS desc, GD desc, GF desc, Name asc
@@ -3930,7 +3950,6 @@ def _build_league_payload_from_db():
                     for i, name in enumerate(teams[:9], start=1):
                         a = agg[name]; gd = a['GF']-a['GA']
                         values.append([str(i), name, str(a['P']), str(a['W']), str(a['D']), str(a['L']), str(gd), str(a['PTS'])])
-                    try:
                     while len(values) < 10:
                         values.append(['']*8)
                     return {'range':'A1:H10','updated_at': datetime.now(timezone.utc).isoformat(),'values': values[:10]}
@@ -3965,6 +3984,26 @@ def _build_league_payload_from_db():
                             upd(aname, sa, sh)
                     except Exception:
                         continue
+                # Инициализация команд из snapshot расписания (если нет/мало результатов — добавим всех участников с нулевой статистикой)
+                try:
+                    if SessionLocal is not None:
+                        dbsched = get_db()
+                        try:
+                            snap_s = _snapshot_get(dbsched, 'schedule')
+                            payload_s = snap_s and snap_s.get('payload') or {}
+                            tours_s = payload_s.get('tours') or []
+                            for t in tours_s:
+                                for mt in (t.get('matches') or []):
+                                    hn = (mt.get('home') or '').strip()
+                                    an = (mt.get('away') or '').strip()
+                                    if hn:
+                                        _ = agg[hn]
+                                    if an:
+                                        _ = agg[an]
+                        finally:
+                            dbsched.close()
+                except Exception:
+                    pass
                 teams = list(agg.keys())
                 def sort_key(name):
                     a = agg[name]; gd = a['GF']-a['GA']
@@ -3982,31 +4021,7 @@ def _build_league_payload_from_db():
                 dbs.close()
     except Exception:
         pass
-
-                                    # Дополнительно инициализируем список команд из snapshot расписания,
-                                    # чтобы при отсутствии завершённых матчей были показаны все участники сезона с нулями
-                                    try:
-                                        if SessionLocal is not None:
-                                            dbsched = get_db()
-                                            try:
-                                                snap = _snapshot_get(dbsched, 'schedule')
-                                                payload = snap and snap.get('payload') or {}
-                                                tours = payload.get('tours') or []
-                                                for t in tours:
-                                                    for mt in (t.get('matches') or []):
-                                                        hn = (mt.get('home') or '').strip()
-                                                        an = (mt.get('away') or '').strip()
-                                                        if hn:
-                                                            _ = agg[hn]  # создаст нули, если не было
-                                                        if an:
-                                                            _ = agg[an]
-                                            finally:
-                                                dbsched.close()
-                                    except Exception:
-                                        pass
-
     # 3) Fallback к старой реляционной таблице (как было)
-                                    teams = list(agg.keys())
     if SessionLocal is not None and 'LeagueTableRow' in globals():
         db = get_db()
         try:
@@ -4735,8 +4750,8 @@ def _bg_sync_once_legacy():
                         sched_map[key] = dt
                 open_bets = db.query(Bet).filter(Bet.status=='open').all()
                 updates = 0
-                for m in res:
-                    new_dt = sched_map.get((b.home, b.away))
+                for b in open_bets:
+                    new_dt = sched_map.get(((b.home or ''), (b.away or '')))
                     if new_dt is None:
                         continue
                     if (b.match_datetime or None) != new_dt:
@@ -4745,28 +4760,7 @@ def _bg_sync_once_legacy():
                         updates += 1
                 if updates:
                     db.commit()
-
-                # Инициализация команд из snapshot расписания (если нет/мало результатов — добавим всех участников с нулевой статистикой)
-                try:
-                    if SessionLocal is not None:
-                        dbsched = get_db()
-                        try:
-                            snap_s = _snapshot_get(dbsched, 'schedule')
-                            payload_s = snap_s and snap_s.get('payload') or {}
-                            tours_s = payload_s.get('tours') or []
-                            for t in tours_s:
-                                for mt in (t.get('matches') or []):
-                                    hn = (mt.get('home') or '').strip()
-                                    an = (mt.get('away') or '').strip()
-                                    if hn:
-                                        _ = agg[hn]
-                                    if an:
-                                        _ = agg[an]
-                        finally:
-                            dbsched.close()
-                except Exception:
-                    pass
-                    app.logger.info(f"BG sync: updated match_datetime for {updates} open bets")
+                app.logger.info(f"BG sync: updated match_datetime for {updates} open bets")
             except Exception as _e:
                 app.logger.warning(f"BG bet sync failed: {_e}")
         except Exception as e:
