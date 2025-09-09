@@ -1664,25 +1664,30 @@ def api_admin_order_set_status(order_id: int):
     При переводе в 'cancelled' делаем возврат кредитов, если ранее не был отменен.
     """
     try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            manual_log(
-                action="order_status_change",
-                description=f"Смена статуса заказа {order_id} - неверные данные авторизации",
-                result_status='error',
-                affected_data={'order_id': order_id, 'error': 'Invalid auth data'}
-            )
-            return jsonify({'error': 'Unauthorized'}), 401
-        user_id = str(parsed['user'].get('id'))
+        # Разрешаем как по Telegram initData, так и по admin cookie (fallback).
         admin_id = os.environ.get('ADMIN_USER_ID', '')
-        if not admin_id or user_id != admin_id:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        user_id = str(parsed['user'].get('id')) if parsed and parsed.get('user') else ''
+        if not admin_id:
             manual_log(
                 action="order_status_change",
-                description=f"Смена статуса заказа {order_id} - доступ запрещен для пользователя {user_id}",
+                description=f"Смена статуса заказа {order_id} - админ не сконфигурирован",
                 result_status='error',
-                affected_data={'order_id': order_id, 'user_id': user_id, 'admin_required': True}
+                affected_data={'order_id': order_id, 'error': 'Admin not configured'}
             )
-            return jsonify({'error': 'forbidden'}), 403
+            return jsonify({'error': 'Admin not configured'}), 500
+        if user_id != admin_id:
+            # Если initData отсутствует/чужой — попробуем cookie.
+            if not _admin_cookie_or_telegram_ok():
+                manual_log(
+                    action="order_status_change",
+                    description=f"Смена статуса заказа {order_id} - доступ запрещен",
+                    result_status='error',
+                    affected_data={'order_id': order_id, 'user_id': user_id or 'unknown', 'admin_required': True}
+                )
+                return jsonify({'error': 'forbidden'}), 403
+            # Доверяем cookie и используем admin_id как инициатора
+            user_id = admin_id
         st = (request.form.get('status') or '').strip().lower()
         if st not in ('new','accepted','done','cancelled'):
             manual_log(
@@ -1792,25 +1797,28 @@ def api_admin_order_set_status(order_id: int):
 def api_admin_order_delete(order_id: int):
     """Админ: удалить заказ целиком вместе с позициями. Поля: initData."""
     try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            manual_log(
-                action="order_delete",
-                description=f"Удаление заказа {order_id} - неверные данные авторизации",
-                result_status='error',
-                affected_data={'order_id': order_id, 'error': 'Invalid auth data'}
-            )
-            return jsonify({'error': 'Unauthorized'}), 401
-        user_id = str(parsed['user'].get('id'))
+        # Разрешаем как по Telegram initData, так и по admin cookie (fallback).
         admin_id = os.environ.get('ADMIN_USER_ID', '')
-        if not admin_id or user_id != admin_id:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        user_id = str(parsed['user'].get('id')) if parsed and parsed.get('user') else ''
+        if not admin_id:
             manual_log(
                 action="order_delete",
-                description=f"Удаление заказа {order_id} - доступ запрещен для пользователя {user_id}",
+                description=f"Удаление заказа {order_id} - админ не сконфигурирован",
                 result_status='error',
-                affected_data={'order_id': order_id, 'user_id': user_id, 'admin_required': True}
+                affected_data={'order_id': order_id, 'error': 'Admin not configured'}
             )
-            return jsonify({'error': 'forbidden'}), 403
+            return jsonify({'error': 'Admin not configured'}), 500
+        if user_id != admin_id:
+            if not _admin_cookie_or_telegram_ok():
+                manual_log(
+                    action="order_delete",
+                    description=f"Удаление заказа {order_id} - доступ запрещен",
+                    result_status='error',
+                    affected_data={'order_id': order_id, 'user_id': user_id or 'unknown', 'admin_required': True}
+                )
+                return jsonify({'error': 'forbidden'}), 403
+            user_id = admin_id
         if SessionLocal is None:
             manual_log(
                 action="order_delete",

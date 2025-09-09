@@ -22,3 +22,6 @@ cryptography==41.0.7  # Enhanced security
 bleach==6.1.0  # HTML sanitization
 flask-limiter==3.5.0  # Rate limiting
 gunicorn==21.2.0  # Production WSGI server (sync worker for now)
+
+# Testing
+pytest==8.3.2
