@@ -8583,8 +8583,30 @@ def api_admin_google_import_schedule():
             db.close()
         # Инвалидируем кэши и уведомим клиентов
         try:
-            if cache_manager: cache_manager.invalidate('schedule')
-            if websocket_manager: websocket_manager.notify_data_change('schedule', payload)
+            if cache_manager:
+                cache_manager.invalidate('schedule')
+                # Дополнительно: связанные снапшоты/вьюхи могут зависеть от расписания
+                try:
+                    cache_manager.invalidate('league_table')
+                    cache_manager.invalidate('results')
+                    cache_manager.invalidate('stats_table')
+                except Exception:
+                    pass
+            if websocket_manager:
+                # Обновление разделов, зависящих от расписания
+                try:
+                    websocket_manager.notify_data_change('schedule', payload)
+                except Exception:
+                    pass
+                try:
+                    # Топиковые уведомления для клиентских подписок (если есть)
+                    ws = websocket_manager
+                    ws.emit_to_topic_batched('global', 'topic_update', {'entity': 'schedule', 'updated_at': payload.get('updated_at')}, priority=0)
+                    ws.emit_to_topic_batched('global', 'topic_update', {'entity': 'league_table', 'reason': 'schedule_import'}, priority=0)
+                    ws.emit_to_topic_batched('global', 'topic_update', {'entity': 'results', 'reason': 'schedule_import'}, priority=0)
+                    ws.emit_to_topic_batched('global', 'topic_update', {'entity': 'stats_table', 'reason': 'schedule_import'}, priority=0)
+                except Exception:
+                    pass
         except Exception:
             pass
         
@@ -10760,6 +10782,13 @@ def api_admin_full_reset():
             summary['db_deleted']['user_limits'] = _safe_delete(db.query(UserLimits))
             summary['db_deleted']['snapshots'] = _safe_delete(db.query(Snapshot))
 
+            # Очистка агрегированной таблицы игроков, если присутствует (источник для /api/scorers)
+            try:
+                if 'TeamPlayerStats' in globals():
+                    summary['db_deleted']['team_player_stats'] = _safe_delete(db.query(TeamPlayerStats))
+            except Exception:
+                pass
+
             db.commit()
         finally:
             try:
@@ -10783,6 +10812,13 @@ def api_admin_full_reset():
                 LEADER_PRIZES_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
             except Exception:
                 pass
+
+            # Кэш бомбардиров
+            try:
+                global SCORERS_CACHE
+                SCORERS_CACHE = {'ts': 0, 'items': []}
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -10798,8 +10834,36 @@ def api_admin_full_reset():
             if cm is not None:
                 try:
                     summary['caches']['memory'] = cm.invalidate_pattern('cache:')
+                    # Явно инвалидируем ключи, которые чаще всего смотрятся в UI
+                    try:
+                        cm.invalidate('schedule')
+                        cm.invalidate('league_table')
+                        cm.invalidate('stats_table')
+                    except Exception:
+                        pass
                 except Exception:
                     pass
+        except Exception:
+            pass
+
+        # Очистка продвинутых таблиц (расширенная схема): PlayerStatistics / MatchEvent — best-effort
+        try:
+            from database.database_models import db_manager as adv_db, PlayerStatistics as AdvPlayerStatistics, MatchEvent as AdvMatchEvent
+            with adv_db.get_session() as adv_sess:
+                deleted = 0
+                try:
+                    deleted += int(adv_sess.query(AdvPlayerStatistics).delete(synchronize_session=False) or 0)
+                except Exception:
+                    pass
+                try:
+                    deleted += int(adv_sess.query(AdvMatchEvent).delete(synchronize_session=False) or 0)
+                except Exception:
+                    pass
+                try:
+                    adv_sess.commit()
+                except Exception:
+                    pass
+                summary['db_deleted']['advanced_player_stats_and_events'] = deleted
         except Exception:
             pass
 
@@ -12092,9 +12156,9 @@ def api_scorers():
         global SCORERS_CACHE
         limit_param = request.args.get('limit')
         try:
-            limit = int(limit_param) if limit_param else None
+            limit = int(limit_param) if (limit_param is not None and str(limit_param).strip()!='') else 10
         except Exception:
-            limit = None
+            limit = 10
         max_age = 600  # 10 минут
         age = time.time() - (SCORERS_CACHE.get('ts') or 0)
         if age > max_age:
