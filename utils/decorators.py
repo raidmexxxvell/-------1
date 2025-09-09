@@ -95,7 +95,28 @@ def require_admin():
         @functools.wraps(f)
         def decorated_function(*args, **kwargs):
             admin_id_env = os.environ.get('ADMIN_USER_ID', '')
-            # 1. Telegram (g.user уже установлен require_telegram_auth)
+            # 1. Telegram: если g.user не установлен, пытаемся провалидировать initData прямо здесь
+            if not getattr(g, 'user', None):
+                try:
+                    init_data = None
+                    if request.method in ('POST','PUT','PATCH'):
+                        init_data = request.form.get('initData') or request.form.get('init_data')
+                    if init_data is None and request.is_json:
+                        js = request.get_json(silent=True) or {}
+                        init_data = js.get('initData') or js.get('init_data')
+                    if init_data is None:
+                        init_data = request.args.get('initData') or request.args.get('init_data')
+                    if init_data is None:
+                        init_data = request.headers.get('X-Telegram-Init-Data')
+                    if init_data:
+                        bot_token = os.environ.get('BOT_TOKEN', '')
+                        if bot_token:
+                            ok, auth_data = telegram_security.verify_init_data(init_data, bot_token, 86400)
+                            if ok and auth_data and auth_data.get('user'):
+                                g.user = auth_data['user']
+                                g.auth_data = auth_data
+                except Exception:
+                    pass
             if hasattr(g, 'user') and g.user:
                 user_id = str(g.user.get('id', ''))
                 if admin_id_env and user_id == admin_id_env:
