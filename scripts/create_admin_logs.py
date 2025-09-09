@@ -7,10 +7,14 @@
 import os
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Добавляем корневую папку проекта в PYTHONPATH
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+# Загружаем переменные окружения
+load_dotenv(project_root / '.env.test')
 
 from database.database_models import Base, db_manager, AdminLog
 from sqlalchemy import text

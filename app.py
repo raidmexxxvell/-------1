@@ -11,6 +11,12 @@ from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, g, make_response, current_app
 import flask
+# Load .env as early as possible to align app/test env with production-like variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # loads .env if present
+except Exception:
+    pass
 
 # Импорты для системы безопасности и мониторинга (Фаза 3)
 try:
@@ -7412,6 +7418,13 @@ def _get_match_result(home: str, away: str):
             for m in results:
                 if m.get('home') == home and m.get('away') == away:
                     return _winner_from_scores(m.get('score_home',''), m.get('score_away',''))
+            # 2) Fallback: прямое чтение из MatchScore, если снапшот ещё не обновлён
+            try:
+                row = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
+                if row and (row.score_home is not None) and (row.score_away is not None):
+                    return _winner_from_scores(row.score_home, row.score_away)
+            except Exception:
+                pass
         finally:
             db.close()
     return None
@@ -7446,6 +7459,22 @@ def _get_match_total_goals(home: str, away: str):
                         app.logger.info(f"_get_match_total_goals: Found {home} vs {away} in results snapshot: {h}+{a}={total}")
                     except: pass
                     return total
+            # 2) Fallback: если в снапшоте нет записи — попробуем MatchScore
+            try:
+                row = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
+                if row and (row.score_home is not None) and (row.score_away is not None):
+                    try:
+                        h = int(row.score_home); a = int(row.score_away)
+                    except Exception:
+                        h = None; a = None
+                    if h is not None and a is not None:
+                        total = h + a
+                        try:
+                            app.logger.info(f"_get_match_total_goals: Fallback from MatchScore for {home} vs {away}: {h}+{a}={total}")
+                        except: pass
+                        return total
+            except Exception:
+                pass
         finally:
             db.close()
     # Логируем отсутствие матча один раз на пару команд, чтобы не шуметь в логах
