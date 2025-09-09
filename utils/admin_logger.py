@@ -18,8 +18,8 @@ class AdminActionLogger:
     def __init__(self):
         """Инициализация логгера с использованием глобального db_manager"""
         self.db_manager = db_manager
-    # Флаг для мягкого отключения логирования, если таблицы нет
-    self._disabled = False
+        # Флаг для мягкого отключения логирования, если таблицы нет
+        self._disabled = False
     
     def log_action(self, admin_id=None, action=None, description=None, endpoint=None, 
                   request_data=None, result_status='success', result_message=None,

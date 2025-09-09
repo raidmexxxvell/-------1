@@ -206,8 +206,14 @@ class DatabaseManager:
         if self._initialized:
             return
             
+        # Если URL не был передан при создании (например, переменная окружения была установлена позже),
+        # пробуем прочитать его из окружения прямо сейчас.
         if not self.database_url:
-            raise ValueError("DATABASE_URL not configured")
+            env_url = os.getenv('DATABASE_URL')
+            if env_url:
+                self.database_url = env_url
+            else:
+                raise ValueError("DATABASE_URL not configured")
 
         # Нормализация URL: postgres:// -> postgresql+psycopg:// и добавление драйвера при отсутствии
         url = self.database_url.strip()
