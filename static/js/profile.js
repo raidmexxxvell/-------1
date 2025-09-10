@@ -511,6 +511,8 @@
             card.appendChild(center);
             // Если матч идёт — показываем счёт и обновляем
             try {
+                const stateKey = (()=>{ try { return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${String(m.date||m.datetime||'').slice(0,10)}`; } catch(_) { return `${m.home||''}__${m.away||''}`; } })();
+                try { const prev = window.MatchState?.get(stateKey); if (prev && prev.score) scoreEl.textContent = prev.score; } catch(_) {}
                 const isLive = (window.MatchUtils ? window.MatchUtils.isLiveNow(m) : false);
                 if (isLive) {
                     scoreEl.textContent = '0 : 0';
@@ -518,63 +520,19 @@
                         try {
                             const r = await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`);
                             const d = await r.json();
-                            if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') { scoreEl.textContent = `${Number(d.score_home)} : ${Number(d.score_away)}`; }
+                            if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') { const txt = `${Number(d.score_home)} : ${Number(d.score_away)}`; if (scoreEl.textContent !== txt) scoreEl.textContent = txt; try { window.MatchState?.set(stateKey, { score: txt }); } catch(_) {} }
                         } catch(_) {}
                     };
                     fetchScore();
                 }
             } catch(_) {}
-            // Горизонтальная полоса голосования «П1 • X • П2» (показываем только если на матч есть ставки)
-            const wrap = document.createElement('div'); wrap.className = 'vote-inline';
-            const title = document.createElement('div'); title.className = 'vote-title'; title.textContent = 'Голосование';
-            const bar = document.createElement('div'); bar.className = 'vote-strip';
-            const segH = document.createElement('div'); segH.className = 'seg seg-h';
-            const segD = document.createElement('div'); segD.className = 'seg seg-d';
-            const segA = document.createElement('div'); segA.className = 'seg seg-a';
-            bar.append(segH, segD, segA);
-            const legend = document.createElement('div'); legend.className = 'vote-legend';
-            const btns = document.createElement('div'); btns.className = 'vote-inline-btns';
-            const confirm = document.createElement('div'); confirm.className = 'vote-confirm'; confirm.style.fontSize='12px'; confirm.style.color='var(--success)';
-            const voteKey = (() => { try { const raw=m.date?String(m.date):(m.datetime?String(m.datetime):''); const d=raw?raw.slice(0,10):''; return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${d}`; } catch(_) { return `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__`; } })();
-            const mkBtn = (code, text) => {
-                const b = document.createElement('button');
-                b.className = 'details-btn';
-                b.textContent = text;
-        b.addEventListener('click', async (e) => {
-                    try { e.stopPropagation(); } catch(_) {}
-                    try {
-                        const fd = new FormData();
-            fd.append('initData', window.Telegram?.WebApp?.initData || '');
-            fd.append('home', m.home || '');
-            fd.append('away', m.away || '');
-            const dkey = (m.date ? String(m.date) : (m.datetime ? String(m.datetime) : '')).slice(0,10);
-            fd.append('date', dkey);
-                        fd.append('choice', code);
-                        const r = await fetch('/api/vote/match', { method: 'POST', body: fd });
-                        if (!r.ok) throw 0;
-                        btns.querySelectorAll('button').forEach(x => x.disabled = true);
-                        confirm.textContent = 'Ваш голос учтён';
-                        try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
-                        btns.style.display = 'none';
-                        await loadAgg(true);
-                    } catch (_) {}
-                });
-                return b;
-            };
-            btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
-            legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
-            wrap.append(title, bar, legend, btns, confirm);
-            // Покрасим полосы под цвета команд + серый для ничьей (через background, чтобы перекрыть CSS-градиенты)
-            try {
-                segH.style.background = getTeamColor(m.home || '');
-                segA.style.background = getTeamColor(m.away || '');
-                segD.style.background = '#8e8e93';
-            } catch(_) {}
+            // Горизонтальная полоса голосования — через унифицированный helper
+            const wrap = window.VoteInline?.create?.({ home: m.home, away: m.away, date: m.date || m.datetime, getTeamColor });
             // Показываем блок только если матч в ставочных турах
             const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
             const mkKey = (obj) => { try { const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=obj?.date?String(obj.date):(obj?.datetime?String(obj.datetime):''); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; } };
             const tourMatches = new Set(); try { const tours=toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(mkKey(x)))); } catch(_) {}
-            if (tourMatches.has(mkKey(m))) { card.appendChild(wrap); }
+            if (tourMatches.has(mkKey(m)) && wrap) { card.appendChild(wrap); }
                         // Клика по карточке всегда открывает детали матча
                         try {
                                 card.style.cursor = 'pointer';
@@ -622,21 +580,7 @@
             footer.appendChild(goPred); card.appendChild(footer);
             host.appendChild(card);
 
-            async function loadAgg(withInit){
-                try {
-            const dkey = (m.date ? String(m.date) : (m.datetime ? String(m.datetime) : '')).slice(0,10);
-            const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: dkey });
-            if (withInit) params.append('initData', (window.Telegram?.WebApp?.initData || ''));
-                    const agg = await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json());
-                    const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
-                    const sum = Math.max(1, h+d+a);
-                    const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
-                    segH.style.width = ph+'%'; segD.style.width = pd+'%'; segA.style.width = pa+'%';
-            if (agg && agg.my_choice) { btns.querySelectorAll('button').forEach(x=>x.disabled=true); btns.style.display='none'; confirm.textContent='Ваш голос учтён'; try { localStorage.setItem('voted:'+voteKey,'1'); } catch(_) {} }
-                } catch(_){ segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
-            }
-        try { if (localStorage.getItem('voted:'+voteKey) === '1') { btns.style.display='none'; confirm.textContent='Ваш голос учтён'; } } catch(_) {}
-        loadAgg(true);
+            // Агрегация и восстановление выполняются внутри VoteInline.create
         } catch(_) {}
     }
     // Сделаем доступной глобально для вызова из других модулей (например, после назначения матча недели)

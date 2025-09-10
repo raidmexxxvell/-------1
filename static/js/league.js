@@ -88,6 +88,7 @@
     };
     return { fetchAgg, readCache, keyFrom };
   })();
+  try { window.__VoteAgg = VoteAgg; } catch(_) {}
 
   // In-memory состояние для счётов и голосов (исключает мерцание при повторном показе)
   const MatchState = (() => {
@@ -267,99 +268,10 @@
         const tourMatches = new Set();
         try { const tours=toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(mkKey(x)))); } catch(_) {}
         if (tourMatches.has(mkKey(m))) {
-          const wrap = document.createElement('div'); wrap.className = 'vote-inline';
-      const title = document.createElement('div'); title.className = 'vote-title'; title.textContent = 'Голосование';
-          const bar = document.createElement('div'); bar.className = 'vote-strip';
-          const segH = document.createElement('div'); segH.className = 'seg seg-h';
-          const segD = document.createElement('div'); segD.className = 'seg seg-d';
-          const segA = document.createElement('div'); segA.className = 'seg seg-a';
-          // Цвета сегментов голосования: П1/П2 — цвета команд, X — серый; ставим через background, чтобы перекрыть градиенты CSS
           try {
-            segH.style.background = getTeamColor(m.home || '');
-            segA.style.background = getTeamColor(m.away || '');
-            segD.style.background = '#8e8e93';
+            const voteEl = window.VoteInline?.create?.({ home: m.home, away: m.away, date: m.date || m.datetime, getTeamColor });
+            if (voteEl) card.appendChild(voteEl);
           } catch(_) {}
-          bar.append(segH, segD, segA);
-          const legend = document.createElement('div'); legend.className = 'vote-legend'; legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
-      const btns = document.createElement('div'); btns.className = 'vote-inline-btns';
-      const confirm = document.createElement('div'); confirm.className = 'vote-confirm'; confirm.style.fontSize='12px'; confirm.style.color='var(--success)';
-      const voteKey = VoteAgg.keyFrom(m.home||'', m.away||'', m.date || m.datetime);
-          const mkBtn = (code, text) => {
-            const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = text;
-            b.addEventListener('click', async () => {
-              try {
-                const fd = new FormData();
-                fd.append('initData', window.Telegram?.WebApp?.initData || '');
-                fd.append('home', m.home || '');
-                fd.append('away', m.away || '');
-                const dkey = (m.date ? String(m.date) : (m.datetime ? String(m.datetime) : '')).slice(0,10);
-                fd.append('date', dkey);
-                fd.append('choice', code);
-                const r = await fetch('/api/vote/match', { method: 'POST', body: fd });
-                if (!r.ok) throw 0;
-                btns.querySelectorAll('button').forEach(x => x.disabled = true);
-        confirm.textContent = 'Ваш голос учтён';
-        try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
-        // Сразу скрываем кнопки
-        btns.style.display = 'none';
-                // Мягко обновим агрегаты через очередь, чтобы полоска обновилась
-                setTimeout(() => { VoteAgg.fetchAgg(m.home||'', m.away||'', m.date || m.datetime).then(applyAgg); }, 250);
-              } catch (_) {}
-            });
-            return b;
-          };
-          btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
-      wrap.append(title, bar, legend, btns, confirm);
-          card.appendChild(wrap);
-          const applyAgg = (agg) => {
-            try {
-              const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
-              const sum = Math.max(1, h+d+a);
-              const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
-              // Избегаем ненужных layout изменений (мерцание) — обновляем только если поменялось
-              if (segH.style.width !== ph+'%') segH.style.width = ph+'%';
-              if (segD.style.width !== pd+'%') segD.style.width = pd+'%';
-              if (segA.style.width !== pa+'%') segA.style.width = pa+'%';
-              MatchState.set(voteKey, { votes: { h, d, a, total: h+d+a }, lastAggTs: Date.now() });
-            } catch(_) { segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
-          };
-          // Если локально зафиксировано, спрячем кнопки сразу
-          try { if (localStorage.getItem('voted:'+voteKey) === '1') { btns.style.display='none'; confirm.textContent='Ваш голос учтён'; } } catch(_) {}
-          // Ленивая загрузка агрегатов: берём из кэша или ждём вход в вьюпорт
-          const cached = VoteAgg.readCache(voteKey);
-          if (cached) applyAgg(cached);
-          const doFetch = () => VoteAgg.fetchAgg(m.home||'', m.away||'', m.date || m.datetime).then(applyAgg);
-          // Запоминаем метаданные для фонового опроса
-          wrap.dataset.voteKey = voteKey;
-          wrap.dataset.home = m.home || '';
-          wrap.dataset.away = m.away || '';
-          wrap.dataset.date = (m.date || m.datetime || '').toString().slice(0,10);
-          if ('IntersectionObserver' in window) {
-            const io = new IntersectionObserver((ents) => {
-              ents.forEach(e => { if (e.isIntersecting) { doFetch(); io.unobserve(card); } });
-            }, { root: null, rootMargin: '200px', threshold: 0.01 });
-            io.observe(card);
-          } else {
-            doFetch();
-          }
-          // Оптимистичное обновление при голосе — модифицируем обработчики кнопок
-          btns.querySelectorAll('button').forEach(btn => {
-            btn.addEventListener('click', () => {
-              const code = (btn.textContent||'').includes('П1')?'home':( (btn.textContent||'').includes('П2')?'away':'draw');
-              // Оптимистично увеличим локальные счетчики
-              try {
-                const st = MatchState.get(voteKey) || { votes:{ h:0,d:0,a:0,total:0 } };
-                const v = st.votes || { h:0,d:0,a:0,total:0 };
-                if (code==='home') v.h++; else if (code==='away') v.a++; else v.d++;
-                v.total = (v.h+v.d+v.a);
-                const sum = Math.max(1, v.total);
-                segH.style.width = Math.round(v.h*100/sum)+'%';
-                segD.style.width = Math.round(v.d*100/sum)+'%';
-                segA.style.width = Math.round(v.a*100/sum)+'%';
-                MatchState.set(voteKey, { votes: v, lastAggTs: Date.now() });
-              } catch(_) {}
-            }, { once: true }); // достаточно один раз
-          });
         }
       } catch(_) {}
 
