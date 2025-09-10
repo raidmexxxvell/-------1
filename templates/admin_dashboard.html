@@ -292,9 +292,14 @@
                             <option value="">Все статусы</option>
                             <option value="success">Успешные</option>
                             <option value="error">Ошибки</option>
+                            <option value="metrics">Метрики</option>
                         </select>
                         <button id="admin-logs-refresh" class="action-btn">Обновить</button>
                         <button id="admin-logs-clear-filters" class="action-btn" style="background: #666;">Сбросить фильтры</button>
+                        <button id="admin-metrics-refresh" class="action-btn" style="display:none; background:#2b6cb0;">Обновить метрики</button>
+                        <label id="metrics-autorefresh-wrapper" style="display:none; font-size:12px; background:#1a1a1a; padding:4px 8px; border-radius:6px; align-items:center; gap:4px; cursor:pointer;">
+                            <input type="checkbox" id="metrics-autorefresh" style="margin-right:4px;"> Автообновление
+                        </label>
                     </div>
                     
                     <!-- Контейнер для логов -->

@@ -960,6 +960,27 @@
     const initData = window.Telegram?.WebApp?.initData || '';
     if (initData) params.append('initData', initData);
     
+    // Режим метрик: не запрашиваем /api/admin/logs, а показываем snapshot /health/perf
+    if (statusFilter === 'metrics') {
+      container.innerHTML = '<div class="loading-indicator">Загрузка метрик...</div>';
+      const perfParams = new URLSearchParams();
+      if (initData) perfParams.append('initData', initData);
+      fetch(`/health/perf?${perfParams.toString()}`)
+        .then(r => { if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(data => {
+          renderMetricsSnapshot(container, data);
+        })
+        .catch(err => {
+          console.error('[Admin] Metrics load error', err);
+          container.innerHTML = '<div class="status-text">Ошибка загрузки метрик</div>';
+        });
+      const pag = document.getElementById('logs-pagination');
+      if (pag) pag.style.display = 'none';
+      toggleMetricsControls(true);
+      return;
+    }
+    toggleMetricsControls(false);
+
     fetch(`/api/admin/logs?${params.toString()}`)
     .then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -980,6 +1001,104 @@
       container.innerHTML = '<div class="status-text">Ошибка загрузки логов</div>';
     });
   }
+
+  function renderMetricsSnapshot(container, data) {
+    if (!data || typeof data !== 'object') {
+      container.innerHTML = '<div class="status-text">Нет данных метрик</div>';
+      return;
+    }
+    try {
+      const apiRows = Object.entries(data.api || {}).map(([k,v]) => {
+        return `<tr><td>${escapeHtml(k)}</td><td>${v.count||0}</td><td>${v.p50_ms||0}</td><td>${v.p95_ms||0}</td></tr>`;
+      }).join('');
+      const cache = data.cache || {};
+      const ws = data.ws || {};
+      const etag = data.etag || {};
+      container.innerHTML = `
+        <div class="metrics-block">
+          <h4 style="margin:4px 0 8px;">Uptime: ${data.uptime_sec||0}s</h4>
+          <div style="display:flex; flex-direction:column; gap:16px;">
+            <div>
+              <h5>API (EMA)</h5>
+              <table class="admin-table" style="font-size:12px;">
+                <thead><tr><th>Endpoint</th><th>Count</th><th>p50(ms)</th><th>p95(ms)</th></tr></thead>
+                <tbody>${apiRows || '<tr><td colspan="4" style="text-align:center;">—</td></tr>'}</tbody>
+              </table>
+            </div>
+            <div>
+              <h5>Cache</h5>
+              <div class="status-text">memory_hits=${cache.memory_hits||0}; redis_hits=${cache.redis_hits||0}; misses=${cache.misses||0}; sets=${cache.sets||0}</div>
+            </div>
+            ${renderAccordion('WebSocket', ws)}
+            ${renderAccordion('ETag', etag)}
+          </div>
+        </div>`;
+    } catch (e) {
+      console.error('[Admin] renderMetricsSnapshot error', e);
+      container.innerHTML = '<div class="status-text">Ошибка рендера метрик</div>';
+    }
+  }
+
+  function renderAccordion(title, obj) {
+    const content = escapeHtml(JSON.stringify(obj || {}, null, 2));
+    const id = 'acc_'+title.toLowerCase();
+    return `<div class="metrics-accordion" data-acc="${id}">
+      <button class="accordion-toggle" style="background:#222; color:#fff; padding:6px 10px; border:1px solid #333; border-radius:6px; width:100%; text-align:left; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
+        <span>${title}</span><span class="acc-ind">▼</span>
+      </button>
+      <div class="accordion-content" style="display:none; margin-top:6px;">
+        <pre style="background:#111; padding:8px; border:1px solid #333; border-radius:6px; max-height:220px; overflow:auto;">${content}</pre>
+      </div>
+    </div>`;
+  }
+
+  // Делегирование кликов по аккордеонам
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.metrics-accordion > .accordion-toggle');
+    if (!btn) return;
+    const wrap = btn.parentElement;
+    const cnt = wrap.querySelector('.accordion-content');
+    const ind = btn.querySelector('.acc-ind');
+    if (cnt.style.display === 'none') {
+      cnt.style.display = 'block';
+      if (ind) ind.textContent = '▲';
+    } else {
+      cnt.style.display = 'none';
+      if (ind) ind.textContent = '▼';
+    }
+  });
+
+  // Метрики: управление кнопками и автообновлением
+  let metricsAutoTimer = null;
+  function toggleMetricsControls(on) {
+    const btn = document.getElementById('admin-metrics-refresh');
+    const wrap = document.getElementById('metrics-autorefresh-wrapper');
+    if (!btn || !wrap) return;
+    btn.style.display = on ? 'inline-block' : 'none';
+    wrap.style.display = on ? 'flex' : 'none';
+    if (!on) {
+      if (metricsAutoTimer) { clearInterval(metricsAutoTimer); metricsAutoTimer = null; }
+      const chk = document.getElementById('metrics-autorefresh');
+      if (chk) chk.checked = false;
+    }
+  }
+  // События для кнопок
+  (function initMetricsControls(){
+    const btn = document.getElementById('admin-metrics-refresh');
+    if (btn) btn.addEventListener('click', () => loadAdminLogs());
+    const chk = document.getElementById('metrics-autorefresh');
+    if (chk) chk.addEventListener('change', () => {
+      if (chk.checked) {
+        if (metricsAutoTimer) clearInterval(metricsAutoTimer);
+        metricsAutoTimer = setInterval(() => {
+          const statusFilter = document.getElementById('logs-status-filter')?.value;
+          if (statusFilter === 'metrics') loadAdminLogs();
+        }, 15000); // 15s
+      } else {
+        if (metricsAutoTimer) { clearInterval(metricsAutoTimer); metricsAutoTimer = null; }
+      }
+    });
+  })();
 
   function displayLogs(logs) {
     const container = document.getElementById('admin-logs-display');
