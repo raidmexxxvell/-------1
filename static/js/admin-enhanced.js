@@ -524,24 +524,51 @@
     const originalText = btn.textContent;
     btn.textContent = 'Обновляю...';
     
-    const fd = new FormData();
-    fd.append('initData', window.Telegram?.WebApp?.initData || '');
-    
-    Promise.allSettled([
-      fetch('/api/league-table/refresh', { method: 'POST', body: fd }),
-      fetch('/api/stats-table/refresh', { method: 'POST', body: fd }),
-      fetch('/api/schedule/refresh', { method: 'POST', body: fd }),
-      fetch('/api/results/refresh', { method: 'POST', body: fd }),
-      fetch('/api/betting/tours/refresh', { method: 'POST', body: fd })
-    ])
-    .then(results => {
-      const failed = results.filter(r => r.status === 'rejected').length;
-  if (failed === 0) showToast('Все данные обновлены','success'); else showToast(`Ошибки: ${failed} / ${results.length}`,'error',6000);
-    })
-    .finally(() => {
-      btn.disabled = false;
-      btn.textContent = originalText;
-    });
+    const fd = new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
+
+    // Зона прогресса
+    let progressBox = document.getElementById('refresh-all-progress');
+    if(!progressBox){
+      progressBox = document.createElement('div');
+      progressBox.id='refresh-all-progress';
+      progressBox.style.cssText='margin-top:8px; font-size:12px; background:#111; border:1px solid #333; padding:6px; border-radius:6px; line-height:1.4;';
+      btn.parentElement.appendChild(progressBox);
+    }
+    progressBox.innerHTML='<div>Старт объединённого обновления...</div>';
+
+    // Подписка на WS прогресс
+    try {
+      if(window.subscribeTopic){
+        window.subscribeTopic('admin_refresh', (evt)=>{
+          if(!evt || typeof evt !== 'object') return;
+            if(evt.type==='progress'){
+              const perc = evt.total ? Math.round((evt.index/evt.total)*100) : 0;
+              if(evt.status==='start'){
+                progressBox.innerHTML += `<div>▶ ${evt.index}/${evt.total}: ${evt.step}...</div>`;
+              } else if(evt.status==='done') {
+                progressBox.innerHTML += `<div>✔ ${evt.index}/${evt.total}: ${evt.step} (${evt.duration_ms||0}мс${evt.error? ' — ошибка: '+escapeHtml(evt.error):''})</div>`;
+              }
+              progressBox.scrollTop = progressBox.scrollHeight;
+            } else if(evt.type==='complete') {
+              progressBox.innerHTML += `<div style="margin-top:4px;">Готово за ${evt.total_duration_ms||0}мс</div>`;
+            }
+        });
+      }
+    } catch(e){ console.warn('WS progress subscribe failed', e); }
+
+    fetch('/api/admin/refresh-all', { method:'POST', body: fd })
+      .then(r=>r.json().then(d=>({ok:r.ok,d})))
+      .then(res=>{
+        if(!res.ok || res.d.error){ throw new Error(res.d.error||'Ошибка'); }
+        const partial = res.d.status==='partial';
+        showToast(partial? 'Обновление завершено с ошибками':'Все данные обновлены', partial? 'warning':'success', partial?6000:3000);
+      })
+      .catch(e=>{ showToast('Ошибка объединённого обновления: '+e.message,'error',6000); })
+      .finally(()=>{
+        btn.disabled=false; btn.textContent=originalText;
+        // Отписка
+        try{ if(window.unsubscribeTopic) window.unsubscribeTopic('admin_refresh'); }catch(_){ }
+      });
   }
 
   // Google Sheets sync
@@ -1009,7 +1036,8 @@
     }
     try {
       const apiRows = Object.entries(data.api || {}).map(([k,v]) => {
-        return `<tr><td>${escapeHtml(k)}</td><td>${v.count||0}</td><td>${v.p50_ms||0}</td><td>${v.p95_ms||0}</td></tr>`;
+        const p95 = v.p95_ms||0; const cls = latencyClass(p95);
+        return `<tr class="lt-${cls}"><td>${escapeHtml(k)}</td><td>${v.count||0}</td><td>${v.p50_ms||0}</td><td>${p95}</td></tr>`;
       }).join('');
       const cache = data.cache || {};
       const ws = data.ws || {};
@@ -1024,6 +1052,7 @@
                 <thead><tr><th>Endpoint</th><th>Count</th><th>p50(ms)</th><th>p95(ms)</th></tr></thead>
                 <tbody>${apiRows || '<tr><td colspan="4" style="text-align:center;">—</td></tr>'}</tbody>
               </table>
+              ${metricsLegendHtml()}
             </div>
             <div>
               <h5>Cache</h5>
@@ -1037,6 +1066,21 @@
       console.error('[Admin] renderMetricsSnapshot error', e);
       container.innerHTML = '<div class="status-text">Ошибка рендера метрик</div>';
     }
+  }
+
+  function latencyClass(p95){
+    if(p95 < 250) return 'ok';
+    if(p95 < 600) return 'warn';
+    return 'bad';
+  }
+  function metricsLegendHtml(){
+    return `<div style="margin-top:6px; font-size:11px; line-height:1.4;">
+      <strong>Легенда:</strong>
+      <div><span style="display:inline-block;width:10px;height:10px;background:#0b6623;vertical-align:middle;margin-right:4px;"></span> p95 < 250мс — норма</div>
+      <div><span style="display:inline-block;width:10px;height:10px;background:#b8860b;vertical-align:middle;margin-right:4px;"></span> 250–600мс — обратить внимание</div>
+      <div><span style="display:inline-block;width:10px;height:10px;background:#8B0000;vertical-align:middle;margin-right:4px;"></span> > 600мс — плохо</div>
+      <div style="margin-top:4px;">Цвет строки = состояние p95. Значения p50/p95 — экспоненциальные сглаженные (EMA) оценки.</div>
+    </div>`;
   }
 
   function renderAccordion(title, obj) {

@@ -85,6 +85,7 @@
     - Публикация событий: `optimizations/smart_invalidator.py` → `publish_topic`, Redis канал `app:topic`
     - Клиентский приём патчей: `static/js/realtime-updates.js` → обработчик `data_patch`
     - Фичефлаги WS: чтение в `templates/index.html`, логика pre-probe в `static/js/profile.js`
+    - PROGRESS топик админского массового обновления: `topic='admin_refresh'` — события `progress_update` с payload `{type:'progress'| 'complete', step?, index?, total?, status?, duration_ms?, summary?}` генерируются эндпоинтом `/api/admin/refresh-all`.
 
 - Ставки и коэффициенты
     - Размещение ставки: `app.py` → `/api/betting/place`
@@ -128,6 +129,7 @@
     - Season rollover: `app.py` → `POST /api/admin/season/rollover`
     - Season rollback: `api/admin.py` → `POST /api/admin/season/rollback` (dry/force)
     - Persistent roster: `app.py` → сохранение составов, синхронизация с `team_roster`
+    - Массовое обновление снапшотов: `POST /api/admin/refresh-all` — последовательный запуск `_sync_league_table`, `_sync_stats_table`, `_sync_schedule`, `_sync_results`, `_sync_betting_tours` с WebSocket прогрессом.
     - Публичные составы: `app.py` → `GET /api/match/lineups?match_id=...`
 
 - Кэширование и ETag
@@ -337,6 +339,10 @@ class Tournament(Base):
 - Версии поддерживаются в памяти на сервере (`_ODDS_VERSION`, `_get_odds_version`, `_bump_odds_version` в `app.py`)
 - Метод отправки патчей: `optimizations/websocket_manager.py: notify_patch_debounced` и `emit_to_topic_batched`.
 - Пакетирование частых изменений реализовано через `emit_to_topic_batched` с задержкой ~3.5с.
+ - Прогресс админского обновления (`/api/admin/refresh-all`): сервер шлёт в топик `admin_refresh` события:
+     - `{type:'progress', step:<имя>, index:n, total:m, status:'start'|'done', duration_ms?, error?}`
+     - По завершении: `{type:'complete', summary:[{name,status,duration_ms,error?},...], total_duration_ms}`
+     Клиент (`static/js/admin-enhanced.js`) динамически обновляет блок прогресса и отписывается после завершения.
 
 #### Fallback без WebSockets (free tier Render)
  Прогнозы/ставки (коэффициенты): модуль `static/js/predictions.js` при отключённых WS выполняет ETag‑опрос `/api/betting/tours` каждые ~3.5–4.7 секунды и обновляет только подписи кнопок П1/Х/П2 у видимых карточек матчей (без полного рендера). Пуллинг останавливается при переключении на под‑вкладку «Мои ставки», при скрытии вкладки, а также при уходе со страницы.

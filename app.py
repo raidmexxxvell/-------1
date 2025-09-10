@@ -9519,6 +9519,120 @@ def api_betting_tours_refresh():
         app.logger.error(f"Ошибка принудительного обновления betting-tours: {e}")
         return jsonify({'error': 'Не удалось обновить туры для ставок'}), 500
 
+@app.route('/api/admin/refresh-all', methods=['POST'])
+def api_admin_refresh_all():
+    """Объединённое обновление всех основных снапшотов (таблица лиги, статистика, расписание,
+    результаты, туры ставок). Выполняется последовательно с отправкой прогресса по WebSocket топику
+    'admin_refresh'. Доступно только администратору.
+
+    Формат прогресс-сообщений (WebSocket topic 'admin_refresh'):
+      { "type": "progress", "step": "league_table", "index": 1, "total": 5, "status": "start" }
+      { "type": "progress", "step": "league_table", "index": 1, "total": 5, "status": "done", "duration_ms": 123 }
+      { "type": "complete", "summary": [...], "total_duration_ms": 456 }
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+
+        steps = [
+            ('league_table', _sync_league_table, 'sync_league_table'),
+            ('stats_table', _sync_stats_table, 'sync_stats_table'),
+            ('schedule', _sync_schedule, 'sync_schedule'),
+            ('results', _sync_results, 'sync_results'),
+            ('betting_tours', _sync_betting_tours, 'sync_betting_tours'),
+        ]
+
+        # Попытаемся импортировать модуль метрик локально (не полагаемся на глобальную переменную)
+        try:
+            from optimizations import metrics as _metrics_mod
+        except Exception:
+            _metrics_mod = None  # type: ignore
+
+        invalidator_local = globals().get('invalidator')
+
+        def _ws_push(payload: dict, priority: int = 2):
+            try:
+                if invalidator_local is not None:
+                    invalidator_local.publish_topic('admin_refresh', 'progress_update', payload, priority=priority)
+            except Exception:
+                pass
+
+        started_at = datetime.now(timezone.utc).isoformat()
+        t_all0 = time.time()
+        summary = []
+        total = len(steps)
+        any_errors = False
+
+        for idx, (name, fn, metric_key) in enumerate(steps, start=1):
+            _ws_push({'type': 'progress', 'step': name, 'index': idx, 'total': total, 'status': 'start'})
+            t0 = time.time()
+            status = 'ok'
+            err_txt = None
+            try:
+                fn()
+            except Exception as e:
+                status = 'error'
+                any_errors = True
+                err_txt = str(e)
+                try:
+                    app.logger.warning(f"refresh-all step '{name}' failed: {e}")
+                except Exception:
+                    pass
+            duration_ms = int((time.time() - t0) * 1000)
+            # Запишем метрику p50/p95 (используем api_observe как унифицированный канал)
+            try:
+                if _metrics_mod:
+                    _metrics_mod.api_observe(metric_key, float(duration_ms))
+            except Exception:
+                pass
+            step_info = {
+                'name': name,
+                'status': status,
+                'duration_ms': duration_ms
+            }
+            if err_txt:
+                step_info['error'] = err_txt
+            summary.append(step_info)
+            _ws_push({'type': 'progress', 'step': name, 'index': idx, 'total': total, 'status': 'done', 'duration_ms': duration_ms, 'error': err_txt})
+
+        total_duration_ms = int((time.time() - t_all0) * 1000)
+        finished_at = datetime.now(timezone.utc).isoformat()
+        _ws_push({'type': 'complete', 'summary': summary, 'total_duration_ms': total_duration_ms, 'started_at': started_at, 'finished_at': finished_at}, priority=1)
+
+        # Лог админского действия
+        try:
+            manual_log(
+                action="refresh_all",
+                description="Объединённое обновление снапшотов",
+                result_status='success' if not any_errors else 'warning',
+                affected_data={
+                    'steps': summary,
+                    'total_duration_ms': total_duration_ms,
+                    'errors': any_errors
+                }
+            )
+        except Exception:
+            pass
+
+        return jsonify({
+            'status': 'ok' if not any_errors else 'partial',
+            'steps': summary,
+            'total_duration_ms': total_duration_ms,
+            'started_at': started_at,
+            'finished_at': finished_at
+        })
+    except Exception as e:
+        try:
+            app.logger.error(f"refresh-all error: {e}")
+        except Exception:
+            pass
+        return jsonify({'error': 'Не удалось выполнить объединённое обновление'}), 500
+
 @app.route('/api/streams/confirm', methods=['POST'])
 def api_streams_confirm():
     """Админ подтверждает трансляцию для матча.
