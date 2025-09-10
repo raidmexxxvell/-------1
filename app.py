@@ -1353,6 +1353,80 @@ def _maybe_sync_event_to_adv_schema(home: str, away: str, player_name: str, even
         except Exception:
             pass
 
+def _apply_lineups_to_adv_stats(home: str, away: str):
+    """Инкрементирует matches_played в расширенной схеме для всех игроков из состава матча.
+    Идемпотентно: один матч → один инкремент per player (через MatchStatsAggregationState.lineup_counted).
+    Fallback: если расширенная схема или турнир не настроены — тихо выходим.
+    """
+    if not home or not away:
+        return
+    if not adv_db_manager or not getattr(adv_db_manager, 'SessionLocal', None):
+        return
+    env_tour = os.environ.get('DEFAULT_TOURNAMENT_ID')
+    try:
+        tournament_id = int(env_tour) if env_tour else None
+    except Exception:
+        tournament_id = None
+    if tournament_id is None:
+        return
+    if SessionLocal is None:
+        return
+    db = get_db()
+    try:
+        state = db.query(MatchStatsAggregationState).filter(MatchStatsAggregationState.home==home, MatchStatsAggregationState.away==away).first()
+        if not state:
+            state = MatchStatsAggregationState(home=home, away=away, lineup_counted=0, events_applied=0)
+            db.add(state)
+            db.flush()
+        if state.lineup_counted == 1:
+            return
+        lineup_rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
+        if not lineup_rows:
+            return
+        uniq = []
+        seen = set()
+        for r in lineup_rows:
+            nm = (r.player or '').strip()
+            if not nm:
+                continue
+            key = nm.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            uniq.append(nm)
+        if not uniq:
+            return
+        adv_sess = adv_db_manager.get_session()
+        try:
+            # Сначала локальная агрегированная TeamPlayerStats (для fallback и кэшей)
+            for r in lineup_rows:
+                team_name = home if r.team == 'home' else away
+                tps = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_name, TeamPlayerStats.player==r.player).first()
+                if not tps:
+                    tps = TeamPlayerStats(team=team_name, player=r.player, games=1)
+                    db.add(tps)
+                else:
+                    tps.games = (tps.games or 0) + 1
+                tps.updated_at = datetime.now(timezone.utc)
+            for full_name in uniq:
+                player_obj = _ensure_adv_player(adv_sess, full_name)
+                stats = adv_sess.query(AdvPlayerStatistics).filter(AdvPlayerStatistics.player_id==player_obj.id, AdvPlayerStatistics.tournament_id==tournament_id).first()
+                if not stats:
+                    stats = AdvPlayerStatistics(player_id=player_obj.id, tournament_id=tournament_id, matches_played=1)
+                    adv_sess.add(stats)
+                else:
+                    stats.matches_played = (stats.matches_played or 0) + 1
+            adv_sess.commit()
+            state.lineup_counted = 1
+            state.updated_at = datetime.now(timezone.utc)
+            db.commit()
+        finally:
+            try: adv_sess.close()
+            except Exception: pass
+    finally:
+        try: db.close()
+        except Exception: pass
+
 # Итоговая статистика матча (основные метрики)
 class MatchStats(Base):
     __tablename__ = 'match_stats'
@@ -2252,86 +2326,90 @@ def api_admin_save_lineups(match_id: str):
 
 @app.route('/api/match/lineups', methods=['GET'])
 def api_public_match_lineups():
-    """Публичный эндпоинт получения составов матча из БД (без Google Sheets).
-    Параметры: home, away (строки).
-    Формат ответа:
-        {
-          "rosters": { "home": ["Игрок"...], "away": ["Игрок"...] },
-          "source": "db",
-          "updated_at": "ISO"
-        }
-    Если составов нет, возвращает пустые списки.
+    """Таблица бомбардиров (goals+assists).
+    Приоритет: расширенная схема PlayerStatistics -> fallback TeamPlayerStats.
+    Кэш 10 мин. Параметр limit.
     """
+    global SCORERS_CACHE
     try:
-        home = (request.args.get('home') or '').strip()
-        away = (request.args.get('away') or '').strip()
-        if not home or not away:
-            return jsonify({'error': 'home и away обязательны'}), 400
-        rosters = {'home': [], 'away': []}
-        if SessionLocal is not None:
-            db: Session = get_db()
-            try:
-                rows, db = _db_retry_read(
-                    db,
-                    lambda s: s.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).order_by(MatchLineupPlayer.id.asc()).all(),
-                    attempts=2, backoff_base=0.1, label='lineups:public:get'
-                )
-                for r in rows:
-                    # сохраняем порядок вставки и только имя игрока
-                    if r.team in ('home','away'):
-                        name = (r.player or '').strip()
-                        if name:
-                            rosters[r.team].append(name)
-            finally:
-                db.close()
-        return _json_response({'rosters': rosters, 'source': 'db', 'updated_at': datetime.utcnow().isoformat()})
-    except Exception as e:
-        app.logger.error(f"public match lineups error: {e}")
-        return jsonify({'error': 'internal'}), 500
-
-@app.route('/api/shop/my-orders', methods=['POST'])
-def api_shop_my_orders():
-    """Возвращает последние 50 заказов текущего пользователя. Требует initData."""
-    try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            return jsonify({'error': 'Недействительные данные'}), 401
-        if SessionLocal is None:
-            return jsonify({'error': 'БД недоступна'}), 500
-        user_id = int(parsed['user'].get('id'))
-        db: Session = get_db()
+        limit_param = request.args.get('limit')
         try:
-            rows = db.query(ShopOrder).filter(ShopOrder.user_id == user_id).order_by(ShopOrder.created_at.desc()).limit(50).all()
-            out = []
-            for r in rows:
-                out.append({
-                    'id': int(r.id),
-                    'user_id': int(r.user_id),
-                    'total': int(r.total or 0),
-                    'status': r.status or 'new',
-                    'created_at': (r.created_at or datetime.now(timezone.utc)).isoformat()
-                })
-            # ETag/304 для экономии трафика
-            etag = _etag_for_payload({'orders': out})
-            inm = request.headers.get('If-None-Match')
-            if inm and inm == etag:
-                resp = app.response_class(status=304)
-                resp.headers['ETag'] = etag
-                resp.headers['Cache-Control'] = 'private, max-age=60'
-                return resp
-            resp = _json_response({'orders': out, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag})
-            resp.headers['ETag'] = etag
-            resp.headers['Cache-Control'] = 'private, max-age=60'
-            return resp
-        finally:
-            db.close()
+            limit = int(limit_param) if (limit_param is not None and str(limit_param).strip()!='') else 10
+        except Exception:
+            limit = 10
+        max_age = 600
+        age = time.time() - (SCORERS_CACHE.get('ts') or 0)
+        if age > max_age:
+            rebuilt = False
+            if adv_db_manager and getattr(adv_db_manager, 'SessionLocal', None):
+                env_tour = os.environ.get('DEFAULT_TOURNAMENT_ID')
+                try:
+                    tour_id = int(env_tour) if env_tour else None
+                except Exception:
+                    tour_id = None
+                if tour_id is not None:
+                    adv_sess = None
+                    try:
+                        adv_sess = adv_db_manager.get_session()
+                        rows = (adv_sess.query(AdvPlayerStatistics, AdvPlayer)
+                                .join(AdvPlayer, AdvPlayerStatistics.player_id==AdvPlayer.id)
+                                .filter(AdvPlayerStatistics.tournament_id==tour_id,
+                                        (AdvPlayerStatistics.goals_scored + AdvPlayerStatistics.assists) > 0)
+                                .all())
+                        scorers = []
+                        for st, pl in rows:
+                            total = (st.goals_scored or 0) + (st.assists or 0)
+                            full_name = ' '.join([x for x in [pl.first_name, pl.last_name] if x]) or 'Unknown'
+                            scorers.append({
+                                'player': full_name.strip(),
+                                'team': None,
+                                'games': st.matches_played or 0,
+                                'goals': st.goals_scored or 0,
+                                'assists': st.assists or 0,
+                                'yellows': st.yellow_cards or 0,
+                                'reds': st.red_cards or 0,
+                                'total_points': total
+                            })
+                        scorers.sort(key=lambda x: (-x['total_points'], x['games'], -x['goals']))
+                        for i,s in enumerate(scorers, start=1): s['rank'] = i
+                        SCORERS_CACHE = { 'ts': time.time(), 'items': scorers }
+                        rebuilt = True
+                    except Exception as _adv_top_err:
+                        try: app.logger.warning(f"scorers adv rebuild failed: {_adv_top_err}")
+                        except Exception: pass
+                    finally:
+                        if adv_sess:
+                            try: adv_sess.close()
+                            except Exception: pass
+            if not rebuilt and SessionLocal is not None:
+                db = get_db()
+                try:
+                    rows = db.query(TeamPlayerStats).all()
+                    scorers = []
+                    for r in rows:
+                        total = (r.goals or 0) + (r.assists or 0)
+                        scorers.append({
+                            'player': r.player,
+                            'team': r.team,
+                            'games': r.games or 0,
+                            'goals': r.goals or 0,
+                            'assists': r.assists or 0,
+                            'yellows': getattr(r,'yells', None) if getattr(r,'yells', None) is not None else (r.yellows or 0),
+                            'reds': r.reds or 0,
+                            'total_points': total
+                        })
+                    scorers.sort(key=lambda x: (-x['total_points'], x['games'], -x['goals']))
+                    for i,s in enumerate(scorers, start=1): s['rank'] = i
+                    SCORERS_CACHE = { 'ts': time.time(), 'items': scorers }
+                finally:
+                    db.close()
+        items = list(SCORERS_CACHE.get('items') or [])
+        if limit:
+            items = items[:limit]
+        return jsonify({'items': items, 'updated_at': SCORERS_CACHE.get('ts')})
     except Exception as e:
-        app.logger.error(f"Shop my-orders error: {e}")
-        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
-
-@app.route('/api/admin/orders', methods=['POST'])
-def api_admin_orders():
-    """Админ: список заказов (ETag поддерживается). Поля: initData."""
+        app.logger.error(f"Ошибка scorers api: {e}")
+        return jsonify({'error': 'internal'}), 500
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
@@ -5567,6 +5645,19 @@ def api_match_status_set():
                 # После расчёта обновим турнирную таблицу (сразу, без ожидания фонового цикла)
                 try:
                     _sync_league_table()
+                except Exception:
+                    pass
+                # 4) Инкремент matches_played для всех игроков составов (расширенная схема)
+                try:
+                    _apply_lineups_to_adv_stats(home, away)
+                except Exception as _lineup_stat_err:
+                    try: app.logger.warning(f"apply_lineups_stats_failed {home} vs {away}: {_lineup_stat_err}")
+                    except Exception: pass
+                # 5) Инвалидация кэша бомбардиров (обновится при следующем запросе)
+                try:
+                    global SCORERS_CACHE
+                    if isinstance(SCORERS_CACHE, dict):
+                        SCORERS_CACHE['ts'] = 0
                 except Exception:
                     pass
                 # Закрепим изменения, включая автофикс спецрынков
@@ -12334,23 +12425,59 @@ def api_match_settle():
 # ----------- SCORERS (GLOBAL) API -----------
 @app.route('/api/scorers', methods=['GET'])
 def api_scorers():
-    """Таблица бомбардиров по агрегированной статистике (TeamPlayerStats).
-    Параметры: limit? (int)
-    Источник: кэш после settle; если кэш устарел (>10 мин), достраивается on-demand.
-    Сортировка: (гол+пас desc, игры asc, голы desc).
-    """
+    """Таблица бомбардиров (goals+assists) с кэшем и расширенной схемой."""
+    global SCORERS_CACHE
     try:
-        global SCORERS_CACHE
         limit_param = request.args.get('limit')
         try:
-            limit = int(limit_param) if (limit_param is not None and str(limit_param).strip()!='') else 10
+            limit = int(limit_param) if (limit_param is not None and str(limit_param).strip()!='' ) else 10
         except Exception:
             limit = 10
-        max_age = 600  # 10 минут
+        max_age = 600
         age = time.time() - (SCORERS_CACHE.get('ts') or 0)
         if age > max_age:
-            # перестраиваем из БД, если есть
-            if SessionLocal is not None:
+            rebuilt = False
+            if adv_db_manager and getattr(adv_db_manager, 'SessionLocal', None):
+                env_tour = os.environ.get('DEFAULT_TOURNAMENT_ID')
+                try:
+                    tour_id = int(env_tour) if env_tour else None
+                except Exception:
+                    tour_id = None
+                if tour_id is not None:
+                    adv_sess = None
+                    try:
+                        adv_sess = adv_db_manager.get_session()
+                        rows = (adv_sess.query(AdvPlayerStatistics, AdvPlayer)
+                                .join(AdvPlayer, AdvPlayerStatistics.player_id==AdvPlayer.id)
+                                .filter(AdvPlayerStatistics.tournament_id==tour_id,
+                                        (AdvPlayerStatistics.goals_scored + AdvPlayerStatistics.assists) > 0)
+                                .all())
+                        scorers = []
+                        for st, pl in rows:
+                            total = (st.goals_scored or 0) + (st.assists or 0)
+                            full_name = ' '.join([x for x in [pl.first_name, pl.last_name] if x]) or 'Unknown'
+                            scorers.append({
+                                'player': full_name.strip(),
+                                'team': None,
+                                'games': st.matches_played or 0,
+                                'goals': st.goals_scored or 0,
+                                'assists': st.assists or 0,
+                                'yellows': st.yellow_cards or 0,
+                                'reds': st.red_cards or 0,
+                                'total_points': total
+                            })
+                        scorers.sort(key=lambda x: (-x['total_points'], x['games'], -x['goals']))
+                        for i,s in enumerate(scorers, start=1): s['rank'] = i
+                        SCORERS_CACHE = { 'ts': time.time(), 'items': scorers }
+                        rebuilt = True
+                    except Exception as _adv_top_err:
+                        try: app.logger.warning(f"scorers adv rebuild failed: {_adv_top_err}")
+                        except Exception: pass
+                    finally:
+                        if adv_sess:
+                            try: adv_sess.close()
+                            except Exception: pass
+            if not rebuilt and SessionLocal is not None:
                 db = get_db()
                 try:
                     rows = db.query(TeamPlayerStats).all()
@@ -12363,13 +12490,12 @@ def api_scorers():
                             'games': r.games or 0,
                             'goals': r.goals or 0,
                             'assists': r.assists or 0,
-                            'yellows': r.yells if hasattr(r,'yells') else (r.yellows or 0),
+                            'yellows': getattr(r,'yells', None) if getattr(r,'yells', None) is not None else (r.yellows or 0),
                             'reds': r.reds or 0,
                             'total_points': total
                         })
                     scorers.sort(key=lambda x: (-x['total_points'], x['games'], -x['goals']))
-                    for i,s in enumerate(scorers, start=1):
-                        s['rank'] = i
+                    for i,s in enumerate(scorers, start=1): s['rank'] = i
                     SCORERS_CACHE = { 'ts': time.time(), 'items': scorers }
                 finally:
                     db.close()

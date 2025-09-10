@@ -69,12 +69,14 @@
     if (elements.checkinStatus){ elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color='var(--success)'; setTimeout(()=>{ if(elements.checkinStatus){ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; } },2000); }
   }
 
-  function animateStats(xpGain, creditsGain){
+  // Анимируем прирост, опционально принимая снапшот пользователя ДО применённой награды,
+  // чтобы избежать двойного визуального увеличения (fetchUserData после сохранения в БД придёт позже)
+  function animateStats(xpGain, creditsGain, baseUser){
     try {
       const xpElement = document.querySelector('.stat-value[data-stat="xp"]') || document.getElementById('xp');
       const creditsElement = document.querySelector('.stat-value[data-stat="credits"]') || document.getElementById('credits');
       // Получаем текущие значения профиля (для корректного расчёта прогресса уровня)
-      const user = (window.ProfileUser && window.ProfileUser.getLastUser && window.ProfileUser.getLastUser()) || null;
+      const user = baseUser || ((window.ProfileUser && window.ProfileUser.getLastUser && window.ProfileUser.getLastUser()) || null);
       if (window.CounterAnimation && user){
         const baseLevel = Math.max(1, user.level || 1);
         const baseCurXp = Math.max(0, (user.current_xp != null ? user.current_xp : (user.xp || 0)));
@@ -117,33 +119,58 @@
     } catch(e){ console.warn('animateStats fail', e); }
   }
 
-  function showRewardAnimation(xp, credits){
-    if (!elements.checkinStatus) return;
-    if (window.RewardAnimation){
-      window.RewardAnimation.show(document.body, xp, credits).then(()=>{
+  function showRewardAnimation(xp, credits, baseUser){
+    return new Promise(resolve => {
+      if (!elements.checkinStatus){ resolve(); return; }
+      const after = () => {
         if (elements.checkinStatus){ elements.checkinStatus.textContent='Награда получена!'; elements.checkinStatus.style.color='var(--success)'; setTimeout(()=>{ if(elements.checkinStatus){ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; } },3000); }
-        animateStats(xp, credits);
-      });
-    } else {
-      elements.checkinStatus.innerHTML = `<div class="reward-animation">+${xp} XP | +${credits} кредитов</div>`;
-      setTimeout(()=>{ if(elements.checkinStatus) elements.checkinStatus.textContent='Награда получена!'; },2000);
-    }
+        // Анимация чисел из снапшота baseUser -> baseUser + gain
+        animateStats(xp, credits, baseUser);
+        // Резолвим после завершения счётчиков (примерно 1.3с)
+        setTimeout(resolve, 1300);
+      };
+      if (window.RewardAnimation){
+        try { window.RewardAnimation.show(document.body, xp, credits).then(after).catch(after); } catch(_) { after(); }
+      } else {
+        elements.checkinStatus.innerHTML = `<div class="reward-animation">+${xp} XP | +${credits} кредитов</div>`;
+        setTimeout(()=>{ if(elements.checkinStatus) elements.checkinStatus.textContent='Награда получена!'; },2000);
+        // Для упрощения сразу запускаем numeric анимацию
+        animateStats(xp, credits, baseUser);
+        setTimeout(resolve, 1300);
+      }
+    });
   }
 
+  let _checkinPending = false;
   function handleCheckin(){
     if (!elements.checkinBtn) return;
+    // Guard от повторного нажатия пока идёт запрос / анимация
+    if (_checkinPending) return;
+    _checkinPending = true;
+    elements.checkinBtn.setAttribute('data-blocking','1');
     elements.checkinBtn.disabled = true;
     if (elements.checkinStatus) elements.checkinStatus.textContent='Обработка...';
     if (!tg || !tg.initDataUnsafe?.user){ uiError('Невозможно выполнить чекин без Telegram WebApp'); if(elements.checkinBtn) elements.checkinBtn.disabled=false; return; }
     const fd = new FormData(); fd.append('initData', tg.initData || '');
+    // Снимок пользователя ДО начисления (для корректной одноразовой анимации)
+    const baseUser = (window.ProfileUser && window.ProfileUser.getLastUser && window.ProfileUser.getLastUser()) ? { ...window.ProfileUser.getLastUser() } : null;
     fetch('/api/checkin',{ method:'POST', body: fd })
       .then(res=>{ if(res.status===401){ uiError('Ошибка авторизации'); throw new Error('unauth'); } return res.json(); })
-      .then(data=>{ if(!data) return; if(data.status==='already_checked'){ if(elements.checkinStatus) elements.checkinStatus.textContent='✅ Награда получена сегодня'; return; } showRewardAnimation(data.xp, data.credits); return window.ProfileUser.fetchUserData(); })
+      .then(data=>{ if(!data) return; if(data.status==='already_checked'){ if(elements.checkinStatus) elements.checkinStatus.textContent='✅ Награда получена сегодня'; return; }
+        return showRewardAnimation(data.xp, data.credits, baseUser).then(()=> window.ProfileUser.fetchUserData());
+      })
       .then(u=>{ if(u) renderCheckinSection(u); })
-      .catch(err=>{ console.error('checkin err', err); uiError('Ошибка получения награды'); if(elements.checkinBtn) elements.checkinBtn.disabled=false; });
+      .catch(err=>{ console.error('checkin err', err); uiError('Ошибка получения награды'); if(elements.checkinBtn) elements.checkinBtn.disabled=false; })
+      .finally(()=>{ _checkinPending = false; if(elements.checkinBtn){ elements.checkinBtn.removeAttribute('data-blocking'); if(!elements.checkinBtn.disabled){ /* краткий debounce */ elements.checkinBtn.setAttribute('data-throttle','2000'); } } });
   }
 
-  function attach(){ if(elements.checkinBtn){ elements.checkinBtn.addEventListener('click', handleCheckin); elements.checkinBtn.setAttribute('data-throttle','2000'); } }
+  function attach(){
+    if(elements.checkinBtn){
+      // Устанавливаем throttle и предотвращение двойного клика
+      elements.checkinBtn.setAttribute('data-throttle','2000');
+      elements.checkinBtn.addEventListener('click', handleCheckin);
+    }
+  }
 
   // Событие из ProfileUser
   window.addEventListener('profile:user-loaded', e=>{ try { renderCheckinSection(e.detail); } catch(_) {} });
