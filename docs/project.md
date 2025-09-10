@@ -415,7 +415,7 @@ class Tournament(Base):
 
 ## ⚡ Обновление производительности (2025-09-06)
 
-- Введён быстрый JSON-рендер на сервере (orjson) в универсальном helper `etag_json`, а также точечно в `/api/news` и `/api/stats-table`. Контракты ответов не изменены, fallback на стандартный json сохранён.
+- Введён быстрый JSON-рендер на сервере (orjson) в универсальном helper `etag_json`, а также точечно в `/api/news` и `/api/stats-table`. Контракты ответов не изменены. Теперь orjson включён как обязательная зависимость (requirements), но fallback на стандартный json сохранён для dev/CI деградации.
 - Лёгкие метрики ETag per-endpoint: `etag_json` собирает `requests`, `etag_requests`, `memory_hits`, `builds`, `served_200`, `served_304`, `hit_ratio`. Экспорт: `/health/etag-metrics` (admin-only, `X-METRICS-KEY` или Telegram initData), поддерживает фильтр `?prefix=leader-`.
 - Пример: получить только лидеры — запрос `GET /health/etag-metrics?prefix=leader-` с заголовком `X-METRICS-KEY: $METRICS_SECRET` вернёт `by_key` с полями и `hit_ratio` по каждому ключу (`leader-top-predictors`, `leader-top-rich`, ...).
 - Безопасный cap в лидербордах: `LEADERBOARD_ITEMS_CAP` (env, по умолчанию 100) — применяется к `/api/leaderboard/top-predictors`, `/api/leaderboard/top-rich`, `/api/leaderboard/server-leaders` на всех источниках (Redis snapshot / DB snapshot / in-memory cache / fresh build). Контракты не изменены.
@@ -831,7 +831,7 @@ python app.py  # или gunicorn -w 1 -k geventwebsocket.gunicorn.workers.Gevent
 - Alembic — отмечено (не инициализирован).
 
 ### Оптимизация JSON-ответов (сентябрь 2025)
-- Все тяжёлые публичные и админские эндпоинты, возвращающие большие JSON, переведены на быстрый рендер через _json_response (orjson).
+- Все тяжёлые публичные и админские эндпоинты, возвращающие большие JSON, переведены на быстрый рендер через _json_response (orjson) — библиотека объявлена обязательной; fallback лишь аварийный.
 - Ошибочные и мелкие ответы оставлены на jsonify для совместимости.
 - Исправлены синтаксические ошибки и выравнивание try/except/finally после рефакторинга.
 

@@ -1,7 +1,6 @@
 Flask==2.3.3  # downgraded for better Flask-SocketIO compatibility
 gspread==6.0.0
 google-auth==2.23.4
-python-dotenv==1.0.0
 SQLAlchemy==2.0.36
 flask-compress==1.14
 requests==2.31.0
@@ -23,5 +22,3 @@ bleach==6.1.0  # HTML sanitization
 flask-limiter==3.5.0  # Rate limiting
 gunicorn==21.2.0  # Production WSGI server (sync worker for now)
 
-# Testing
-pytest==8.3.2

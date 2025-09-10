@@ -11,12 +11,6 @@ from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, g, make_response, current_app
 import flask
-# Load .env as early as possible to align app/test env with production-like variables
-try:
-    from dotenv import load_dotenv
-    load_dotenv()  # loads .env if present
-except Exception:
-    pass
 
 # Импорты для системы безопасности и мониторинга (Фаза 3)
 try:
@@ -188,11 +182,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 import threading
 try:
-    import orjson  # faster JSON serializer
+    import orjson  # faster JSON serializer (required in prod)
     _ORJSON_AVAILABLE = True
 except Exception:
+    # Should not happen in production: orjson listed in requirements.
     orjson = None  # type: ignore
     _ORJSON_AVAILABLE = False
+    if not os.environ.get('ORJSON_WARNED'):
+        print('[WARN] orjson not available, falling back to standard json. Install orjson for best performance.')
+        os.environ['ORJSON_WARNED'] = '1'
 
 # Flask app
 app = Flask(__name__, static_folder='static', template_folder='templates')
@@ -3839,6 +3837,39 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
     _etag_metrics_inc(endpoint_key, 'served_200', 1)
     return resp
 
+# ---------------------- Metrics Endpoint (/health/perf) ----------------------
+try:
+    from optimizations import metrics as _perf_metrics
+except Exception:
+    _perf_metrics = None
+
+@app.route('/health/perf', methods=['GET'])
+def health_perf():
+    """Админский эндпоинт: сводные метрики (API latency approx, cache, ws, etag)."""
+    try:
+        admin_id = os.environ.get('ADMIN_USER_ID','')
+        # Авторизация по Telegram initData (GET-параметр или заголовок) либо пропускаем если admin id не задан
+        init_data = request.args.get('initData','') or request.headers.get('X-Telegram-Init-Data','')
+        if admin_id:
+            parsed = parse_and_verify_telegram_init_data(init_data)
+            uid = str(parsed.get('user',{}).get('id')) if parsed and parsed.get('user') else ''
+            if uid != str(admin_id):
+                return jsonify({'error':'forbidden'}), 403
+        ws_manager = current_app.config.get('websocket_manager') if current_app else None
+        ws_metrics = None
+        try:
+            if ws_manager and hasattr(ws_manager,'get_metrics'):
+                ws_metrics = ws_manager.get_metrics()
+        except Exception:
+            ws_metrics = None
+        etag_snapshot = _etag_metrics_snapshot()
+        base = _perf_metrics.snapshot(ws_metrics) if _perf_metrics else {}
+        base['etag'] = etag_snapshot
+        return _json_response(base)
+    except Exception as e:
+        app.logger.error(f"health/perf error: {e}")
+        return jsonify({'error':'server error'}), 500
+
 def _cache_fresh(cache_obj: dict, ttl: int) -> bool:
     return bool(cache_obj.get('data') is not None and (time.time() - (cache_obj.get('ts') or 0) < ttl))
 
@@ -7187,10 +7218,12 @@ def api_league_table():
 def api_schedule():
     """Расписание (до 3 туров) через etag_json: только snapshot (без чтения Sheets), с match_of_week логикой."""
     def _build():
+        _t0 = time.time()
         payload = None
-        # 1) snapshot
+        # 1) snapshot из БД
         if SessionLocal is not None:
-            db: Session = get_db(); snap=None
+            db: Session = get_db()
+            snap = None
             try:
                 snap = _snapshot_get(db, 'schedule')
             finally:
@@ -7198,56 +7231,76 @@ def api_schedule():
             if snap and snap.get('payload'):
                 payload = snap['payload']
                 tours_in_snap = (payload.get('tours') or []) if isinstance(payload, dict) else []
-                total_matches = 0
                 try:
                     total_matches = sum(len(t.get('matches') or []) for t in tours_in_snap)
                 except Exception:
                     total_matches = 0
                 if (not tours_in_snap) or total_matches == 0:
-                    payload = None  # форсируем rebuild
-        # 2) без fallback к Sheets — только пустой payload
+                    payload = None  # форсируем rebuild на пустой payload ниже
+        # 2) fallback: пустой payload (без чтения Sheets)
         if payload is None:
             payload = {'tours': []}
-        # 3) match_of_week
+        # 3) match_of_week логика
         try:
-            manual=None
+            manual = None
             if SessionLocal is not None:
-                db2=get_db();
+                db2 = get_db()
                 try:
-                    fm=_snapshot_get(db2,'feature-match') or {}
-                    manual=(fm.get('payload') or {}).get('match') or None
+                    fm = _snapshot_get(db2, 'feature-match') or {}
+                    manual = (fm.get('payload') or {}).get('match') or None
                 finally:
                     db2.close()
-            use_manual=False
+            use_manual = False
             if manual and isinstance(manual, dict):
-                mh,ma=manual.get('home'), manual.get('away')
+                mh, ma = manual.get('home'), manual.get('away')
                 if mh and ma:
                     try:
-                        status='scheduled'
-                        dt=_get_match_datetime(mh,ma); now=datetime.now()
+                        status = 'scheduled'
+                        dt = _get_match_datetime(mh, ma)
+                        now = datetime.now()
                         if dt:
-                            if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES): status='live'
-                            elif now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES): status='finished'
-                        if status!='finished': use_manual=True
-                    except Exception: use_manual=True
+                            if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                status = 'live'
+                            elif now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                status = 'finished'
+                        if status != 'finished':
+                            use_manual = True
+                    except Exception:
+                        use_manual = True
             if use_manual:
-                payload=dict(payload); payload['match_of_week']=manual
+                payload = dict(payload)
+                payload['match_of_week'] = manual
             else:
-                tours_src=payload.get('tours') or []
+                tours_src = payload.get('tours') or []
                 if SessionLocal is not None:
-                    db3=get_db();
+                    db3 = get_db()
                     try:
-                        bt=_snapshot_get(db3,'betting-tours')
-                        tours_src=(bt or {}).get('payload', {}).get('tours') or tours_src
-                    finally: db3.close()
-                best=_pick_match_of_week(tours_src)
+                        bt = _snapshot_get(db3, 'betting-tours')
+                        tours_src = (bt or {}).get('payload', {}).get('tours') or tours_src
+                    finally:
+                        db3.close()
+                best = _pick_match_of_week(tours_src)
                 if best:
-                    payload=dict(payload); payload['match_of_week']=best
+                    payload = dict(payload)
+                    payload['match_of_week'] = best
         except Exception:
             pass
-        # enriched payload returned
+        # 4) метрика латентности
+        try:
+            if _perf_metrics:
+                _perf_metrics.api_observe('api_schedule', (time.time() - _t0) * 1000.0)
+        except Exception:
+            pass
         return payload
-    return etag_json('schedule', _build, cache_ttl=900, max_age=900, swr=600, core_filter=lambda p: {'tours': p.get('tours')})
+
+    return etag_json(
+        'schedule',
+        _build,
+        cache_ttl=900,
+        max_age=900,
+        swr=600,
+        core_filter=lambda p: {'tours': p.get('tours')}
+    )
 
 @app.route('/api/vote/match', methods=['POST'])
 def api_vote_match():

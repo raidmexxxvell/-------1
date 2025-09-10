@@ -12,6 +12,10 @@ from typing import Any, Optional, Dict, Callable
 from datetime import datetime, timezone, timedelta
 import redis
 import pickle
+try:
+    from . import metrics as _metrics
+except Exception:
+    _metrics = None
 
 class MultiLevelCache:
     def __init__(self, redis_client: Optional[redis.Redis] = None):
@@ -59,6 +63,7 @@ class MultiLevelCache:
                 if key in self.memory_cache:
                     entry = self.memory_cache[key]
                     if time.time() - entry['timestamp'] < config['memory']:
+                        if _metrics: _metrics.cache_inc('memory_hits')
                         return entry['data']
                     else:
                         del self.memory_cache[key]
@@ -76,6 +81,7 @@ class MultiLevelCache:
                                 'data': data,
                                 'timestamp': time.time()
                             }
+                    if _metrics: _metrics.cache_inc('redis_hits')
                     return data
             except Exception as e:
                 print(f"Redis get error for {key}: {e}")
@@ -86,9 +92,12 @@ class MultiLevelCache:
                 data = loader_func()
                 if data is not None:
                     self.set(cache_type, data, identifier)
+                else:
+                    if _metrics: _metrics.cache_inc('misses')
                 return data
             except Exception as e:
                 print(f"Loader function error for {key}: {e}")
+                if _metrics: _metrics.cache_inc('misses')
                 
         return None
 
@@ -96,7 +105,6 @@ class MultiLevelCache:
         """Устанавливает данные во все уровни кэша"""
         key = self._make_key(cache_type, identifier)
         config = self.ttl_config.get(cache_type, {'memory': 300, 'redis': 1800})
-        
         try:
             # Memory cache
             if config['memory'] > 0:
@@ -113,7 +121,8 @@ class MultiLevelCache:
                     self.redis_client.setex(key, config['redis'], serialized)
                 except Exception as e:
                     print(f"Redis set error for {key}: {e}")
-                    
+
+            if _metrics: _metrics.cache_inc('sets')
             return True
         except Exception as e:
             print(f"Cache set error for {key}: {e}")
@@ -217,9 +226,8 @@ def get_cache() -> MultiLevelCache:
                 # Проверяем соединение
                 redis_client.ping()
             else:
-                # Локальный Redis
-                redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
-                redis_client.ping()
+                # Нет REDIS_URL — работаем только в памяти без локального подключения
+                redis_client = None
         except Exception as e:
             print(f"Redis connection failed, using memory-only cache: {e}")
             redis_client = None
