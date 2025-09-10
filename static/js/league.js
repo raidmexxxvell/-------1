@@ -89,6 +89,15 @@
     return { fetchAgg, readCache, keyFrom };
   })();
 
+  // In-memory состояние для счётов и голосов (исключает мерцание при повторном показе)
+  const MatchState = (() => {
+    const map = new Map(); // key -> { score:"X : Y", votes:{h,d,a,total}, lastAggTs }
+    function get(k){ return map.get(k); }
+    function set(k, patch){ map.set(k, Object.assign({}, map.get(k)||{}, patch)); }
+    return { get, set };
+  })();
+  try { window.MatchState = MatchState; } catch(_) {}
+
   function setUpdatedLabelSafely(labelEl, newIso) {
     try {
       const prevIso = labelEl.getAttribute('data-updated-iso');
@@ -196,7 +205,7 @@
     const MAX_RENDERED_TOURS = 4; // держим в DOM не больше 4 туров одновременно
     const INITIAL_RENDER = Math.min(2, tours.length);
 
-    function createMatchCard(m) {
+  function createMatchCard(m) {
       const card = document.createElement('div');
       card.className = 'match-card';
       const header = document.createElement('div'); header.className = 'match-header';
@@ -224,6 +233,12 @@
       card.appendChild(center);
 
       // Если лайв — подгрузим текущий счёт
+      const stateKey = (()=>{ try { return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${String(m.date||m.datetime||'').slice(0,10)}`; } catch(_) { return `${m.home||''}__${m.away||''}`; } })();
+      // Восстанавливаем предыдущий известный счёт сразу (исключаем визуальный скачок 'VS')
+      try {
+        const prev = MatchState.get(stateKey);
+        if (prev && prev.score) score.textContent = prev.score;
+      } catch(_) {}
       try {
         if (isLive && !finStore[mkKey(m)]) {
           score.textContent = '0 : 0';
@@ -231,13 +246,17 @@
             try {
               const r = await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`);
               const d = await r.json();
-              if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') score.textContent = `${Number(d.score_home)} : ${Number(d.score_away)}`;
+              if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') {
+                const txt = `${Number(d.score_home)} : ${Number(d.score_away)}`;
+                if (score.textContent !== txt) score.textContent = txt;
+                MatchState.set(stateKey, { score: txt });
+              }
             } catch(_) {}
           };
           fetchScore();
         } else if (finStore[mkKey(m)]) {
           // Попробуем сразу показать финальный счёт (однократный fetch)
-          (async()=>{ try { const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`); const d=await r.json(); if (typeof d?.score_home==='number' && typeof d?.score_away==='number') score.textContent=`${Number(d.score_home)} : ${Number(d.score_away)}`; } catch(_){} })();
+          (async()=>{ try { const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`); const d=await r.json(); if (typeof d?.score_home==='number' && typeof d?.score_away==='number') { const txt=`${Number(d.score_home)} : ${Number(d.score_away)}`; score.textContent=txt; MatchState.set(stateKey,{ score: txt }); } } catch(_){} })();
         }
       } catch(_) {}
 
@@ -296,9 +315,12 @@
             try {
               const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
               const sum = Math.max(1, h+d+a);
-              segH.style.width = Math.round(h*100/sum)+'%';
-              segD.style.width = Math.round(d*100/sum)+'%';
-              segA.style.width = Math.round(a*100/sum)+'%';
+              const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
+              // Избегаем ненужных layout изменений (мерцание) — обновляем только если поменялось
+              if (segH.style.width !== ph+'%') segH.style.width = ph+'%';
+              if (segD.style.width !== pd+'%') segD.style.width = pd+'%';
+              if (segA.style.width !== pa+'%') segA.style.width = pa+'%';
+              MatchState.set(voteKey, { votes: { h, d, a, total: h+d+a }, lastAggTs: Date.now() });
             } catch(_) { segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
           };
           // Если локально зафиксировано, спрячем кнопки сразу
@@ -307,6 +329,11 @@
           const cached = VoteAgg.readCache(voteKey);
           if (cached) applyAgg(cached);
           const doFetch = () => VoteAgg.fetchAgg(m.home||'', m.away||'', m.date || m.datetime).then(applyAgg);
+          // Запоминаем метаданные для фонового опроса
+          wrap.dataset.voteKey = voteKey;
+          wrap.dataset.home = m.home || '';
+          wrap.dataset.away = m.away || '';
+          wrap.dataset.date = (m.date || m.datetime || '').toString().slice(0,10);
           if ('IntersectionObserver' in window) {
             const io = new IntersectionObserver((ents) => {
               ents.forEach(e => { if (e.isIntersecting) { doFetch(); io.unobserve(card); } });
@@ -315,6 +342,24 @@
           } else {
             doFetch();
           }
+          // Оптимистичное обновление при голосе — модифицируем обработчики кнопок
+          btns.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+              const code = (btn.textContent||'').includes('П1')?'home':( (btn.textContent||'').includes('П2')?'away':'draw');
+              // Оптимистично увеличим локальные счетчики
+              try {
+                const st = MatchState.get(voteKey) || { votes:{ h:0,d:0,a:0,total:0 } };
+                const v = st.votes || { h:0,d:0,a:0,total:0 };
+                if (code==='home') v.h++; else if (code==='away') v.a++; else v.d++;
+                v.total = (v.h+v.d+v.a);
+                const sum = Math.max(1, v.total);
+                segH.style.width = Math.round(v.h*100/sum)+'%';
+                segD.style.width = Math.round(v.d*100/sum)+'%';
+                segA.style.width = Math.round(v.a*100/sum)+'%';
+                MatchState.set(voteKey, { votes: v, lastAggTs: Date.now() });
+              } catch(_) {}
+            }, { once: true }); // достаточно один раз
+          });
         }
       } catch(_) {}
 
@@ -527,4 +572,39 @@
   }
 
   window.League = { batchAppend, renderLeagueTable, renderStatsTable, renderSchedule, renderResults, setUpdatedLabelSafely, refreshTable, refreshSchedule };
+
+  // Фоновый опрос агрегатов голосования для непроголосовавших пользователей (каждые ~4s)
+  function startVotePolling(){
+    const INTERVAL = 4000; // 4 секунды (в заданном диапазоне 3-5)
+    setInterval(() => {
+      try {
+        if (document.hidden) return;
+        document.querySelectorAll('.vote-inline[data-votekey]').forEach(wrap => {
+          try {
+            const key = wrap.dataset.votekey;
+            const st = MatchState.get(key);
+            if (st && Date.now() - (st.lastAggTs||0) < 3500) return; // ещё свежо
+            const home = wrap.dataset.home || '';
+            const away = wrap.dataset.away || '';
+            const date = wrap.dataset.date || '';
+            // Не опрашиваем если пользователь уже голосовал (кнопок нет и confirm есть) реже? всё равно можно — нагрузка ограничена VoteAgg
+            VoteAgg.fetchAgg(home, away, date).then(agg => {
+              const segH = wrap.querySelector('.seg-h');
+              const segD = wrap.querySelector('.seg-d');
+              const segA = wrap.querySelector('.seg-a');
+              if (!segH) return;
+              const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
+              const sum = Math.max(1, h+d+a);
+              const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
+              if (segH.style.width !== ph+'%') segH.style.width = ph+'%';
+              if (segD.style.width !== pd+'%') segD.style.width = pd+'%';
+              if (segA.style.width !== pa+'%') segA.style.width = pa+'%';
+              MatchState.set(key, { votes:{ h,d,a,total:h+d+a }, lastAggTs: Date.now() });
+            }).catch(()=>{});
+          } catch(_) {}
+        });
+      } catch(_) {}
+    }, INTERVAL);
+  }
+  if (!window.__VOTE_POLLING_STARTED__) { window.__VOTE_POLLING_STARTED__ = true; startVotePolling(); }
 })();
