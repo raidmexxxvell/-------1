@@ -11200,8 +11200,34 @@ def api_admin_full_reset():
                         cm.invalidate('schedule')
                         cm.invalidate('league_table')
                         cm.invalidate('stats_table')
+                        cm.invalidate('results')
+                        cm.invalidate('betting-tours')
                     except Exception:
                         pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Очистка метрик производительности (api/cache/ws) и локальных ETag метрик
+        try:
+            from optimizations import metrics as _perf_metrics_mod
+            try:
+                _perf_metrics_mod.reset()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
+            # Локальный ETag helper cache и метрики
+            if '_ETAG_HELPER_CACHE' in globals():
+                try:
+                    _ETAG_HELPER_CACHE.clear()
+                except Exception:
+                    pass
+            if '_ETAG_METRICS' in globals():
+                try:
+                    _ETAG_METRICS['by_key'].clear()
                 except Exception:
                     pass
         except Exception:

@@ -80,3 +80,19 @@ def snapshot(ws_metrics: Dict | None = None):
         return {}
 
 __all__ = ['api_observe','cache_inc','snapshot']
+
+def reset():
+    """Полный сброс внутренних метрик (используется в admin full-reset).
+    Сохраняем только новую точку старта uptime.
+    """
+    try:
+        with _LOCK:
+            _DATA['uptime_started'] = time.time()
+            _DATA['api']['by_key'].clear()
+            for k in list(_DATA['cache'].keys()):
+                _DATA['cache'][k] = 0
+            _DATA['ws'].clear()
+    except Exception:
+        pass
+
+__all__.append('reset')
