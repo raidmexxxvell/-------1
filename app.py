@@ -3915,6 +3915,7 @@ def _team_overview_from_results_snapshot(db: Session, team_name: str) -> dict:
     norm = name.lower()
     matches = 0; w=d=l=0; gf=ga=0; cs=0
     last5 = []
+    recent_buf = []  # временный список объектов для последних матчей (полные данные)
     for m in results:
         try:
             h = (m.get('home') or '').strip()
@@ -3939,13 +3940,32 @@ def _team_overview_from_results_snapshot(db: Session, team_name: str) -> dict:
             elif tgf == tga: d += 1; last5.append('D')
             else: l += 1; last5.append('L')
             if tga == 0: cs += 1
+            # собираем последние матчи с соперником (для секции «Форма»)
+            try:
+                opp = a if is_team_home else h
+                score_txt = f"{tgf}:{tga}"
+                # дата: пробуем поля date / match_date / updated_at
+                dt = m.get('date') or m.get('match_date') or m.get('updated_at') or m.get('datetime')
+                if isinstance(dt, dict):
+                    dt = dt.get('iso') or dt.get('value')
+                recent_buf.append({
+                    'opponent': opp or None,
+                    'score': score_txt,
+                    'result': ('W' if tgf>tga else ('D' if tgf==tga else 'L')),
+                    'date': dt
+                })
+            except Exception:
+                pass
         except Exception:
             continue
     # последние 5 в порядке убывания времени уже примерно соблюдаются в снапшоте; ограничим
     last5 = last5[-5:]
+    # recent: берём из буфера последние (по порядку добавления считаем хронологию входного снапшота) 2 матча, реверс чтобы самые свежие первыми
+    recent = list(reversed(recent_buf[-2:])) if recent_buf else []
     return {
         'team': {'id': None, 'name': name},
         'stats': {'matches':matches,'wins':w,'draws':d,'losses':l,'goals_for':gf,'goals_against':ga,'clean_sheets':cs,'last5':last5},
+        'recent': recent,
         'updated_at': updated_at
     }
 
@@ -4001,13 +4021,14 @@ def api_team_overview():
                 else:
                     sql2 = text(
                         """
-                        SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.tournament_id
-                        FROM matches m
-                        JOIN teams th ON th.id = m.home_team_id
-                        JOIN teams ta ON ta.id = m.away_team_id
-                        WHERE m.status = 'finished' AND (lower(th.name)=lower(:nm) OR lower(ta.name)=lower(:nm))
-                        """
-                    )
+                            SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.tournament_id,
+                                   th.name AS home_name, ta.name AS away_name
+                            FROM matches m
+                            JOIN teams th ON th.id = m.home_team_id
+                            JOIN teams ta ON ta.id = m.away_team_id
+                            WHERE m.status = 'finished' AND (lower(th.name)=lower(:nm) OR lower(ta.name)=lower(:nm))
+                            """
+                        )
                     rows = db.execute(sql2, { 'nm': name_final }).fetchall()
                 matches = 0; w=d=l=0; gf=ga=0; cs=0
                 tournaments_set = set()
@@ -4028,13 +4049,22 @@ def api_team_overview():
                 if rows:
                     for r in rows:
                         try:
-                            h_id, a_id, hs, as_, tourn_id = int(r[0] or 0), int(r[1] or 0), int(r[2] or 0), int(r[3] or 0), (int(r[4]) if r[4] is not None else None)
-                            is_home = (team_id and h_id == team_id) or (not team_id and False)
-                            is_away = (team_id and a_id == team_id) or (not team_id and False)
-                            # если team_id неизвестен (по имени), считаем нейтрально: определим по имени позже — для надёжности используем fallback путь
-                            if not (is_home or is_away):
-                                # при отсутствии точного id не различаем дом/выезд — считаем как для home, это влияет только на clean sheet, но не на W/D/L
-                                is_home = True
+                            h_id = int(r[0] or 0); a_id = int(r[1] or 0)
+                            hs = int(r[2] or 0); as_ = int(r[3] or 0)
+                            tourn_id = (int(r[4]) if r[4] is not None else None)
+                            home_name = (r[5] if len(r) > 5 else None)
+                            away_name = (r[6] if len(r) > 6 else None)
+                            if team_id:
+                                is_home = (h_id == team_id)
+                                is_away = (a_id == team_id)
+                            else:
+                                # Определяем по имени (надёжнее, чем искусственно считать home)
+                                nm_low = name_final.lower()
+                                is_home = (str(home_name or '').lower() == nm_low)
+                                is_away = (str(away_name or '').lower() == nm_low)
+                                if not (is_home or is_away):
+                                    # неизвестно — пропускаем (не искажаем clean sheet)
+                                    continue
                             tgf = hs if is_home else as_
                             tga = as_ if is_home else hs
                             matches += 1
