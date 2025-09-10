@@ -4669,8 +4669,9 @@ def _build_schedule_payload_from_sheet():
         _tz_min = _tz_h * 60
     now_local = datetime.now() + timedelta(minutes=_tz_min)
     today = now_local.date()
-    # Снимок завершенности: (home, away, tour) и последний номер тура с прошедшими матчами
+    # Снимок завершенности + карта счетов из snapshot results
     finished_triples = set()
+    results_score_map = {}
     last_finished_tour = 0
     if SessionLocal is not None:
         dbx = get_db()
@@ -4680,16 +4681,39 @@ def _build_schedule_payload_from_sheet():
             for r in (payload_res.get('results') or []):
                 try:
                     tr = r.get('tour')
-                    finished_triples.add(((r.get('home') or ''), (r.get('away') or ''), int(tr) if isinstance(tr, int) else tr))
-                    if isinstance(tr, int):
-                        if tr > last_finished_tour:
-                            last_finished_tour = tr
+                    key_trip = ((r.get('home') or ''), (r.get('away') or ''), int(tr) if isinstance(tr, int) else tr)
+                    finished_triples.add(key_trip)
+                    # карта счетов для оверлея
+                    results_score_map[(r.get('home') or '', r.get('away') or '')] = (r.get('score_home'), r.get('score_away'))
                 except Exception:
                     continue
         except Exception:
             pass
         finally:
             dbx.close()
+
+    # Определяем полностью завершённые туры: все матчи тура в finished_triples
+    try:
+        tour_total = {}
+        for t in tours:
+            trn = t.get('tour')
+            if trn is None: continue
+            cnt = 0
+            for m in t.get('matches', []):
+                if (m.get('home') or '') or (m.get('away') or ''):
+                    cnt += 1
+            tour_total[trn] = cnt
+        tour_finished_counts = {}
+        for (h,a,trn) in finished_triples:
+            if trn in tour_total:
+                tour_finished_counts[trn] = tour_finished_counts.get(trn,0) + 1
+        # последний тур, у которого finished == total >0
+        for trn, total_cnt in tour_total.items():
+            if total_cnt>0 and tour_finished_counts.get(trn,0) == total_cnt and isinstance(trn,int):
+                if trn > last_finished_tour:
+                    last_finished_tour = trn
+    except Exception:
+        pass
     def tour_is_upcoming(t):
         # Тур считаем актуальным, если есть хотя бы один незавершённый матч:
         #  - с будущим временем старта
@@ -4749,6 +4773,17 @@ def _build_schedule_payload_from_sheet():
                     except Exception:
                         pass
                 if keep:
+                    # Оверлей счёта из snapshot results (если лист ещё не обновился)
+                    try:
+                        sc_key = (m.get('home') or '', m.get('away') or '')
+                        if sc_key in results_score_map:
+                            sc_h, sc_a = results_score_map[sc_key]
+                            if sc_h not in (None, '', '-'):
+                                m['score_home'] = str(sc_h)
+                            if sc_a not in (None, '', '-'):
+                                m['score_away'] = str(sc_a)
+                    except Exception:
+                        pass
                     new_matches.append(m)
             except Exception:
                 new_matches.append(m)
@@ -4804,6 +4839,23 @@ def _build_results_payload_from_sheet():
             return None
 
     results = []
+    # Карта счётов из snapshot results (чтобы показать даже если лист не обновлён)
+    results_score_map = {}
+    if SessionLocal is not None:
+        try:
+            dbx = get_db()
+            try:
+                snap_res = _snapshot_get(dbx, 'results')
+                payload_res = snap_res and snap_res.get('payload') or {}
+                for r in (payload_res.get('results') or []):
+                    try:
+                        results_score_map[(r.get('home') or '', r.get('away') or '')] = (r.get('score_home'), r.get('score_away'))
+                    except Exception:
+                        continue
+            finally:
+                dbx.close()
+        except Exception:
+            pass
     current_tour = None
     for r in rows:
         a = (r[0] if len(r) > 0 else '').strip()
@@ -4858,6 +4910,17 @@ def _build_results_payload_from_sheet():
                 is_past = False
 
             if is_past:
+                # Оверлей счёта, если в листе ещё нет
+                try:
+                    sc_key = (home, away)
+                    if sc_key in results_score_map:
+                        sc_h, sc_a = results_score_map[sc_key]
+                        if sc_h not in (None, '', '-'):
+                            score_home = str(sc_h)
+                        if sc_a not in (None, '', '-'):
+                            score_away = str(sc_a)
+                except Exception:
+                    pass
                 results.append({
                     'tour': current_tour,
                     'home': home,
@@ -5385,55 +5448,57 @@ def _build_betting_tours_payload():
         except Exception:
             return (datetime(2100,1,1), t.get('tour') or 10**9)
     tours.sort(key=sort_key)
-    # Выбираем ближайший тур
+    # Выбираем ближайший тур (первый по сортировке)
     primary = tours[:1]
-    # Логика раннего открытия следующего тура: открываем второй тур только если ближайший тур полностью завершён
-    early_open = []
+    extra = []
+    now_local = datetime.now()
     if len(tours) >= 2 and primary:
-        def _tour_has_unfinished_matches(tour_obj):
-            now_local = datetime.now()
+        # Правило: показываем следующий тур, когда ВСЕ матчи текущего уже стартовали (dt <= now)
+        def _all_matches_started(tour_obj):
             for m in (tour_obj.get('matches') or []):
                 try:
                     if m.get('datetime'):
                         dt = datetime.fromisoformat(m['datetime'])
-                        end_dt = dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES)
-                        if dt > now_local or now_local < end_dt:
-                            return True
+                        if dt > now_local:
+                            return False
                     elif m.get('date'):
                         d = datetime.fromisoformat(m['date']).date()
-                        if d >= now_local.date():
-                            return True
+                        # днём матча считаем, что старт возможен в любой момент дня — считаем_started если дата < сегодня
+                        if d > now_local.date():
+                            return False
+                    else:
+                        return False  # неизвестное время — считаем не стартовал
                 except Exception:
-                    continue
-            return False
-        if not _tour_has_unfinished_matches(primary[0]):
-            try:
-                next_t = tours[1]
-                # Вычислим самое раннее время среди матчей следующего тура
-                earliest = None
-                for m in next_t.get('matches', []):
-                    dt = None
-                    if m.get('datetime'):
-                        dt = datetime.fromisoformat(m['datetime'])
-                    elif m.get('date'):
-                        try:
-                            d = datetime.fromisoformat(m['date']).date()
-                            tm_str = (m.get('time') or '00:00')
-                            tm = datetime.strptime(tm_str, "%H:%M").time()
-                            dt = datetime.combine(d, tm)
-                        except Exception:
-                            dt = None
-                    if dt is not None:
-                        if earliest is None or dt < earliest:
-                            earliest = dt
-                if earliest is not None and (earliest - datetime.now() <= timedelta(days=2)):
-                    early_open = [next_t]
-            except Exception:
-                early_open = []
-    tours = primary + early_open
+                    return False
+            return True if (tour_obj.get('matches') or []) else False
+        if _all_matches_started(primary[0]):
+            extra = tours[1:2]
+    tours = primary + extra
 
     now_local = datetime.now()
     for t in tours:
+        # Скрываем матчи, которые уже стартовали, из списка для ставок
+        filtered_matches = []
+        for m in t.get('matches', []):
+            started = False
+            try:
+                if m.get('datetime'):
+                    dt = datetime.fromisoformat(m['datetime'])
+                    if dt <= now_local:
+                        started = True
+                elif m.get('date'):
+                    d = datetime.fromisoformat(m['date']).date()
+                    if d < now_local.date():
+                        started = True
+                    elif d == now_local.date():
+                        # без точного времени — считаем что старт в полночь (уже начался)
+                        started = True
+            except Exception:
+                pass
+            if started:
+                continue
+            filtered_matches.append(m)
+        t['matches'] = filtered_matches
         for m in t.get('matches', []):
             try:
                 lock = False
@@ -5670,6 +5735,13 @@ def api_match_status_set():
                             pass
                         try:
                             if websocket_manager: websocket_manager.notify_data_change('results', payload)
+                        except Exception:
+                            pass
+                        # Инвалидация team overview ETag cache
+                        try:
+                            for k in list(_ETAG_HELPER_CACHE.keys()):
+                                if k.startswith('team-overview:'):
+                                    _ETAG_HELPER_CACHE.pop(k, None)
                         except Exception:
                             pass
                         # Отзеркалим счёт в Google Sheets (best-effort)
@@ -12298,6 +12370,13 @@ def api_match_settle():
                     pass
                 try:
                     if websocket_manager: websocket_manager.notify_data_change('results', payload)
+                except Exception:
+                    pass
+                # Инвалидация team overview ETag cache (все команды могли поменять агрегаты)
+                try:
+                    for k in list(_ETAG_HELPER_CACHE.keys()):
+                        if k.startswith('team-overview:'):
+                            _ETAG_HELPER_CACHE.pop(k, None)
                 except Exception:
                     pass
                 
