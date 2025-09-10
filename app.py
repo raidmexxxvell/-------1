@@ -5786,11 +5786,124 @@ def api_match_status_set():
                 except Exception as _lineup_stat_err:
                     try: app.logger.warning(f"apply_lineups_stats_failed {home} vs {away}: {_lineup_stat_err}")
                     except Exception: pass
-                # 5) Инвалидация кэша бомбардиров (обновится при следующем запросе)
+                # 5) Агрегация локальной статистики игроков (TeamPlayerStats) и обновление stats-table
+                #    (адаптация логики из /api/match/settle — защищено от повторного подсчёта через MatchStatsAggregationState)
                 try:
-                    global SCORERS_CACHE
-                    if isinstance(SCORERS_CACHE, dict):
-                        SCORERS_CACHE['ts'] = 0
+                    lineup_rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
+                    event_rows = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).all()
+                    from collections import defaultdict
+                    team_players_games = defaultdict(set)
+                    real_home = (home or '').strip(); real_away = (away or '').strip()
+                    for r in lineup_rows:
+                        side_team = real_home if (r.team or 'home') == 'home' else real_away
+                        team_players_games[side_team].add((r.player or '').strip())
+
+                    def _upsert_player(team_name, player_name):
+                        pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_name, TeamPlayerStats.player==player_name).first()
+                        if not pl:
+                            pl = TeamPlayerStats(team=team_name, player=player_name)
+                            db.add(pl)
+                        return pl
+
+                    state = db.query(MatchStatsAggregationState).filter(MatchStatsAggregationState.home==home, MatchStatsAggregationState.away==away).first()
+                    if not state:
+                        state = MatchStatsAggregationState(home=home, away=away, lineup_counted=0, events_applied=0)
+                        db.add(state)
+                        db.flush()
+
+                    if state.lineup_counted == 0:
+                        for team_name, players_set in team_players_games.items():
+                            for p in players_set:
+                                if not p: continue
+                                pl = _upsert_player(team_name, p)
+                                pl.games = (pl.games or 0) + 1
+                                pl.updated_at = datetime.now(timezone.utc)
+                        state.lineup_counted = 1
+                        state.updated_at = datetime.now(timezone.utc)
+
+                    if state.events_applied == 0:
+                        for ev in event_rows:
+                            player = (ev.player or '').strip()
+                            if not player: continue
+                            team_name = real_home if (ev.team or 'home') == 'home' else real_away
+                            pl = _upsert_player(team_name, player)
+                            if not pl.games:
+                                pl.games = 1
+                            if ev.type == 'goal': pl.goals = (pl.goals or 0) + 1
+                            elif ev.type == 'assist': pl.assists = (pl.assists or 0) + 1
+                            elif ev.type == 'yellow': pl.yellows = (pl.yellows or 0) + 1
+                            elif ev.type == 'red': pl.reds = (pl.reds or 0) + 1
+                            pl.updated_at = datetime.now(timezone.utc)
+                        state.events_applied = 1
+                        state.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+
+                    # Пересоберём глобальный кэш бомбардиров (SCORERS_CACHE)
+                    try:
+                        all_rows = db.query(TeamPlayerStats).all()
+                        scorers = []
+                        for r in all_rows:
+                            total = (r.goals or 0) + (r.assists or 0)
+                            scorers.append({
+                                'player': r.player,
+                                'team': r.team,
+                                'games': r.games or 0,
+                                'goals': r.goals or 0,
+                                'assists': r.assists or 0,
+                                'yellows': r.yellows or 0,
+                                'reds': r.reds or 0,
+                                'total_points': total
+                            })
+                        scorers.sort(key=lambda x: (-x['total_points'], x['games'], -x['goals']))
+                        for i, s in enumerate(scorers, start=1):
+                            s['rank'] = i
+                        global SCORERS_CACHE
+                        SCORERS_CACHE = {'ts': time.time(), 'items': scorers}
+                    except Exception as _sc_err:
+                        try: app.logger.warning(f"scorers cache rebuild failed (status finished): {_sc_err}")
+                        except Exception: pass
+
+                    # Обновим snapshot stats-table из TeamPlayerStats
+                    try:
+                        header = ['Игрок', 'Матчи', 'Голы', 'Пасы', 'ЖК', 'КК', 'Очки']
+                        rows = db.query(TeamPlayerStats).all()
+                        rows_sorted = sorted(rows, key=lambda r: (-((r.goals or 0)+(r.assists or 0)), -(r.goals or 0)))
+                        vals = []
+                        for r in rows_sorted[:10]:
+                            name = (r.player or '')
+                            matches = int(r.games or 0)
+                            goals = int(r.goals or 0)
+                            assists = int(r.assists or 0)
+                            yellows = int(r.yellows or 0)
+                            reds = int(r.reds or 0)
+                            points = goals + assists
+                            vals.append([name, matches, goals, assists, yellows, reds, points])
+                        if len(vals) < 10:
+                            for i in range(len(vals)+1, 11):
+                                vals.append([f'Игрок {i}', 0, 0, 0, 0, 0, 0])
+                        stats_payload = {
+                            'range': 'A1:G11',
+                            'values': [header] + vals,
+                            'updated_at': datetime.now(timezone.utc).isoformat()
+                        }
+                        try: _snapshot_set(db, 'stats-table', stats_payload)
+                        except Exception: pass
+                        try:
+                            if cache_manager: cache_manager.invalidate('stats_table')
+                        except Exception: pass
+                        try:
+                            if websocket_manager: websocket_manager.notify_data_change('stats_table', stats_payload)
+                        except Exception: pass
+                    except Exception:
+                        pass
+                except Exception as _agg_err:
+                    try: app.logger.warning(f"post-finish player stats aggregation failed: {_agg_err}")
+                    except Exception: pass
+
+                # 6) (best-effort) обновим snapshot schedule (удаление завершённого матча из активного расписания)
+                try:
+                    schedule_payload = _build_schedule_payload_from_sheet()
+                    _snapshot_set(db, 'schedule', schedule_payload)
                 except Exception:
                     pass
                 # Закрепим изменения, включая автофикс спецрынков
