@@ -2,8 +2,8 @@
 // Унифицированный helper для полосы голосования П1 / X / П2
 (function(){
   if (window.VoteInline) return;
-  // Не кэшируем window.__VoteAgg / window.MatchState во время загрузки — они определяются в другом файле (league.js).
-  // Будем обращаться к ним динамически внутри функций через window.__VoteAgg / window.MatchState.
+  const VoteAgg = window.__VoteAgg;
+  const MatchState = window.MatchState;
   function keyFrom(obj){
     try {
       const raw = obj.date?String(obj.date):(obj.datetime?String(obj.datetime):'');
