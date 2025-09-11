@@ -8209,7 +8209,7 @@ def api_results():
         payload=None
         if SessionLocal is not None:
             db=get_db(); snap=None
-            try: snap=_snapshot_get(db,'results')
+            try: snap=_snapshot_get(db, Snapshot, 'results', app.logger)
             finally: db.close()
             if snap and snap.get('payload'):
                 payload=snap['payload']
