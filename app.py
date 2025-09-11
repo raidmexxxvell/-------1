@@ -93,6 +93,8 @@ except ImportError as e:
     log_order_management = log_admin_operation
     log_leaderboard_operation = log_admin_operation
 
+"""Совместимые адаптеры snapshot/settle удалены после миграции всех вызовов на новую сигнатуру."""
+
 
 def check_required_environment_variables():
     """Проверяет наличие критически важных переменных окружения при старте приложения"""
@@ -953,7 +955,7 @@ def api_betting_place():
         try:
             dbx: Session = get_db()
             try:
-                snap = _snapshot_get(dbx, 'schedule')
+                snap = _snapshot_get(dbx, Snapshot, 'schedule', app.logger)
                 payload = snap and snap.get('payload')
                 tours = payload and payload.get('tours') or []
             finally:
@@ -1918,7 +1920,7 @@ def api_admin_matches_upcoming():
             try:
                 dbs = get_db()
                 try:
-                    snap = _snapshot_get(dbs, 'schedule')
+                    snap = _snapshot_get(dbs, Snapshot, 'schedule', app.logger)
                     payload = snap and snap.get('payload')
                     tours = payload and payload.get('tours') or []
                 finally:
@@ -1997,7 +1999,7 @@ def _resolve_match_by_id(match_id: str, tours=None):
             try:
                 dbs = get_db()
                 try:
-                    snap = _snapshot_get(dbs, 'schedule')
+                    snap = _snapshot_get(dbs, Snapshot, 'schedule', app.logger)
                     payload = snap and snap.get('payload')
                     tours = payload and payload.get('tours') or []
                 finally:
@@ -2767,7 +2769,7 @@ def _load_league_ranks_from_source() -> dict:
     if SessionLocal is not None:
         db = get_db()
         try:
-            snap = _snapshot_get(db, 'league-table')
+            snap = _snapshot_get(db, Snapshot, 'league-table', app.logger)
             payload = snap and snap.get('payload')
             values = payload and payload.get('values') or None
             if values:
@@ -3532,7 +3534,7 @@ def serialize_user(db_user: 'User'):
 def _get_teams_from_snapshot(db: Session) -> list[str]:
     """Возвращает список команд из снапшота 'league-table' (колонка с названиями, 9 шт.)."""
     teams = []
-    snap = _snapshot_get(db, 'league-table')
+    snap = _snapshot_get(db, Snapshot, 'league-table', app.logger)
     payload = snap and snap.get('payload')
     values = payload and payload.get('values') or []
     for i in range(1, min(len(values), 10)):
@@ -3813,7 +3815,7 @@ def _team_overview_from_results_snapshot(db: Session, team_name: str) -> dict:
     """Fallback агрегация из снапшота results: учитывает все сезоны.
     Возвращает {team:{name}, stats:{...}, updated_at} либо пустые значения.
     """
-    snap = _snapshot_get(db, 'results') or {}
+    snap = (_snapshot_get(db, Snapshot, 'results', app.logger) or {})
     payload = (snap.get('payload') or {}) if isinstance(snap, dict) else {}
     updated_at = (snap.get('updated_at') if isinstance(snap, dict) else None) or datetime.now(timezone.utc).isoformat()
     results = payload.get('results') or []
@@ -4113,7 +4115,7 @@ def api_feature_match_set():
                 'set_by': user_id,
                 'set_at': datetime.now(timezone.utc).isoformat()
             }
-            ok = _snapshot_set(db, 'feature-match', payload)
+            ok = _snapshot_set(db, Snapshot, 'feature-match', payload, app.logger)
             if not ok:
                 return jsonify({'error': 'store failed'}), 500
             return jsonify({'status': 'ok'})
@@ -4138,7 +4140,7 @@ def api_feature_match_clear():
             return jsonify({'error': 'DB unavailable'}), 500
         db: Session = get_db()
         try:
-            ok = _snapshot_set(db, 'feature-match', {'match': None, 'set_by': user_id, 'set_at': datetime.now(timezone.utc).isoformat()})
+            ok = _snapshot_set(db, Snapshot, 'feature-match', {'match': None, 'set_by': user_id, 'set_at': datetime.now(timezone.utc).isoformat()}, app.logger)
             if not ok:
                 return jsonify({'error': 'store failed'}), 500
             return jsonify({'status': 'ok'})
@@ -4236,7 +4238,7 @@ def _build_league_payload_from_db():
                         if SessionLocal is not None:
                             dbsched = get_db()
                             try:
-                                snap = _snapshot_get(dbsched, 'schedule')
+                                snap = _snapshot_get(dbsched, Snapshot, 'schedule', app.logger)
                                 payload = snap and snap.get('payload') or {}
                                 tours = payload.get('tours') or []
                                 for t in tours:
@@ -4293,7 +4295,7 @@ def _build_league_payload_from_db():
         if SessionLocal is not None:
             dbs = get_db()
             try:
-                snap = _snapshot_get(dbs, 'results')
+                snap = _snapshot_get(dbs, Snapshot, 'results', app.logger)
                 payload = snap and snap.get('payload') or {}
                 res = payload.get('results') or []
                 from collections import defaultdict
@@ -4329,7 +4331,7 @@ def _build_league_payload_from_db():
                     if SessionLocal is not None:
                         dbsched = get_db()
                         try:
-                            snap_s = _snapshot_get(dbsched, 'schedule')
+                            snap_s = _snapshot_get(dbsched, Snapshot, 'schedule', app.logger)
                             payload_s = snap_s and snap_s.get('payload') or {}
                             tours_s = payload_s.get('tours') or []
                             for t in tours_s:
@@ -4553,7 +4555,7 @@ def _build_schedule_payload_from_sheet():
     if SessionLocal is not None:
         dbx = get_db()
         try:
-            snap_res = _snapshot_get(dbx, 'results')
+            snap_res = _snapshot_get(dbx, Snapshot, 'results', app.logger)
             payload_res = snap_res and snap_res.get('payload') or {}
             for r in (payload_res.get('results') or []):
                 try:
@@ -4722,7 +4724,7 @@ def _build_results_payload_from_sheet():
         try:
             dbx = get_db()
             try:
-                snap_res = _snapshot_get(dbx, 'results')
+                snap_res = _snapshot_get(dbx, Snapshot, 'results', app.logger)
                 payload_res = snap_res and snap_res.get('payload') or {}
                 for r in (payload_res.get('results') or []):
                     try:
@@ -4909,7 +4911,7 @@ def _sync_league_table():
         t0 = time.time()
         # DB-only: собираем из БД или оставляем предыдущий снапшот
         league_payload = _build_league_payload_from_db()
-        _snapshot_set(db, 'league-table', league_payload)
+        _snapshot_set(db, Snapshot, 'league-table', league_payload, app.logger)
         _metrics_set('last_sync', 'league-table', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'league-table', 'ok')
         _metrics_set('last_sync_duration_ms', 'league-table', int((time.time()-t0)*1000))
@@ -4966,7 +4968,7 @@ def _sync_stats_table():
         t0 = time.time()
         # DB-first билдер уже использует БД, не читаем Sheets
         stats_payload = _build_stats_payload_from_sheet()
-        _snapshot_set(db, 'stats-table', stats_payload)
+        _snapshot_set(db, Snapshot, 'stats-table', stats_payload, app.logger)
         _metrics_set('last_sync', 'stats-table', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'stats-table', 'ok')
         _metrics_set('last_sync_duration_ms', 'stats-table', int((time.time()-t0)*1000))
@@ -4993,16 +4995,14 @@ def _sync_schedule():
         t0 = time.time()
         # Больше не читаем Sheets в фоне. Полагаться на admin импорт.
         # Если хотим auto-refresh — можно оставить предыдущий снапшот без изменений.
-        snap_prev = _snapshot_get(db, 'schedule') or {}
+        snap_prev = (_snapshot_get(db, Snapshot, 'schedule', app.logger) or {})
         schedule_payload = snap_prev.get('payload') or {'tours': []}
-        _snapshot_set(db, 'schedule', schedule_payload)
+        _snapshot_set(db, Snapshot, 'schedule', schedule_payload, app.logger)
         _metrics_set('last_sync', 'schedule', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'schedule', 'ok')
         _metrics_set('last_sync_duration_ms', 'schedule', int((time.time()-t0)*1000))
-        # Инвалидируем соответствующий кэш
         if cache_manager:
             cache_manager.invalidate('schedule')
-        # Отправляем WebSocket уведомление
         if websocket_manager:
             websocket_manager.notify_data_change('schedule', schedule_payload)
     except Exception as e:
@@ -5021,9 +5021,9 @@ def _sync_results():
         _metrics_inc('bg_runs_total', 1)
         t0 = time.time()
         # Не читаем Sheets: используем предыдущий снапшот
-        snap_prev = _snapshot_get(db, 'results') or {}
+        snap_prev = (_snapshot_get(db, Snapshot, 'results', app.logger) or {})
         results_payload = snap_prev.get('payload') or {'results': []}
-        _snapshot_set(db, 'results', results_payload)
+        _snapshot_set(db, Snapshot, 'results', results_payload, app.logger)
         _metrics_set('last_sync', 'results', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'results', 'ok')
         _metrics_set('last_sync_duration_ms', 'results', int((time.time()-t0)*1000))
@@ -5049,7 +5049,7 @@ def _sync_betting_tours():
         _metrics_inc('bg_runs_total', 1)
         t0 = time.time()
         tours_payload = _build_betting_tours_payload()
-        _snapshot_set(db, 'betting-tours', tours_payload)
+        _snapshot_set(db, Snapshot, 'betting-tours', tours_payload, app.logger)
         _metrics_set('last_sync', 'betting-tours', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'betting-tours', 'ok')
         _metrics_set('last_sync_duration_ms', 'betting-tours', int((time.time()-t0)*1000))
@@ -5074,12 +5074,11 @@ def _sync_leaderboards():
     try:
         _metrics_inc('bg_runs_total', 1)
         t0 = time.time()
-        
         lb_payloads = _build_leaderboards_payloads(db)
-        _snapshot_set(db, 'leader-top-predictors', lb_payloads['top_predictors'])
-        _snapshot_set(db, 'leader-top-rich', lb_payloads['top_rich'])
-        _snapshot_set(db, 'leader-server-leaders', lb_payloads['server_leaders'])
-        _snapshot_set(db, 'leader-prizes', lb_payloads['prizes'])
+        _snapshot_set(db, Snapshot, 'leader-top-predictors', lb_payloads['top_predictors'], app.logger)
+        _snapshot_set(db, Snapshot, 'leader-top-rich', lb_payloads['top_rich'], app.logger)
+        _snapshot_set(db, Snapshot, 'leader-server-leaders', lb_payloads['server_leaders'], app.logger)
+        _snapshot_set(db, Snapshot, 'leader-prizes', lb_payloads['prizes'], app.logger)
         
         now_iso = datetime.now(timezone.utc).isoformat()
         _metrics_set('last_sync', 'leaderboards', now_iso)
@@ -5119,7 +5118,7 @@ def _bg_sync_once_legacy():
         try:
             t0 = time.time()
             stats_payload = _build_stats_payload_from_sheet()
-            _snapshot_set(db, 'stats-table', stats_payload)
+            _snapshot_set(db, Snapshot, 'stats-table', stats_payload, app.logger)
             _metrics_set('last_sync', 'stats-table', datetime.now(timezone.utc).isoformat())
             _metrics_set('last_sync_status', 'stats-table', 'ok')
             _metrics_set('last_sync_duration_ms', 'stats-table', int((time.time()-t0)*1000))
@@ -5150,7 +5149,7 @@ def _bg_sync_once_legacy():
         try:
             t0 = time.time()
             schedule_payload = _build_schedule_payload_from_sheet()
-            _snapshot_set(db, 'schedule', schedule_payload)
+            _snapshot_set(db, Snapshot, 'schedule', schedule_payload, app.logger)
             _metrics_set('last_sync', 'schedule', datetime.now(timezone.utc).isoformat())
             _metrics_set('last_sync_status', 'schedule', 'ok')
             _metrics_set('last_sync_duration_ms', 'schedule', int((time.time()-t0)*1000))
@@ -5195,7 +5194,7 @@ def _bg_sync_once_legacy():
         try:
             t0 = time.time()
             results_payload = _build_results_payload_from_sheet()
-            _snapshot_set(db, 'results', results_payload)
+            _snapshot_set(db, Snapshot, 'results', results_payload, app.logger)
             _metrics_set('last_sync', 'results', datetime.now(timezone.utc).isoformat())
             _metrics_set('last_sync_status', 'results', 'ok')
             _metrics_set('last_sync_duration_ms', 'results', int((time.time()-t0)*1000))
@@ -5208,7 +5207,7 @@ def _bg_sync_once_legacy():
         try:
             t0 = time.time()
             tours_payload = _build_betting_tours_payload()
-            _snapshot_set(db, 'betting-tours', tours_payload)
+            _snapshot_set(db, Snapshot, 'betting-tours', tours_payload, app.logger)
             _metrics_set('last_sync', 'betting-tours', datetime.now(timezone.utc).isoformat())
             _metrics_set('last_sync_status', 'betting-tours', 'ok')
             _metrics_set('last_sync_duration_ms', 'betting-tours', int((time.time()-t0)*1000))
@@ -5220,10 +5219,10 @@ def _bg_sync_once_legacy():
         try:
             t0 = time.time()
             lb_payloads = _build_leaderboards_payloads(db)
-            _snapshot_set(db, 'leader-top-predictors', lb_payloads['top_predictors'])
-            _snapshot_set(db, 'leader-top-rich', lb_payloads['top_rich'])
-            _snapshot_set(db, 'leader-server-leaders', lb_payloads['server_leaders'])
-            _snapshot_set(db, 'leader-prizes', lb_payloads['prizes'])
+            _snapshot_set(db, Snapshot, 'leader-top-predictors', lb_payloads['top_predictors'], app.logger)
+            _snapshot_set(db, Snapshot, 'leader-top-rich', lb_payloads['top_rich'], app.logger)
+            _snapshot_set(db, Snapshot, 'leader-server-leaders', lb_payloads['server_leaders'], app.logger)
+            _snapshot_set(db, Snapshot, 'leader-prizes', lb_payloads['prizes'], app.logger)
             now_iso = datetime.now(timezone.utc).isoformat()
             _metrics_set('last_sync', 'leaderboards', now_iso)
             _metrics_set('last_sync_status', 'leaderboards', 'ok')
@@ -5296,7 +5295,7 @@ def _build_betting_tours_payload():
         try:
             dbs = get_db()
             try:
-                snap = _snapshot_get(dbs, 'schedule')
+                snap = _snapshot_get(dbs, Snapshot, 'schedule', app.logger)
                 payload = snap and snap.get('payload')
                 all_tours = payload and payload.get('tours') or []
             finally:
@@ -5569,7 +5568,7 @@ def api_match_status_set():
         # Перестроим снапшот туров (lock может зависеть от статуса)
         try:
             payload = _build_betting_tours_payload()
-            _snapshot_set(db, 'betting-tours', payload)
+            _snapshot_set(db, Snapshot, 'betting-tours', payload, app.logger)
         except Exception as e:
             app.logger.warning(f"Failed to build betting tours payload: {e}")
         if status == 'finished':
@@ -5588,6 +5587,7 @@ def api_match_status_set():
                     MatchPlayerEvent=MatchPlayerEvent,
                     TeamPlayerStats=TeamPlayerStats,
                     MatchStatsAggregationState=MatchStatsAggregationState,
+                    SnapshotModel=Snapshot,
                     snapshot_get=_snapshot_get,
                     snapshot_set=_snapshot_set,
                     # Используем уже инициализированный cache_manager (многоуровневый кэш)
@@ -5606,17 +5606,7 @@ def api_match_status_set():
                         (lambda: (lambda v: int(v) if v else None)(os.environ.get('DEFAULT_TOURNAMENT_ID')))(),
                         app.logger
                     )),
-                    settle_open_bets_fn=lambda: (_settle_open_bets and _settle_open_bets(
-                        db,
-                        Bet,
-                        User,
-                        _get_match_result,
-                        _get_match_total_goals,
-                        _get_special_result,
-                        BET_MATCH_DURATION_MINUTES,
-                        datetime.now(),
-                        app.logger
-                    )),
+                    settle_open_bets_fn=lambda: (_settle_open_bets() if _settle_open_bets else None),
                     build_schedule_payload=_build_schedule_payload_from_sheet,
                     build_league_payload=_build_league_payload_from_db,
                     logger=app.logger,
@@ -5768,7 +5758,7 @@ def api_match_status_live():
     if SessionLocal is not None:
         db = get_db()
         try:
-            snap = _snapshot_get(db, 'betting-tours')
+            snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
             payload = snap and snap.get('payload')
             tours = payload and payload.get('tours') or []
             for t in tours:
@@ -5822,7 +5812,7 @@ def api_leader_top_predictors():
         if SessionLocal is not None:
             db = get_db(); snap=None
             try:
-                snap = _snapshot_get(db, 'leader-top-predictors')
+                snap = _snapshot_get(db, Snapshot, 'leader-top-predictors', app.logger)
             finally:
                 db.close()
             if snap and snap.get('payload'):
@@ -5880,7 +5870,7 @@ def api_leader_top_rich():
         if SessionLocal is not None:
             db = get_db(); snap=None
             try:
-                snap = _snapshot_get(db, 'leader-top-rich')
+                snap = _snapshot_get(db, Snapshot, 'leader-top-rich', app.logger)
             finally:
                 db.close()
             if snap and snap.get('payload'):
@@ -5939,7 +5929,7 @@ def api_leader_server_leaders():
         if SessionLocal is not None:
             db = get_db(); snap=None
             try:
-                snap = _snapshot_get(db, 'leader-server-leaders')
+                snap = _snapshot_get(db, Snapshot, 'leader-server-leaders', app.logger)
             finally:
                 db.close()
             if snap and snap.get('payload'):
@@ -5993,7 +5983,7 @@ def api_leader_prizes():
         if SessionLocal is not None:
             db = get_db(); snap=None
             try:
-                snap = _snapshot_get(db, 'leader-prizes')
+                snap = _snapshot_get(db, Snapshot, 'leader-prizes', app.logger)
             finally:
                 db.close()
             if snap and snap.get('payload'):
@@ -7103,7 +7093,7 @@ def api_league_table():
             if SessionLocal is not None:
                 db = get_db()
                 try:
-                    _snapshot_set(db, 'league-table', payload)
+                    _snapshot_set(db, Snapshot, 'league-table', payload, app.logger)
                 finally:
                     db.close()
         except Exception:
@@ -7127,7 +7117,7 @@ def api_schedule():
             db: Session = get_db()
             snap = None
             try:
-                snap = _snapshot_get(db, 'schedule')
+                snap = _snapshot_get(db, Snapshot, 'schedule', app.logger)
             finally:
                 db.close()
             if snap and snap.get('payload'):
@@ -7436,7 +7426,7 @@ def api_betting_tours():
             if SessionLocal is not None:
                 db: Session = get_db()
                 try:
-                    snap = _snapshot_get(db, 'betting-tours')
+                    snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
                     if snap and snap.get('payload'):
                         return snap['payload']
                 finally:
@@ -7497,7 +7487,7 @@ def api_betting_my_bets():
             # Соберём карту текущих дат матчей из снапшота betting-tours
             match_dt_map = {}
             try:
-                snap = _snapshot_get(db, 'betting-tours')
+                snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
                 payload = snap and snap.get('payload')
                 tours_src = payload and payload.get('tours') or []
             except Exception:
@@ -7635,7 +7625,7 @@ def _get_match_result(home: str, away: str):
     if SessionLocal is not None:
         db = get_db()
         try:
-            snap = _snapshot_get(db, 'results')
+            snap = _snapshot_get(db, Snapshot, 'results', app.logger)
             payload = snap and snap.get('payload')
             results = payload and payload.get('results') or []
             for m in results:
@@ -7662,7 +7652,7 @@ def _get_match_total_goals(home: str, away: str):
     if SessionLocal is not None:
         db = get_db()
         try:
-            snap = _snapshot_get(db, 'results')
+            snap = _snapshot_get(db, Snapshot, 'results', app.logger)
             payload = snap and snap.get('payload')
             results = payload and payload.get('results') or []
             for m in results:
@@ -7718,7 +7708,7 @@ def _get_match_tour_and_dt(home: str, away: str):
         db = get_db()
         try:
             # 1) Сначала snapshot расписания (предпочтительнее для тура)
-            snap = _snapshot_get(db, 'schedule')
+            snap = _snapshot_get(db, Snapshot, 'schedule', app.logger)
             payload = snap and snap.get('payload') or {}
             tours = payload.get('tours') or []
             for t in tours:
@@ -7737,7 +7727,7 @@ def _get_match_tour_and_dt(home: str, away: str):
                     break
             # 2) Если не нашли в расписании — попробуем betting-tours
             if tour is None:
-                snap_bt = _snapshot_get(db, 'betting-tours')
+                snap_bt = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
                 payload_bt = snap_bt and snap_bt.get('payload') or {}
                 for t in (payload_bt.get('tours') or []):
                     for m in (t.get('matches') or []):
@@ -7755,7 +7745,7 @@ def _get_match_tour_and_dt(home: str, away: str):
                         break
             # 3) В крайнем случае — возьмём из уже имеющихся результатов
             if tour is None:
-                snap_res = _snapshot_get(db, 'results')
+                snap_res = _snapshot_get(db, Snapshot, 'results', app.logger)
                 payload_res = snap_res and snap_res.get('payload') or {}
                 for r in (payload_res.get('results') or []):
                     if (r.get('home') or '').strip() == home and (r.get('away') or '').strip() == away:
@@ -7978,7 +7968,7 @@ def _get_match_datetime(home: str, away: str):
     if SessionLocal is not None:
         db = get_db()
         try:
-            snap = _snapshot_get(db, 'betting-tours')
+            snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
             payload = snap and snap.get('payload')
             tours = payload and payload.get('tours') or []
             for t in tours:
@@ -8092,7 +8082,7 @@ def _build_league_payload_live():
         if SessionLocal is not None:
             db = get_db()
             try:
-                snap = _snapshot_get(db, 'schedule')
+                snap = _snapshot_get(db, Snapshot, 'schedule', app.logger)
                 payload = snap and snap.get('payload') or {}
                 for t in (payload.get('tours') or []):
                     for m in (t.get('matches') or []):
@@ -8113,7 +8103,7 @@ def _build_league_payload_live():
                             live_pairs.append((home, away))
                 # Исключим уже учтённые в results (на случай ручной правки)
                 try:
-                    snap_res = _snapshot_get(db, 'results')
+                    snap_res = _snapshot_get(db, Snapshot, 'results', app.logger)
                     payload_res = snap_res and snap_res.get('payload') or {}
                     finished_set = set()
                     for r in (payload_res.get('results') or []):
@@ -8575,7 +8565,7 @@ def api_league_table_refresh():
         if SessionLocal is not None:
             db = get_db()
             try:
-                snap = _snapshot_get(db, 'league-table') or {}
+                snap = _snapshot_get(db, Snapshot, 'league-table', app.logger) or {}
                 payload = snap.get('payload') or {}
                 updated_at = payload.get('updated_at')
             finally:
@@ -8619,7 +8609,7 @@ def api_stats_table_refresh():
         if SessionLocal is not None:
             db = get_db()
             try:
-                snap = _snapshot_get(db, 'stats-table') or {}
+                snap = _snapshot_get(db, Snapshot, 'stats-table', app.logger) or {}
                 payload = snap.get('payload') or {}
                 updated_at = payload.get('updated_at')
             finally:
@@ -8651,7 +8641,7 @@ def api_schedule_refresh():
         if SessionLocal is not None:
             db = get_db()
             try:
-                snap = _snapshot_get(db, 'schedule') or {}
+                snap = _snapshot_get(db, Snapshot, 'schedule', app.logger) or {}
                 payload = snap.get('payload') or {}
                 updated_at = payload.get('updated_at')
             finally:
@@ -8682,7 +8672,7 @@ def api_results_refresh():
         if SessionLocal is not None:
             db = get_db()
             try:
-                snap = _snapshot_get(db, 'results') or {}
+                snap = _snapshot_get(db, Snapshot, 'results', app.logger) or {}
                 payload = snap.get('payload') or {}
                 updated_at = payload.get('updated_at')
             finally:
@@ -8741,7 +8731,7 @@ def api_admin_google_import_schedule():
             return jsonify({'error': 'sheet_read_failed'}), 500
         db = get_db()
         try:
-            _snapshot_set(db, 'schedule', payload)
+            _snapshot_set(db, Snapshot, 'schedule', payload, app.logger)
         finally:
             db.close()
         # Инвалидируем кэши и уведомим клиентов
@@ -9309,7 +9299,7 @@ def api_betting_tours_refresh():
         if SessionLocal is not None:
             db = get_db()
             try:
-                snap = _snapshot_get(db, 'betting-tours') or {}
+                snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger) or {}
                 payload = snap.get('payload') or {}
                 updated_at = payload.get('updated_at')
             finally:
@@ -10955,7 +10945,7 @@ def api_admin_users_stats():
 # ---------------- Version bump to force client cache refresh ----------------
 def _get_app_version(db: Session) -> int:
     try:
-        snap = _snapshot_get(db, 'app-version')
+        snap = _snapshot_get(db, Snapshot, 'app-version', app.logger)
         if snap and isinstance(snap.get('payload'), dict):
             v = int(snap['payload'].get('ver') or 0)
             return max(0, v)
@@ -10964,7 +10954,7 @@ def _get_app_version(db: Session) -> int:
     return 0
 
 def _set_app_version(db: Session, ver: int):
-    _snapshot_set(db, 'app-version', {'ver': int(ver), 'updated_at': datetime.now(timezone.utc).isoformat()})
+    _snapshot_set(db, Snapshot, 'app-version', {'ver': int(ver), 'updated_at': datetime.now(timezone.utc).isoformat()}, app.logger)
 
 @app.route('/api/version', methods=['GET'])
 def api_version_get():
@@ -11713,7 +11703,7 @@ def api_stats_table():
         if SessionLocal is not None:
             db: Session = get_db()
             try:
-                snap = _snapshot_get(db, 'stats-table')
+                snap = _snapshot_get(db, Snapshot, 'stats-table', app.logger)
                 if snap and snap.get('payload'):
                     payload = snap['payload']
                     _core = {'range': payload.get('range'), 'values': payload.get('values')}
@@ -11832,7 +11822,7 @@ def api_stats_table():
                     'values': [header] + temp_values,
                     'updated_at': datetime.now(timezone.utc).isoformat()
                 }
-                _snapshot_set(db, 'stats-table', payload)
+                _snapshot_set(db, Snapshot, 'stats-table', payload, app.logger)
                 _core = {'range': 'A1:G11', 'values': payload.get('values')}
                 _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
                 resp = jsonify({**payload, 'version': _etag})
@@ -11848,7 +11838,7 @@ def api_stats_table():
         if SessionLocal is not None:
             db = get_db()
             try:
-                _snapshot_set(db, 'stats-table', payload)
+                _snapshot_set(db, Snapshot, 'stats-table', payload, app.logger)
             finally:
                 db.close()
 
@@ -12192,6 +12182,7 @@ def api_match_settle():
                     MatchPlayerEvent=MatchPlayerEvent,
                     TeamPlayerStats=TeamPlayerStats,
                     MatchStatsAggregationState=MatchStatsAggregationState,
+                    SnapshotModel=Snapshot,
                     snapshot_get=_snapshot_get,
                     snapshot_set=_snapshot_set,
                     # Используем уже инициализированный cache_manager (многоуровневый кэш)

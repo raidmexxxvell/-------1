@@ -30,6 +30,7 @@ def finalize_match_core(
     MatchPlayerEvent,
     TeamPlayerStats,
     MatchStatsAggregationState,
+    SnapshotModel,
     # Helpers / functions
     snapshot_get: Callable,
     snapshot_set: Callable,
@@ -67,7 +68,7 @@ def finalize_match_core(
     try:
         ms = db.query(MatchScore).filter(MatchScore.home == home, MatchScore.away == away).first()
         if ms and ms.score_home is not None and ms.score_away is not None:
-            snap = snapshot_get(db, 'results')
+            snap = snapshot_get(db, SnapshotModel, 'results', logger)
             payload = (snap and snap.get('payload')) or {
                 'results': [],
                 'updated_at': datetime.now(timezone.utc).isoformat(),
@@ -95,7 +96,7 @@ def finalize_match_core(
                 results.append(entry)
             payload['results'] = results
             payload['updated_at'] = datetime.now(timezone.utc).isoformat()
-            snapshot_set(db, 'results', payload)
+            snapshot_set(db, SnapshotModel, 'results', payload, logger)
             # Инвалидация / WS
             try:
                 if cache_manager:
