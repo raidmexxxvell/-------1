@@ -390,6 +390,8 @@ class Tournament(Base):
 - Логирование: снижен шум от предупреждений «No match found» при расчёте тоталов — в `_get_match_total_goals` сообщение переведено в INFO и логируется один раз на пару команд (dedup); предупреждения по некорректному формату счёта сохранены как WARNING.
 
 ### 2025-09-04
+### 2025-09-11 (Hotfix betting settlement)
+- Исправлено: ошибка `can't compare offset-naive and offset-aware datetimes` при авторасчёте ставок. Теперь в `services/betting_settle.py` все сравнения времени матча приводят `now` к naive UTC (Bet.match_datetime хранится без tz). Это устраняет падение `psycopg.OperationalError` сценария фонового settle при запросе `/api/betting/tours`.
 ### 2025-09-11 (Service extraction – шаг 1)
 - Вынесены три сервисных модуля в `services/` без изменения бизнес-логики:
     - `betting_settle.py` → `settle_open_bets` (массовый расчёт открытых ставок). Ранее `_settle_open_bets` в `app.py` (~глубокая зона файла).

@@ -4,7 +4,7 @@
 зависимостей и подготовки к дальнейшей декомпозиции.
 """
 from __future__ import annotations
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 def settle_open_bets(
     db,
@@ -17,10 +17,23 @@ def settle_open_bets(
     now,
     logger,
 ):
+    """Массовый расчёт открытых ставок.
+
+    Защищено от сравнения naive и timezone-aware datetime:
+    если now имеет tzinfo, приводим его к UTC naive. (Bet.match_datetime хранится без tz.)
+    """
+    if now is None:
+        now = datetime.utcnow()
+    # Приводим now к naive UTC для сопоставления с Bet.match_datetime (timezone=False)
+    if isinstance(now, datetime) and now.tzinfo is not None:
+        now_cmp = now.astimezone(timezone.utc).replace(tzinfo=None)
+    else:
+        now_cmp = now
+
     open_bets = db.query(Bet).filter(Bet.status=='open').all()
     changed = 0
     for b in open_bets:
-        if b.match_datetime and b.match_datetime > now:
+        if b.match_datetime and b.match_datetime > now_cmp:
             continue
         won = None
         if b.market == '1x2':
@@ -56,7 +69,7 @@ def settle_open_bets(
                 if b.match_datetime:
                     try: end_dt = b.match_datetime + timedelta(minutes=bet_match_duration_minutes)
                     except Exception: end_dt = b.match_datetime
-                    if end_dt <= now: finished=True
+                    if end_dt <= now_cmp: finished=True
                 else:
                     if get_match_result(b.home,b.away) is not None or get_match_total_goals(b.home,b.away) is not None:
                         finished=True
@@ -80,7 +93,8 @@ def settle_open_bets(
                 u.credits = int(u.credits or 0) + payout
         else:
             b.status='lost'; b.payout=0
-        b.updated_at=now
+        # updated_at также делаем naive UTC для консистентности
+        b.updated_at=now_cmp
         changed+=1
     if changed:
         try: db.commit()
