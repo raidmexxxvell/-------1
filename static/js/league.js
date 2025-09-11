@@ -579,6 +579,7 @@
     } catch(_) {}
   }
 
+  // Экспортируем публичные методы, чтобы realtime-updates мог дергать refreshTable / refreshSchedule / renderResults
   window.League = { batchAppend, renderLeagueTable, renderStatsTable, renderSchedule, renderResults, setUpdatedLabelSafely, refreshTable, refreshSchedule };
 
   // ================== A) Ранняя загрузка betting tours (только если отсутствует или устарел) ==================

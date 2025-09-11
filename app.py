@@ -12321,7 +12321,29 @@ def api_match_settle():
                             _ETAG_CACHE.pop(k, None)
             except Exception:
                 pass
-            return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt, 'total_bets': total_bets_cnt, 'open_before': open_before_cnt})
+            # WebSocket событие match_finished (best-effort)
+            try:
+                ws_mgr = current_app.config.get('websocket_manager') if current_app else None
+                if ws_mgr:
+                    # Попытаемся взять финальный счёт + свежий блок результатов (snapshot results)
+                    extra = {}
+                    try:
+                        ms_final = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
+                        if ms_final and ms_final.score_home is not None and ms_final.score_away is not None:
+                            extra['score_home'] = int(ms_final.score_home)
+                            extra['score_away'] = int(ms_final.score_away)
+                    except Exception:
+                        pass
+                    try:
+                        snap_res = _snapshot_get(db, Snapshot, 'results', app.logger) or {}
+                        if snap_res and 'payload' in snap_res:
+                            extra['results_block'] = snap_res['payload']
+                    except Exception:
+                        pass
+                    ws_mgr.notify_match_finished(home, away, extra)
+            except Exception:
+                pass
+            return jsonify({'status':'finished', 'ok': True, 'changed': changed, 'won': won_cnt, 'lost': lost_cnt, 'total_bets': total_bets_cnt, 'open_before': open_before_cnt})
         finally:
             db.close()
     except Exception as e:

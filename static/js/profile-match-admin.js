@@ -77,16 +77,45 @@
       const fd=new FormData(); fd.append('initData', tg?.initData||''); fd.append('home', match.home||''); fd.append('away', match.away||'');
       const r=await fetch('/api/match/settle',{ method:'POST', body:fd });
       const d=await r.json().catch(()=>({}));
-      if(!r.ok || d?.error) throw new Error(d?.error||'Ошибка завершения');
-      window.showAlert?.('Матч завершён','success');
+  if(!r.ok || d?.error) throw new Error(d?.error||'Ошибка завершения');
+  if(d.status==='finished'){ window.showAlert?.('Матч завершён','success'); } else { window.showAlert?.('Расчет выполнен','success'); }
       try { if(d && d.total_bets!==undefined){ const msg=`Ставки: всего ${d.total_bets}, открытых до расчёта ${d.open_before}, изменено ${d.changed||0}, выиграло ${d.won||0}, проиграло ${d.lost||0}`; window.showAlert?.(msg,'info'); } } catch(_){}
       try { const dateStr=(match?.datetime||match?.date||'').toString().slice(0,10); const key=`stream:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${dateStr}`; localStorage.removeItem(key); const sp=document.getElementById('md-pane-stream'); if(sp){ sp.style.display='none'; sp.innerHTML='<div class="stream-wrap"><div class="stream-skeleton">Трансляция недоступна</div></div>'; } } catch(_){}
       try { finStore[mKey]=true; } catch(_){}
-      await fullRefresh(); btn.style.display='none'; const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) statusEl.textContent='Матч завершен';
+      // Мгновенный локальный апдейт без ожидания fullRefresh
+      try {
+        // Удаляем live-бейдж
+        mdPane.querySelectorAll('.live-badge').forEach(b=>b.remove());
+      } catch(_){ }
+      btn.style.display='none';
+      try { finStore[mKey]=true; } catch(_){}
+      const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) statusEl.textContent='Матч завершен';
+      // Кэш результатов обновим асинхронно (не блокируем UI)
+      fullRefresh();
     } catch(e){
       console.error('finish match error', e); window.showAlert?.(e?.message||'Ошибка','error');
     } finally { btn.disabled=false; btn.textContent=old; }
   });
+    // Подписка на глобальное событие match_finished через WebSocket (если realtimeUpdater есть)
+    try {
+      if(!window.__MATCH_FINISHED_WS_BOUND__) {
+        window.__MATCH_FINISHED_WS_BOUND__ = true;
+        document.addEventListener('DOMContentLoaded', ()=>{}); // safeguard
+        if(window.realtimeUpdater && window.realtimeUpdater.socket){
+          window.realtimeUpdater.socket.on('match_finished', (msg)=>{
+            try {
+              if(!msg || msg.home!==match.home || msg.away!==match.away) return;
+              finStore[mKey]=true; btn.style.display='none';
+              mdPane.querySelectorAll('.live-badge').forEach(b=>b.remove());
+              const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) statusEl.textContent='Матч завершен';
+            } catch(_){}
+          });
+        } else {
+          // fallback: попробуем позже
+          setTimeout(()=>{ try { if(window.realtimeUpdater && window.realtimeUpdater.socket){ window.realtimeUpdater.socket.on('match_finished',(msg)=>{ if(!msg || msg.home!==match.home || msg.away!==match.away) return; finStore[mKey]=true; btn.style.display='none'; mdPane.querySelectorAll('.live-badge').forEach(b=>b.remove()); const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) statusEl.textContent='Матч завершен'; }); } } catch(_){} }, 2000);
+        }
+      }
+    } catch(_){}
     topbar.appendChild(btn);
     return { cleanup(){ try { if(mdPane.__finishBtnTimer){ clearInterval(mdPane.__finishBtnTimer); mdPane.__finishBtnTimer=null; } } catch(_){} } };
   }

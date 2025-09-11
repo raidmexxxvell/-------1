@@ -278,3 +278,28 @@ class WebSocketManager:
         """Возвращает количество подключенных пользователей"""
         with self.lock:
             return len(self.connected_users)
+
+    # --- New: прямое событие завершения матча ---
+    def notify_match_finished(self, home: str, away: str, extra: dict | None = None):
+        """Рассылает событие 'match_finished' всем клиентам и патч сущности match.
+        extra: дополнительный словарь (например, финальный счёт)
+        """
+        if not self.socketio:
+            return
+        try:
+            payload = {
+                'type': 'match_finished',
+                'home': home,
+                'away': away,
+            }
+            if extra:
+                payload.update(extra)
+            # Сырой эвент
+            self.socketio.emit('match_finished', payload, namespace='/')
+            # Компактный патч для already subscribed UI
+            try:
+                self.notify_patch('match', {'home': home, 'away': away}, { 'status': 'finished', **({k:v for k,v in (extra or {}).items() if k.startswith('score_')} ) })
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f"Failed to emit match_finished for {home} vs {away}: {e}")

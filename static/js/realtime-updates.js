@@ -91,6 +91,72 @@ class RealtimeUpdater {
             this.handleDataPatch(patch);
         });
 
+        // Событие завершения матча (содержит optional results_block для мгновенного UX)
+        this.socket.on('match_finished', (payload) => {
+            try {
+                if(!payload || !payload.home || !payload.away) return;
+                const { home, away } = payload;
+                // Удаляем live-бейджи и кнопку на открытом экране (если админ)
+                try {
+                    document.querySelectorAll('.live-badge').forEach(b=>{
+                        const wrap = b.closest('#ufo-match-details');
+                        if(wrap) b.remove();
+                    });
+                    const btn=document.getElementById('md-finish-btn'); if(btn) btn.style.display='none';
+                } catch(_){}
+                // Мгновенно скрываем матч из расписания (плавно)
+                try {
+                    const cards=document.querySelectorAll('.match-card');
+                    cards.forEach(c=>{
+                        const h=c.querySelector('.team.home .team-name')?.textContent?.trim();
+                        const a=c.querySelector('.team.away .team-name')?.textContent?.trim();
+                        if(h===home && a===away){
+                            c.style.transition='opacity .35s ease';
+                            c.style.opacity='0';
+                            setTimeout(()=>{ try { c.remove(); } catch(_){} }, 360);
+                        }
+                    });
+                } catch(_){}
+                // Если пришёл актуальный блок результатов, обновим локально без fetch
+                if(payload.results_block){
+                    try {
+                        const data = payload.results_block;
+                        localStorage.setItem('results', JSON.stringify({ data, ts: Date.now() }));
+                        const pane = document.getElementById('league-pane-results');
+                        if(pane && window.League && typeof window.League.renderResults==='function'){
+                            window.League.renderResults(pane, { results: data.results });
+                        }
+                    } catch(_){}
+                }
+                // Фоновая синхронизация (расписание нужно обновить в любом случае)
+                this.refreshSchedule();
+                if(!payload.results_block){
+                    setTimeout(()=>this.triggerDataRefresh('results'), 150);
+                }
+                // Точечное обновление открытых экранов команд (без fetch если текущая вкладка команды активна)
+                try {
+                    const teamPane = document.getElementById('ufo-team');
+                    if(teamPane && teamPane.style.display !== 'none'){
+                        const nameEl = document.getElementById('team-name');
+                        const openedTeam = nameEl ? nameEl.textContent.trim() : '';
+                        // Если открыт экран одной из команд матча — инвалидация кэша + форсированный refresh
+                        if(openedTeam && (openedTeam===home || openedTeam===away)){
+                            // Удаляем ETag кэш, чтобы следующий fetch не получил 304 со старым snapshot
+                            const cacheKey = `team:overview:${openedTeam.toLowerCase()}`;
+                            try { localStorage.removeItem(cacheKey); } catch(_) {}
+                            // Попробуем лёгкий refetch (используем имеющийся API TeamPage)
+                            if(window.TeamPage && typeof window.TeamPage.openTeam==='function'){
+                                // Перерисуем асинхронно, чтобы не блокировать основной поток применения события
+                                setTimeout(()=>{ try { window.TeamPage.openTeam(openedTeam); } catch(_){} }, 50);
+                            }
+                        }
+                    }
+                } catch(_){}
+                // Обновление таблицы лиги (live проекция) — быстрый refresh чтобы отразить победы/очки
+                try { this.refreshTable(); } catch(_){}
+            } catch(_){}
+        });
+
         // Обработчик live обновлений матчей
         this.socket.on('live_update', (message) => {
             this.handleLiveUpdate(message);
