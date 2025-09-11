@@ -398,6 +398,14 @@
     // --- LIVE badges periodic rescan (UI only) ---
     try {
       if (pane.__liveRescanTimer) { clearInterval(pane.__liveRescanTimer); }
+      // Кэш статусов live из бекенда (минимизируем запросы)
+      const LiveStatusCache = (window.__LIVE_STATUS_CACHE = window.__LIVE_STATUS_CACHE || {
+        map: new Map(), // key -> { ts, status }
+        TTL: 45000,
+        get(k){ const v=this.map.get(k); if(!v) return null; if(Date.now()-v.ts>this.TTL){ this.map.delete(k); return null;} return v.status; },
+        set(k,status){ this.map.set(k,{ ts: Date.now(), status }); }
+      });
+
       const rescanLiveBadges = () => {
         try {
           if (!window.MatchUtils || typeof window.MatchUtils.isLiveNow !== 'function') return;
@@ -422,10 +430,41 @@
                 if (m) { date = m[1].split('.').reverse().join('-'); time = time || m[2]; }
               }
               const matchObj = { home, away, date, time };
-              const live = window.MatchUtils.isLiveNow(matchObj);
+              let live = window.MatchUtils.isLiveNow(matchObj);
               const key = mkKey(matchObj);
               const header = card.querySelector('.match-header'); if(!header) return;
               let badge = header.querySelector('.live-badge');
+              // Фолбэк: если локально не live, но старт в пределах +-10 минут от now — спросим бекенд статус (1 запрос на матч в TTL)
+              if(!live && !finStore[key]){
+                try {
+                  const dt = window.MatchUtils.parseDateTime(matchObj);
+                  if (dt) {
+                    const diffMin = Math.abs((Date.now() - dt.getTime())/60000);
+                    if (diffMin <= 10) {
+                      const cached = LiveStatusCache.get(key);
+                      if (cached === 'live') { live = true; }
+                      else if (cached === null) {
+                        // делаем отложенный fetch чтобы не блокировать цикл
+                        setTimeout(()=>{
+                          // двойная проверка чтобы не дублировать запросы
+                          if(LiveStatusCache.get(key) !== null) return;
+                          fetch(`/api/match/status/get?home=${encodeURIComponent(matchObj.home||'')}&away=${encodeURIComponent(matchObj.away||'')}`)
+                            .then(r=>r.json())
+                            .then(s=>{
+                              try {
+                                if(s && s.status){
+                                  LiveStatusCache.set(key, s.status);
+                                  if(s.status==='live') { rescanLiveBadges(); }
+                                }
+                              } catch(_) {}
+                            })
+                            .catch(()=>{ try { LiveStatusCache.set(key,'err'); } catch(_){} });
+                        }, 0);
+                      }
+                    }
+                  }
+                } catch(_) {}
+              }
               if (live && !finStore[key]) {
                 if (!badge) {
                   badge = document.createElement('span'); badge.className='live-badge';
