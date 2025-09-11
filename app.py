@@ -7,6 +7,7 @@ import hashlib
 import hmac
 from datetime import datetime, date, timezone
 from datetime import timedelta
+from services import snapshot_get as _snapshot_get, snapshot_set as _snapshot_set, apply_lineups_to_adv_stats as _apply_lineups_to_adv_stats, settle_open_bets as _settle_open_bets
 from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, g, make_response, current_app
@@ -1351,79 +1352,7 @@ def _maybe_sync_event_to_adv_schema(home: str, away: str, player_name: str, even
         except Exception:
             pass
 
-def _apply_lineups_to_adv_stats(home: str, away: str):
-    """Инкрементирует matches_played в расширенной схеме для всех игроков из состава матча.
-    Идемпотентно: один матч → один инкремент per player (через MatchStatsAggregationState.lineup_counted).
-    Fallback: если расширенная схема или турнир не настроены — тихо выходим.
-    """
-    if not home or not away:
-        return
-    if not adv_db_manager or not getattr(adv_db_manager, 'SessionLocal', None):
-        return
-    env_tour = os.environ.get('DEFAULT_TOURNAMENT_ID')
-    try:
-        tournament_id = int(env_tour) if env_tour else None
-    except Exception:
-        tournament_id = None
-    if tournament_id is None:
-        return
-    if SessionLocal is None:
-        return
-    db = get_db()
-    try:
-        state = db.query(MatchStatsAggregationState).filter(MatchStatsAggregationState.home==home, MatchStatsAggregationState.away==away).first()
-        if not state:
-            state = MatchStatsAggregationState(home=home, away=away, lineup_counted=0, events_applied=0)
-            db.add(state)
-            db.flush()
-        if state.lineup_counted == 1:
-            return
-        lineup_rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
-        if not lineup_rows:
-            return
-        uniq = []
-        seen = set()
-        for r in lineup_rows:
-            nm = (r.player or '').strip()
-            if not nm:
-                continue
-            key = nm.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            uniq.append(nm)
-        if not uniq:
-            return
-        adv_sess = adv_db_manager.get_session()
-        try:
-            # Сначала локальная агрегированная TeamPlayerStats (для fallback и кэшей)
-            for r in lineup_rows:
-                team_name = home if r.team == 'home' else away
-                tps = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_name, TeamPlayerStats.player==r.player).first()
-                if not tps:
-                    tps = TeamPlayerStats(team=team_name, player=r.player, games=1)
-                    db.add(tps)
-                else:
-                    tps.games = (tps.games or 0) + 1
-                tps.updated_at = datetime.now(timezone.utc)
-            for full_name in uniq:
-                player_obj = _ensure_adv_player(adv_sess, full_name)
-                stats = adv_sess.query(AdvPlayerStatistics).filter(AdvPlayerStatistics.player_id==player_obj.id, AdvPlayerStatistics.tournament_id==tournament_id).first()
-                if not stats:
-                    stats = AdvPlayerStatistics(player_id=player_obj.id, tournament_id=tournament_id, matches_played=1)
-                    adv_sess.add(stats)
-                else:
-                    stats.matches_played = (stats.matches_played or 0) + 1
-            adv_sess.commit()
-            state.lineup_counted = 1
-            state.updated_at = datetime.now(timezone.utc)
-            db.commit()
-        finally:
-            try: adv_sess.close()
-            except Exception: pass
-    finally:
-        try: db.close()
-        except Exception: pass
+"""_apply_lineups_to_adv_stats удалён: логика перенесена в services.adv_lineups.apply_lineups_to_adv_stats"""
 
 # Итоговая статистика матча (основные метрики)
 class MatchStats(Base):
@@ -3873,63 +3802,7 @@ def health_perf():
 def _cache_fresh(cache_obj: dict, ttl: int) -> bool:
     return bool(cache_obj.get('data') is not None and (time.time() - (cache_obj.get('ts') or 0) < ttl))
 
-# ---------------------- DB SNAPSHOTS HELPERS ----------------------
-def _snapshot_get(db: Session, key: str):
-    attempts = 0
-    while attempts < 3:
-        try:
-            row = db.get(Snapshot, key)
-            if not row:
-                return None
-            try:
-                data = json.loads(row.payload)
-            except Exception:
-                data = None
-            return {
-                'key': key,
-                'payload': data,
-                'updated_at': (row.updated_at or datetime.now(timezone.utc)).isoformat()
-            }
-        except Exception as e:
-            # OperationalError / EOF: rollback and retry
-            try:
-                db.rollback()
-            except Exception:
-                pass
-            attempts += 1
-            if attempts >= 3:
-                app.logger.warning(f"Snapshot get failed for {key} (attempt {attempts}): {e}")
-                return None
-            # small backoff
-            time.sleep(0.1 * attempts)
-    return None
-
-def _snapshot_set(db: Session, key: str, payload: dict):
-    attempts = 0
-    while attempts < 3:
-        try:
-            raw = json.dumps(payload, ensure_ascii=False)
-            row = db.get(Snapshot, key)
-            now = datetime.now(timezone.utc)
-            if row:
-                row.payload = raw
-                row.updated_at = now
-            else:
-                row = Snapshot(key=key, payload=raw, updated_at=now)
-                db.add(row)
-            db.commit()
-            return True
-        except Exception as e:
-            try:
-                db.rollback()
-            except Exception:
-                pass
-            attempts += 1
-            if attempts >= 3:
-                app.logger.warning(f"Snapshot set failed for {key} (attempt {attempts}): {e}")
-                return False
-            time.sleep(0.1 * attempts)
-    return False
+"""Старые _snapshot_get/_snapshot_set удалены: используем services.snapshots.*"""
 
 # ---------------------- BUILDERS FROM SHEETS ----------------------
 def _team_overview_from_results_snapshot(db: Session, team_name: str) -> dict:
@@ -5697,7 +5570,48 @@ def api_match_status_set():
             app.logger.warning(f"Failed to build betting tours payload: {e}")
         if status == 'finished':
             try:
-                _finalize_match_core(db, home, away, settle_open_bets=True)
+                _finalize_match_core(
+                    db, home, away,
+                    settle_open_bets=True,
+                    MatchScore=MatchScore,
+                    MatchSpecials=MatchSpecials,
+                    MatchLineupPlayer=MatchLineupPlayer,
+                    MatchPlayerEvent=MatchPlayerEvent,
+                    TeamPlayerStats=TeamPlayerStats,
+                    MatchStatsAggregationState=MatchStatsAggregationState,
+                    snapshot_get=lambda d,k: _snapshot_get(d,k),
+                    snapshot_set=lambda d,k,p: _snapshot_set(d,k,p),
+                    cache_manager=multilevel_cache,
+                    websocket_manager=current_app.config.get('websocket_manager') if current_app else None,
+                    etag_cache=_ETAG_CACHE,
+                    build_match_meta=_build_match_meta,
+                    mirror_score=_mirror_score_to_sheet,
+                    apply_lineups_adv=lambda h,a: (_apply_lineups_to_adv_stats and _apply_lineups_to_adv_stats(
+                        db, h, a,
+                        MatchStatsAggregationState,
+                        MatchLineupPlayer,
+                        adv_db_manager,
+                        _ensure_adv_player,
+                        _update_player_statistics,
+                        (lambda: (lambda v: int(v) if v else None)(os.environ.get('DEFAULT_TOURNAMENT_ID')))(),
+                        app.logger
+                    )),
+                    settle_open_bets_fn=lambda: (_settle_open_bets and _settle_open_bets(
+                        db,
+                        Bet,
+                        User,
+                        _get_match_result,
+                        _get_match_total_goals,
+                        _get_special_result,
+                        BET_MATCH_DURATION_MINUTES,
+                        datetime.now(),
+                        app.logger
+                    )),
+                    build_schedule_payload=_build_schedule_payload_from_sheet,
+                    build_league_payload=_build_league_table_payload,
+                    logger=app.logger,
+                    scorers_cache=SCORERS_CACHE,
+                )
             except Exception as e:
                 try:
                     app.logger.error(f"Failed to finalize match via status/set: {e}")
@@ -8258,107 +8172,7 @@ def api_league_table_live():
         app.logger.error(f"live league table error: {e}")
         return jsonify({'error':'internal'}), 500
 
-def _settle_open_bets():
-    if SessionLocal is None:
-        return
-    db: Session = get_db()
-    try:
-        now = datetime.now()
-        open_bets = db.query(Bet).filter(Bet.status=='open').all()
-        changed = 0
-        for b in open_bets:
-            # матч должен быть уже начат/сыгран
-            if b.match_datetime and b.match_datetime > now:
-                continue
-            if b.market == '1x2':
-                res = _get_match_result(b.home, b.away)
-                if not res:
-                    continue
-                won = (res == b.selection)
-            elif b.market == 'totals':
-                sel_raw = (b.selection or '').strip()
-                side = None; line = None
-                if '_' in sel_raw:  # старый формат over_3.5
-                    parts = sel_raw.split('_', 1)
-                    if len(parts)==2:
-                        side, line_str = parts[0], parts[1]
-                        try:
-                            line = float(line_str)
-                        except Exception:
-                            line = None
-                else:  # новый код O35 / U45 / O55
-                    if len(sel_raw) in (3,4) and sel_raw[0] in ('O','U'):
-                        side = 'over' if sel_raw[0]=='O' else 'under'
-                        num_part = sel_raw[1:]
-                        # ожидаем '35','45','55'
-                        if num_part in ('35','45','55'):
-                            try:
-                                line = float(num_part[0]+'.5')  # '35' -> 3.5
-                            except Exception:
-                                line = None
-                if side not in ('over','under') or line is None:
-                    continue
-                total = _get_match_total_goals(b.home, b.away)
-                if total is None:
-                    continue
-                won = (total > line) if side == 'over' else (total < line)
-            elif b.market in ('penalty','redcard'):
-                # Да/Нет по записи в MatchSpecials; если к моменту расчёта не внесено —
-                # считаем «Нет» только после окончания матча:
-                #  - по времени (match_datetime + BET_MATCH_DURATION_MINUTES)
-                #  - или по факту наличия результата/счёта в снапшоте/таблице
-                res = _get_special_result(b.home, b.away, b.market)
-                if res is None:
-                    finished = False
-                    if b.match_datetime:
-                        # Если знаем время начала — ждём строго окончания окна (2 часа по умолчанию)
-                        try:
-                            end_dt = b.match_datetime + timedelta(minutes=BET_MATCH_DURATION_MINUTES)
-                        except Exception:
-                            end_dt = b.match_datetime
-                        if end_dt <= now:
-                            finished = True
-                    else:
-                        # Если не знаем время начала, допускаем завершение по факту появления результата/счёта
-                        r = _get_match_result(b.home, b.away)
-                        if r is not None:
-                            finished = True
-                        else:
-                            tg = _get_match_total_goals(b.home, b.away)
-                            if tg is not None:
-                                finished = True
-                    if not finished:
-                        continue
-                    res = False
-                # selection: 'yes'|'no'
-                won = ((res is True) and b.selection == 'yes') or ((res is False) and b.selection == 'no')
-            else:
-                # не поддерживаемый рынок
-                continue
-
-            if won:
-                # выигрыш
-                try:
-                    odd = float(b.odds or '2.0')
-                except Exception:
-                    odd = 2.0
-                payout = int(round(b.stake * odd))
-                b.status = 'won'
-                b.payout = payout
-                # начислить кредиты
-                u = db.get(User, b.user_id)
-                if u:
-                    u.credits = int(u.credits or 0) + payout
-                    u.updated_at = datetime.now(timezone.utc)
-            else:
-                b.status = 'lost'
-                b.payout = 0
-            b.updated_at = datetime.now(timezone.utc)
-            changed += 1
-        if changed:
-            db.commit()
-    finally:
-        db.close()
+"""_settle_open_bets удалён: логика перенесена в services.betting_settle.settle_open_bets"""
 
 @app.route('/api/results', methods=['GET'])
 def api_results():
@@ -12355,7 +12169,38 @@ def api_match_settle():
                 db.commit()
             # Унифицированная финализация матча (результаты, спецрынки, статистика игроков, снапшоты)
             try:
-                _finalize_match_core(db, home, away, settle_open_bets=False)
+                _finalize_match_core(
+                    db, home, away,
+                    settle_open_bets=False,
+                    MatchScore=MatchScore,
+                    MatchSpecials=MatchSpecials,
+                    MatchLineupPlayer=MatchLineupPlayer,
+                    MatchPlayerEvent=MatchPlayerEvent,
+                    TeamPlayerStats=TeamPlayerStats,
+                    MatchStatsAggregationState=MatchStatsAggregationState,
+                    snapshot_get=lambda d,k: _snapshot_get(d,k),
+                    snapshot_set=lambda d,k,p: _snapshot_set(d,k,p),
+                    cache_manager=multilevel_cache,
+                    websocket_manager=current_app.config.get('websocket_manager') if current_app else None,
+                    etag_cache=_ETAG_CACHE,
+                    build_match_meta=_build_match_meta,
+                    mirror_score=_mirror_score_to_sheet,
+                    apply_lineups_adv=lambda h,a: (_apply_lineups_to_adv_stats and _apply_lineups_to_adv_stats(
+                        db, h, a,
+                        MatchStatsAggregationState,
+                        MatchLineupPlayer,
+                        adv_db_manager,
+                        _ensure_adv_player,
+                        _update_player_statistics,
+                        (lambda: (lambda v: int(v) if v else None)(os.environ.get('DEFAULT_TOURNAMENT_ID')))(),
+                        app.logger
+                    )),
+                    settle_open_bets_fn=lambda: None,
+                    build_schedule_payload=_build_schedule_payload_from_sheet,
+                    build_league_payload=_build_league_table_payload,
+                    logger=app.logger,
+                    scorers_cache=SCORERS_CACHE,
+                )
             except Exception as fin_err:  # noqa: F841
                 try: app.logger.error(f"finalize after settle failed: {fin_err}")
                 except Exception: pass

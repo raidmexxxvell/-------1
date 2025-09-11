@@ -390,6 +390,16 @@ class Tournament(Base):
 - Логирование: снижен шум от предупреждений «No match found» при расчёте тоталов — в `_get_match_total_goals` сообщение переведено в INFO и логируется один раз на пару команд (dedup); предупреждения по некорректному формату счёта сохранены как WARNING.
 
 ### 2025-09-04
+### 2025-09-11 (Service extraction – шаг 1)
+- Вынесены три сервисных модуля в `services/` без изменения бизнес-логики:
+    - `betting_settle.py` → `settle_open_bets` (массовый расчёт открытых ставок). Ранее `_settle_open_bets` в `app.py` (~глубокая зона файла).
+    - `adv_lineups.py` → `apply_lineups_to_adv_stats` (идемпотентное применение составов к расширенной схеме статистики, выставление `lineup_counted`).
+    - `snapshots.py` → `snapshot_get/snapshot_set` (унифицированные retry 3 попытки + backoff 100–300 ms, JSON сериализация, централизованный логгер). Ранее `_snapshot_get/_snapshot_set` в `app.py`.
+- Обновлён `services/__init__.py` для экспорта новых функций (с защитой try/except при раннем импорте).
+- Цель: уменьшить размер `app.py`, подготовить почву для внедрения метрик (latency, failures) и повторного использования снапшот‑логики в будущих модулях (e.g. leaderboard precompute или новостные дайджесты).
+- Изменений в API контракте и схемах БД нет. Идемпотентные флаги `lineup_counted` и транзакционные границы сохранены.
+- Следующий шаг (план): заменить внутренние вызовы в `finalize_match_core` на эти сервисы через DI; добавить lightweight unit тесты для settle (парсинг selection, edge cases totals, specials fallback). 
+
 - Splash экран: добавлен числовой индикатор прогресса (0–100%) под полосой загрузки.
 - Введён stage API `window.splashStages` (profile → 70%, data → 90%, finish → 100%) + `setSplashProgress` для ручной коррекции.
 - Устранён горизонтальный скролл: убраны full-bleed стили у `.subtabs`, ограничены `profile-top-area`, инсет для нижней навигации.
