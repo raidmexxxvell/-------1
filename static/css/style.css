@@ -464,14 +464,16 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 #ufo-team .summary-left { display: grid; place-items: center; }
 /* Полукруговая диаграмма результатов (W/D/L) */
-#ufo-team .gauge {
+#ufo-team .gauge { 
     position: relative;
-    width: 140px; height: 72px; /* полукруг */
-    display:flex; align-items:flex-end; justify-content:center;
+    width: 140px; height: 90px; /* место под дугой и текст */
+    display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+    padding-top:4px;
 }
 #ufo-team .stat-summary { position:relative; }
-#ufo-team .summary-right { padding-left:6px; }
-#ufo-team .gauge .gauge-text { position:absolute; top:8px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; }
+#ufo-team .summary-right { padding-left:10px; }
+#ufo-team .gauge svg { height:60px; }
+#ufo-team .gauge .gauge-text { position:static; transform:none; margin-top:4px; display:flex; flex-direction:column; align-items:center; }
 #ufo-team .gauge svg { overflow: visible; }
 #ufo-team .gauge path.track { stroke: rgba(255,255,255,0.08); stroke-width: 10; fill:none; stroke-linecap:round; }
 #ufo-team .gauge path.segment { stroke-width: 10; fill:none; stroke-linecap: round; filter: drop-shadow(0 0 2px rgba(0,0,0,0.3)); }
