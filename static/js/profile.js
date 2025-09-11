@@ -314,9 +314,9 @@
         let slides = Array.isArray(window.__HOME_ADS__) ? window.__HOME_ADS__.slice() : null;
         if (!slides || slides.length === 0) {
             slides = [
-                { img: '/static/img/ligareklama.webp', title: 'Нажми', action: 'BLB' },
-                { img: '/static/img/reklama.webp', title: '', action: '' },
-                { img: '/static/img/reklama.webp', title: '', action: '' }
+                { img: '/static/img/ligareklama.jpg', title: 'Нажми', action: 'BLB' },
+                { img: '/static/img/reklama.jpg', title: '', action: '' },
+                { img: '/static/img/reklama.jpg', title: '', action: '' }
             ];
         }
         // Рендер слайдов

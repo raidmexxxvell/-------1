@@ -7,7 +7,12 @@ import hashlib
 import hmac
 from datetime import datetime, date, timezone
 from datetime import timedelta
-from services import snapshot_get as _snapshot_get, snapshot_set as _snapshot_set, apply_lineups_to_adv_stats as _apply_lineups_to_adv_stats, settle_open_bets as _settle_open_bets
+from services import (
+    snapshot_get as _snapshot_get,
+    snapshot_set as _snapshot_set,
+    apply_lineups_to_adv_stats as _apply_lineups_to_adv_stats,
+    settle_open_bets as _settle_open_bets,
+)
 from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, g, make_response, current_app
@@ -183,14 +188,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 import threading
 try:
-    import orjson  # faster JSON serializer (required in prod)
+    import orjson as _orjson  # type: ignore  # optional faster serializer
     _ORJSON_AVAILABLE = True
 except Exception:
-    # Should not happen in production: orjson listed in requirements.
-    orjson = None  # type: ignore
+    _orjson = None  # type: ignore
     _ORJSON_AVAILABLE = False
     if not os.environ.get('ORJSON_WARNED'):
-        print('[WARN] orjson not available, falling back to standard json. Install orjson for best performance.')
+        print('[WARN] orjson not available, falling back to std json. Install orjson for best performance.')
         os.environ['ORJSON_WARNED'] = '1'
 
 # Flask app
@@ -3619,8 +3623,8 @@ def _etag_for_payload(payload: dict) -> str:
 # Fast JSON response helper (uses orjson when available)
 def _json_response(payload: dict, status: int = 200):
     try:
-        if _ORJSON_AVAILABLE:
-            data = orjson.dumps(payload)
+        if _ORJSON_AVAILABLE and _orjson is not None:
+            data = _orjson.dumps(payload)
         else:
             data = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         resp = app.response_class(data, status=status, mimetype='application/json')
@@ -5570,6 +5574,11 @@ def api_match_status_set():
             app.logger.warning(f"Failed to build betting tours payload: {e}")
         if status == 'finished':
             try:
+                # Инициализация fallback'ов (реальные функции могут быть ниже по файлу)
+                if '_ETAG_CACHE' not in globals():
+                    _ETAG_CACHE = {}
+                _build_meta_fn = globals().get('_build_match_meta') or (lambda h,a: {'tour': None,'date':'','time':'','datetime':''})
+                _mirror_fn = globals().get('_mirror_score_to_sheet') or (lambda *args, **kwargs: None)
                 _finalize_match_core(
                     db, home, away,
                     settle_open_bets=True,
@@ -5579,13 +5588,14 @@ def api_match_status_set():
                     MatchPlayerEvent=MatchPlayerEvent,
                     TeamPlayerStats=TeamPlayerStats,
                     MatchStatsAggregationState=MatchStatsAggregationState,
-                    snapshot_get=lambda d,k: _snapshot_get(d,k),
-                    snapshot_set=lambda d,k,p: _snapshot_set(d,k,p),
-                    cache_manager=multilevel_cache,
+                    snapshot_get=_snapshot_get,
+                    snapshot_set=_snapshot_set,
+                    # Используем уже инициализированный cache_manager (многоуровневый кэш)
+                    cache_manager=globals().get('cache_manager'),
                     websocket_manager=current_app.config.get('websocket_manager') if current_app else None,
                     etag_cache=_ETAG_CACHE,
-                    build_match_meta=_build_match_meta,
-                    mirror_score=_mirror_score_to_sheet,
+                    build_match_meta=_build_meta_fn,
+                    mirror_score=_mirror_fn,
                     apply_lineups_adv=lambda h,a: (_apply_lineups_to_adv_stats and _apply_lineups_to_adv_stats(
                         db, h, a,
                         MatchStatsAggregationState,
@@ -5608,7 +5618,7 @@ def api_match_status_set():
                         app.logger
                     )),
                     build_schedule_payload=_build_schedule_payload_from_sheet,
-                    build_league_payload=_build_league_table_payload,
+                    build_league_payload=_build_league_payload_from_db,
                     logger=app.logger,
                     scorers_cache=SCORERS_CACHE,
                 )
@@ -12169,6 +12179,10 @@ def api_match_settle():
                 db.commit()
             # Унифицированная финализация матча (результаты, спецрынки, статистика игроков, снапшоты)
             try:
+                if '_ETAG_CACHE' not in globals():
+                    _ETAG_CACHE = {}
+                _build_meta_fn = globals().get('_build_match_meta') or (lambda h,a: {'tour': None,'date':'','time':'','datetime':''})
+                _mirror_fn = globals().get('_mirror_score_to_sheet') or (lambda *args, **kwargs: None)
                 _finalize_match_core(
                     db, home, away,
                     settle_open_bets=False,
@@ -12178,13 +12192,14 @@ def api_match_settle():
                     MatchPlayerEvent=MatchPlayerEvent,
                     TeamPlayerStats=TeamPlayerStats,
                     MatchStatsAggregationState=MatchStatsAggregationState,
-                    snapshot_get=lambda d,k: _snapshot_get(d,k),
-                    snapshot_set=lambda d,k,p: _snapshot_set(d,k,p),
-                    cache_manager=multilevel_cache,
+                    snapshot_get=_snapshot_get,
+                    snapshot_set=_snapshot_set,
+                    # Используем уже инициализированный cache_manager (многоуровневый кэш)
+                    cache_manager=globals().get('cache_manager'),
                     websocket_manager=current_app.config.get('websocket_manager') if current_app else None,
                     etag_cache=_ETAG_CACHE,
-                    build_match_meta=_build_match_meta,
-                    mirror_score=_mirror_score_to_sheet,
+                    build_match_meta=_build_meta_fn,
+                    mirror_score=_mirror_fn,
                     apply_lineups_adv=lambda h,a: (_apply_lineups_to_adv_stats and _apply_lineups_to_adv_stats(
                         db, h, a,
                         MatchStatsAggregationState,
@@ -12197,7 +12212,7 @@ def api_match_settle():
                     )),
                     settle_open_bets_fn=lambda: None,
                     build_schedule_payload=_build_schedule_payload_from_sheet,
-                    build_league_payload=_build_league_table_payload,
+                    build_league_payload=_build_league_payload_from_db,
                     logger=app.logger,
                     scorers_cache=SCORERS_CACHE,
                 )
