@@ -49,8 +49,15 @@
         } catch(_){} 
     };
   btn.addEventListener('click', async()=>{
-    // Если матч не live — дополнительное подтверждение
-    if(!isLiveNow(match)) {
+    // Если на экране есть бейдж LIVE — считаем матч live (UI синхронизация)
+    let isLive = false;
+    try {
+      const badge = mdPane.querySelector('.match-details-topbar .live-badge, .match-header .live-badge');
+      isLive = !!badge;
+    } catch(_) {}
+    // Если нет бейджа, fallback к isLiveNow(match)
+    if(!isLive) isLive = isLiveNow(match);
+    if(!isLive) {
       const proceed = await new Promise(resolve => {
         let ov=document.querySelector('.modal-overlay');
         if(!ov){
