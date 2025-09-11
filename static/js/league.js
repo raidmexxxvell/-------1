@@ -394,6 +394,56 @@
         try { patchScheduleVotes(pane); } catch(_) {}
       });
     } catch(_) {}
+
+    // --- LIVE badges periodic rescan (UI only) ---
+    try {
+      if (pane.__liveRescanTimer) { clearInterval(pane.__liveRescanTimer); }
+      const rescanLiveBadges = () => {
+        try {
+          if (!window.MatchUtils || typeof window.MatchUtils.isLiveNow !== 'function') return;
+          const finStore = (window.__FINISHED_MATCHES = window.__FINISHED_MATCHES || {});
+          const mkKey = (mm)=>{ try { return `${(mm.home||'').toLowerCase().trim()}__${(mm.away||'').toLowerCase().trim()}__${(mm.date||mm.datetime||'').toString().slice(0,10)}`; } catch(_) { return `${(mm.home||'')}__${(mm.away||'')}`; } };
+          // Берём только видимые отрисованные карточки
+          const cards = pane.querySelectorAll('.tour-block .tour-body .match-card');
+          let scanned = 0;
+          cards.forEach(card => {
+            if (scanned > 120) return; // safety limit
+            scanned++;
+            try {
+              // Восстановление данных матча из DOM
+              const home = card.querySelector('.team.home .team-name')?.getAttribute('data-team-name') || card.querySelector('.team.home .team-name')?.textContent || '';
+              const away = card.querySelector('.team.away .team-name')?.getAttribute('data-team-name') || card.querySelector('.team.away .team-name')?.textContent || '';
+              let date = card.getAttribute('data-date') || '';
+              let time = card.getAttribute('data-time') || '';
+              if (!date) {
+                const headerSpan = card.querySelector('.match-header span');
+                const txt = headerSpan ? headerSpan.textContent||'' : '';
+                const m = txt.match(/(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})/);
+                if (m) { date = m[1].split('.').reverse().join('-'); time = time || m[2]; }
+              }
+              const matchObj = { home, away, date, time };
+              const live = window.MatchUtils.isLiveNow(matchObj);
+              const key = mkKey(matchObj);
+              const header = card.querySelector('.match-header'); if(!header) return;
+              let badge = header.querySelector('.live-badge');
+              if (live && !finStore[key]) {
+                if (!badge) {
+                  badge = document.createElement('span'); badge.className='live-badge';
+                  const dot=document.createElement('span'); dot.className='live-dot';
+                  const lbl=document.createElement('span'); lbl.textContent='Матч идет';
+                  badge.append(dot,lbl); header.appendChild(badge);
+                }
+              } else if (badge) {
+                badge.remove();
+              }
+            } catch(_) {}
+          });
+        } catch(_) {}
+      };
+      rescanLiveBadges(); // immediate
+      pane.__liveRescanTimer = setInterval(rescanLiveBadges, 60000); // every 60s
+    } catch(_) {}
+    // --- end LIVE badges periodic rescan ---
   }
 
   function renderResults(pane, data) {
