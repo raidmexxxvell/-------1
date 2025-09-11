@@ -5695,6 +5695,18 @@ def api_match_status_get():
             except Exception:
                 pass
         return _json_response({'status':'scheduled', 'soon': False, 'live_started_at': ''})
+    # Приоритет ручного флага 'finished' над расчётом по времени (если матч вручную закрыт раньше окна окончания)
+    if SessionLocal is not None:
+        try:
+            db = get_db()
+            try:
+                mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
+                if mf and mf.status == 'finished':
+                    return _json_response({'status':'finished', 'soon': False, 'live_started_at': ''})
+            finally:
+                db.close()
+        except Exception:
+            pass
     if (dt - timedelta(minutes=10)) <= now < dt:
         return _json_response({'status':'scheduled', 'soon': True, 'live_started_at': ''})
     if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
@@ -12288,6 +12300,27 @@ def api_match_settle():
             except Exception as fin_err:  # noqa: F841
                 try: app.logger.error(f"finalize after settle failed: {fin_err}")
                 except Exception: pass
+            # Помечаем матч как завершённый (MatchFlags.status='finished') чтобы UI перестал считать его live по окну времени
+            try:
+                mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
+                now_utc = datetime.now(timezone.utc)
+                if not mf:
+                    mf = MatchFlags(home=home, away=away, status='finished', updated_at=now_utc)
+                    db.add(mf)
+                else:
+                    mf.status = 'finished'
+                    mf.updated_at = now_utc
+                db.commit()
+            except Exception:
+                pass
+            # Инвалидация schedule snapshot etag (если используем ETag кэш)
+            try:
+                if '_ETAG_CACHE' in globals():
+                    for k in list(_ETAG_CACHE.keys()):
+                        if k.startswith('schedule:'):
+                            _ETAG_CACHE.pop(k, None)
+            except Exception:
+                pass
             return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt, 'total_bets': total_bets_cnt, 'open_before': open_before_cnt})
         finally:
             db.close()
