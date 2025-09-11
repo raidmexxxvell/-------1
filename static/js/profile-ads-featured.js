@@ -88,7 +88,8 @@
     track.addEventListener('touchend', ()=>{ if(!dragging)return; dragging=false; const w=box.clientWidth; const cur=Math.round(track.scrollLeft/Math.max(1,w)); index=Math.max(0, Math.min(slides.length-1, cur)); apply(); arm(); }, { passive:true });
     window.addEventListener('resize', apply);
     apply();
-    try { window.dispatchEvent(new CustomEvent('preload:ads-ready')); } catch(_) {}
+  try { window.dispatchEvent(new CustomEvent('preload:ads-ready')); } catch(_) {}
+  setTimeout(()=>{ try { window.dispatchEvent(new CustomEvent('main:ads-ready')); } catch(_) {} }, 0);
   }
 
   async function renderTopMatchOfWeek(overrideMatch){
@@ -164,7 +165,8 @@
       async function loadAgg(withInit){ try { const dkey=(m.date?String(m.date):(m.datetime?String(m.datetime):'')).slice(0,10); const params=new URLSearchParams({ home:m.home||'', away:m.away||'', date:dkey }); if(withInit) params.append('initData', (window.Telegram?.WebApp?.initData || '')); const agg=await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json()); const h=Number(agg?.home||0), d=Number(agg?.draw||0), a=Number(agg?.away||0); const sum=Math.max(1,h+d+a); segH.style.width=Math.round(h*100/sum)+'%'; segD.style.width=Math.round(d*100/sum)+'%'; segA.style.width=Math.round(a*100/sum)+'%'; if(agg && agg.my_choice){ btns.querySelectorAll('button').forEach(x=>x.disabled=true); btns.style.display='none'; confirm.textContent='Ваш голос учтён'; try { localStorage.setItem('voted:'+voteKey,'1'); } catch(_){} } } catch(_) { segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; } }
       try { if(localStorage.getItem('voted:'+voteKey) === '1'){ btns.style.display='none'; confirm.textContent='Ваш голос учтён'; } } catch(_){}
       loadAgg(true);
-    try { window.dispatchEvent(new CustomEvent('preload:topmatch-ready')); } catch(_) {}
+  try { window.dispatchEvent(new CustomEvent('preload:topmatch-ready')); } catch(_) {}
+  setTimeout(()=>{ try { window.dispatchEvent(new CustomEvent('main:topmatch-ready')); } catch(_) {} }, 0);
     } catch(_){}
   }
 

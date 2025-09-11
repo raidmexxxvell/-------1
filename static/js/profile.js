@@ -447,6 +447,10 @@
             `;
             list.appendChild(div);
         });
+        // После полного рендера новостей диспатчим событие main:news-ready
+        setTimeout(() => {
+            document.dispatchEvent(new CustomEvent('main:news-ready'));
+        }, 0);
     }
 
     // Авто-загрузка новостей при первом входе в приложение (до выбора лиги)

@@ -249,21 +249,22 @@ document.addEventListener('DOMContentLoaded', () => {
     let newsReady = false;
     let adsReady = false;
     let topMatchReady = false;
+    // Новая логика: ждём именно main:*-ready (после полной отрисовки)
     const tryMarkDataReady = () => {
-        if (!stageDataReady && (newsReady || adsReady || topMatchReady)) {
+        if (!stageDataReady && newsReady && adsReady && topMatchReady) {
             stageDataReady = true;
-            info('Data stage ready via preload events');
+            info('Data stage ready via main:* events');
             try { window.dispatchEvent(new CustomEvent('app:data-ready')); } catch(_) {}
         }
-        if (!ready && newsReady && (adsReady || topMatchReady)) {
+        if (!ready && newsReady && adsReady && topMatchReady) {
             ready = true;
-            info('All core preloads ready -> finish');
+            info('All main content rendered -> finish');
             try { window.dispatchEvent(new CustomEvent('app:all-ready')); } catch(_) {}
         }
     };
-    window.addEventListener('preload:news-ready', () => { newsReady = true; tryMarkDataReady(); }, { once:true });
-    window.addEventListener('preload:ads-ready', () => { adsReady = true; tryMarkDataReady(); }, { once:true });
-    window.addEventListener('preload:topmatch-ready', () => { topMatchReady = true; tryMarkDataReady(); }, { once:true });
+    document.addEventListener('main:news-ready', () => { newsReady = true; tryMarkDataReady(); }, { once:true });
+    document.addEventListener('main:ads-ready', () => { adsReady = true; tryMarkDataReady(); }, { once:true });
+    document.addEventListener('main:topmatch-ready', () => { topMatchReady = true; tryMarkDataReady(); }, { once:true });
     // 1) Профиль (имя + аватар)
     window.addEventListener('app:profile-ready', () => {
         info('Received app:profile-ready');
