@@ -98,9 +98,29 @@
         if (host) host.innerHTML='';
         return;
       }
+      // Восстановление сохранённого feature-match
       let m = null;
-      if (overrideMatch && typeof overrideMatch === 'object') {
+      let savedKey = null;
+      try { savedKey = localStorage.getItem('feature-match-key')||null; } catch(_){}
+      if (!overrideMatch && savedKey) {
+        const res = await fetch(`/api/schedule?_=${Date.now()}`);
+        const data = await res.json();
+        const all = data?.tours?.flatMap(t=>t.matches)||[];
+        m = all.find(x=>{
+          const h=(x?.home||'').toLowerCase().trim();
+          const a=(x?.away||'').toLowerCase().trim();
+          const d=String(x?.date||x?.datetime||'').slice(0,10);
+          return `${h}__${a}__${d}`===savedKey;
+        }) || data?.match_of_week;
+      } else if (overrideMatch && typeof overrideMatch === 'object') {
         m = overrideMatch;
+        // Сохраняем ключ выбранного матча
+        try {
+          const h=(m?.home||'').toLowerCase().trim();
+          const a=(m?.away||'').toLowerCase().trim();
+          const d=String(m?.date||m?.datetime||'').slice(0,10);
+          localStorage.setItem('feature-match-key', `${h}__${a}__${d}`);
+        } catch(_){}
       } else {
         const res = await fetch(`/api/schedule?_=${Date.now()}`);
         const data = await res.json();

@@ -641,12 +641,16 @@
         const table = document.getElementById('stats-table');
         const updated = document.getElementById('stats-table-updated');
         if (!table) return;
+        // Очищаем таблицу и скрываем tbody до загрузки, чтобы не мигали старые строки
+        const tbody = table.querySelector('tbody');
+        if (tbody) { tbody.innerHTML = ''; tbody.style.display = 'none'; }
+        if (updated) updated.textContent = '';
         _statsLoading = true;
         fetch('/api/stats-table')
             .then(r => r.json())
             .then(data => { try { window.League?.renderStatsTable?.(table, updated, data); } catch(_) {} })
             .catch(err => { console.error('stats table load error', err); })
-            .finally(() => { _statsLoading = false; });
+            .finally(() => { _statsLoading = false; if (tbody) tbody.style.display = ''; });
     }
 
     // --------- ЛИДЕРБОРД ---------
