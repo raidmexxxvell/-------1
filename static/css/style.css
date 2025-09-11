@@ -463,15 +463,47 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     padding: 12px;
 }
 #ufo-team .summary-left { display: grid; place-items: center; }
+/* Полукруговая диаграмма результатов (W/D/L) */
 #ufo-team .gauge {
-    width: 120px; height: 120px; border-radius: 50%;
-    background:
-        radial-gradient(closest-side, rgba(0,0,0,0) 64%, rgba(255,255,255,0.06) 65%),
-        conic-gradient(var(--primary) calc(var(--pct,0) * 1%), rgba(255,255,255,0.08) 0);
-    display:flex; align-items:center; justify-content:center;
-    border: 1px solid rgba(255,255,255,0.08);
+    position: relative;
+    width: 140px; height: 72px; /* полукруг */
+    display:flex; align-items:flex-end; justify-content:center;
 }
-#ufo-team .gauge .gauge-text { text-align:center; }
+#ufo-team .gauge svg { overflow: visible; }
+#ufo-team .gauge path.track { stroke: rgba(255,255,255,0.08); stroke-width: 10; fill:none; stroke-linecap:round; }
+#ufo-team .gauge path.segment { stroke-width: 10; fill:none; stroke-linecap: round; filter: drop-shadow(0 0 2px rgba(0,0,0,0.3)); }
+#ufo-team .gauge path.segment.seg-win { stroke: #10b981; }
+#ufo-team .gauge path.segment.seg-draw { stroke: #9aa4b2; }
+#ufo-team .gauge path.segment.seg-loss { stroke: #ef4444; }
+#ufo-team .gauge-tooltip { position:absolute; background: rgba(0,0,0,0.85); color:#fff; font-size:11px; padding:4px 8px; border-radius:6px; pointer-events:none; transform:translate(-50%, -6px); white-space:nowrap; transition:opacity .15s; }
+#ufo-team .gauge-arc {
+    position:absolute; left:0; right:0; bottom:0; height:140px; /* полный диаметр */
+    pointer-events:none;
+    mask: radial-gradient(circle at 50% 100%, rgba(0,0,0,0) 58%, rgba(0,0,0,1) 59%) top/100% 200% no-repeat,
+          linear-gradient(#000,#000); /* вырез внутреннего круга */
+    -webkit-mask: radial-gradient(circle at 50% 100%, rgba(0,0,0,0) 58%, rgba(0,0,0,1) 59%) top/100% 200% no-repeat,
+                   linear-gradient(#000,#000);
+    border-bottom-left-radius:140px; border-bottom-right-radius:140px;
+    overflow:hidden;
+}
+#ufo-team .gauge-arc-inner {
+    position:absolute; inset:0; background:var(--gauge-bg,rgba(255,255,255,0.08));
+}
+#ufo-team .gauge-arc-fill {
+    position:absolute; inset:0;
+    background:conic-gradient(from 180deg,
+      var(--g-win,#10b981) 0deg var(--g-win-end,0deg),
+      var(--g-draw,#9aa4b2) var(--g-win-end,0deg) var(--g-draw-end,0deg),
+      var(--g-loss,#ef4444) var(--g-draw-end,0deg) 180deg,
+      transparent 180deg 360deg);
+    mask:linear-gradient(#000,#000); -webkit-mask:linear-gradient(#000,#000);
+}
+#ufo-team .gauge-center-label {
+    position:absolute; bottom:6px; text-align:center; font-size:11px; color:var(--gray); width:100%;
+}
+#ufo-team .gauge-value { font-size: 22px; font-weight: 900; line-height:1; }
+#ufo-team .gauge .gauge-text { text-align:center; position:relative; z-index:2; }
+#ufo-team .gauge .gauge-label { font-size: 11px; color: var(--gray); margin-top: 2px; }
 #ufo-team .gauge .gauge-value { font-size: 20px; font-weight: 900; }
 #ufo-team .gauge .gauge-label { font-size: 11px; color: var(--gray); margin-top: -2px; }
 

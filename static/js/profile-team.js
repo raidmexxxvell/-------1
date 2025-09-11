@@ -79,18 +79,86 @@
   const statsTitle = document.createElement('div'); statsTitle.className='stats-title'; statsTitle.textContent='Статистика';
   const summary = document.createElement('div'); summary.className='stat-summary';
     const left = document.createElement('div'); left.className='summary-left';
-    const gauge = document.createElement('div'); gauge.className='gauge'; gauge.style.setProperty('--pct', Math.max(0, Math.min(100, (stats.matches||0))));
+    // Полукруг (SVG) с тремя сегментами W/D/L + tooltip
+    const gauge = document.createElement('div'); gauge.className='gauge';
+    const total = Math.max(0, stats.matches||0);
+    const w = Math.max(0, stats.wins||0);
+    const d = Math.max(0, stats.draws||0);
+    const l = Math.max(0, stats.losses||0);
+    let wn=w, dn=d, ln=l, sum = w+d+l;
+    if (total && sum && sum !== total){ const k= total/sum; wn=w*k; dn=d*k; ln=l*k; }
+    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('width','140'); svg.setAttribute('height','72'); svg.setAttribute('viewBox','0 0 140 72');
+    const centerX=70, centerY=70, radius=60; // полукруг над областью
+    // Фон-трек
+    const track = document.createElementNS('http://www.w3.org/2000/svg','path');
+    track.setAttribute('d', describeArc(centerX, centerY, radius, 180, 0));
+    track.setAttribute('class','track');
+    svg.appendChild(track);
+    // Подготовка сегментов
+    const segments = [];
+    if (wn>0) segments.push({label:'Победы', short:'W', value:w, adj:wn, colorClass:'seg-win'});
+    if (dn>0) segments.push({label:'Ничьи', short:'D', value:d, adj:dn, colorClass:'seg-draw'});
+    if (ln>0) segments.push({label:'Поражения', short:'L', value:l, adj:ln, colorClass:'seg-loss'});
+    const usableAngle = 180;
+    const gapDeg = segments.length>1 ? 4 : 0; // межсегментный визуальный зазор
+    const totalGap = gapDeg * (segments.length - 1);
+    const scale = usableAngle - totalGap;
+    let cursor = 180; // старт слева
+    segments.forEach((seg, idx) => {
+      const raw = total? (seg.adj/total)*scale : 0;
+      const startAngle = cursor;
+      const endAngle = startAngle - raw; // двигаемся к 0
+      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+      const innerGap = gapDeg && idx < segments.length-1 ? gapDeg : 0;
+      // Для аккуратных закруглений слегка уменьшаем дугу
+      const pad = raw>4 ? 1.5 : 0; // не убивать совсем короткие
+      const realStart = startAngle - pad;
+      const realEnd = endAngle + pad;
+      path.setAttribute('d', describeArc(centerX, centerY, radius, realStart, realEnd));
+      path.setAttribute('class','segment '+seg.colorClass);
+      const pct = total? (seg.value/total*100) : 0;
+      path.dataset.tooltip = `${seg.label}: ${seg.value} (${pct.toFixed(1)}%)`;
+      svg.appendChild(path);
+      cursor = endAngle - innerGap; // смещаем, учитывая gap
+    });
+    // Tooltip
+    const tip = document.createElement('div'); tip.className='gauge-tooltip'; tip.style.opacity='0';
+    gauge.append(svg, tip);
+    // Текст по центру
     const gText = document.createElement('div'); gText.className='gauge-text';
-    const gVal = document.createElement('div'); gVal.className='gauge-value'; gVal.textContent = String(stats.matches||0);
-    // Русская плюрализация для "матч"
-    const pluralMatches = (n)=>{
-      n = Math.abs(n||0);
-      if (n % 10 === 1 && n % 100 !== 11) return 'матч';
-      if ([2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100)) return 'матча';
-      return 'матчей';
-    };
-    const gLab = document.createElement('div'); gLab.className='gauge-label'; gLab.textContent = pluralMatches(stats.matches||0);
-    gText.append(gVal, gLab); gauge.appendChild(gText); left.appendChild(gauge);
+    const gVal = document.createElement('div'); gVal.className='gauge-value'; gVal.textContent = String(total);
+    const pluralMatches = (n)=>{ n=Math.abs(n||0); if(n%10===1&&n%100!==11)return 'матч'; if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100)) return 'матча'; return 'матчей'; };
+    const gLab = document.createElement('div'); gLab.className='gauge-label'; gLab.textContent = pluralMatches(total);
+    gText.append(gVal, gLab);
+    gauge.append(gText);
+    // Наведение: показываем tooltip
+    svg.addEventListener('mousemove', (e)=>{
+      const target = e.target.closest('.segment');
+      if (target){
+        tip.textContent = target.dataset.tooltip||'';
+        tip.style.opacity='1';
+        const rect = gauge.getBoundingClientRect();
+        tip.style.left = (e.clientX - rect.left) + 'px';
+        tip.style.top = (e.clientY - rect.top - 12) + 'px';
+      } else {
+        tip.style.opacity='0';
+      }
+    });
+    svg.addEventListener('mouseleave', ()=>{ tip.style.opacity='0'; });
+    left.appendChild(gauge);
+    // Функция описания дуги (startAngle -> endAngle, углы в градусах, 0° справа, растёт по часовой стрелке)
+    function describeArc(cx, cy, r, startAngle, endAngle){
+      const start = polar(cx, cy, r, startAngle);
+      const end = polar(cx, cy, r, endAngle);
+      const large = (startAngle - endAngle) > 180 ? 1 : 0; // не будет >180 здесь, но на будущее
+      const sweep = 0; // против часовой стрелки (верхняя дуга)
+      return `M ${start.x} ${start.y} A ${r} ${r} 0 ${large} ${sweep} ${end.x} ${end.y}`;
+    }
+    function polar(cx, cy, r, deg){
+      const rad = (Math.PI/180)*deg;
+      return { x: cx + r*Math.cos(rad), y: cy + r*Math.sin(rad) };
+    }
     const right = document.createElement('div'); right.className='summary-right';
     const ul = document.createElement('div'); ul.className='summary-list';
     const row = (label, value)=>{ const d=document.createElement('div'); d.innerHTML=`<span class="dot"></span>${label}: <b>${value}</b>`; return d; };
