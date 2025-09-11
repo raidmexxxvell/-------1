@@ -11,8 +11,11 @@ from services import (
     snapshot_get as _snapshot_get,
     snapshot_set as _snapshot_set,
     apply_lineups_to_adv_stats as _apply_lineups_to_adv_stats,
-    settle_open_bets as _settle_open_bets,
+        settle_open_bets as _settle_open_bets_new,
 )
+
+# Backward compat alias (старое имя использовалось в комментариях / возможных внешних импортерах)
+_settle_open_bets = None  # все вызовы переведены на _settle_open_bets_new
 from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, g, make_response, current_app
@@ -5606,7 +5609,17 @@ def api_match_status_set():
                         (lambda: (lambda v: int(v) if v else None)(os.environ.get('DEFAULT_TOURNAMENT_ID')))(),
                         app.logger
                     )),
-                    settle_open_bets_fn=lambda: (_settle_open_bets() if _settle_open_bets else None),
+                    settle_open_bets_fn=lambda: _settle_open_bets_new(
+                        db,
+                        Bet,
+                        User,
+                        _get_match_result,
+                        _get_match_total_goals,
+                        _get_special_result,
+                        BET_MATCH_DURATION_MINUTES,
+                        datetime.now(timezone.utc),
+                        app.logger
+                    ),
                     build_schedule_payload=_build_schedule_payload_from_sheet,
                     build_league_payload=_build_league_payload_from_db,
                     logger=app.logger,
@@ -7413,7 +7426,22 @@ def api_betting_tours():
         now_ts = int(time.time())
         if now_ts - _LAST_SETTLE_TS > 300:
             try:
-                _settle_open_bets()
+                if SessionLocal is not None:
+                    dbs: Session = get_db()
+                    try:
+                        _settle_open_bets_new(
+                            dbs,
+                            Bet,
+                            User,
+                            _get_match_result,
+                            _get_match_total_goals,
+                            _get_special_result,
+                            BET_MATCH_DURATION_MINUTES,
+                            datetime.now(timezone.utc),
+                            app.logger
+                        )
+                    finally:
+                        dbs.close()
             except Exception as e:
                 try:
                     app.logger.warning(f"Авторасчёт ставок: {e}")
