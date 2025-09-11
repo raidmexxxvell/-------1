@@ -9,16 +9,31 @@
     let slides = Array.isArray(window.__HOME_ADS__) ? window.__HOME_ADS__.slice() : null;
     if (!slides || slides.length === 0) {
       slides = [
-        { img: '/static/img/ligareklama.webp', title: 'Здесь может быть ваша лига — нажми', action: 'BLB' },
-        { img: '/static/img/reklama.webp', title: '', action: '' },
-        { img: '/static/img/reklama.webp', title: '', action: '' }
+        { img: '/static/img/ligareklama.jpg', fallback: '/static/img/ligareklama.webp', title: 'Здесь может быть ваша лига — нажми', action: 'BLB' },
+        { img: '/static/img/reklama.jpg', fallback: '/static/img/reklama.webp', title: '', action: '' },
+        { img: '/static/img/reklama.jpg', fallback: '/static/img/reklama.webp', title: '', action: '' }
       ];
     }
     track.innerHTML=''; dots.innerHTML='';
     slides.forEach((s, idx) => {
       const slide = document.createElement('div');
       slide.className = 'ads-slide';
-      slide.innerHTML = `<img src="${s.img}" alt="" class="ads-img" loading="lazy"><div class="ads-title">${s.title||''}</div>`;
+      const primary = s.img;
+      const fallback = s.fallback || null;
+      const imgEl = document.createElement('img');
+      imgEl.src = primary;
+      imgEl.alt = '';
+      imgEl.className = 'ads-img';
+      imgEl.loading = 'lazy';
+      if (fallback) {
+        imgEl.onerror = () => {
+          if (imgEl.dataset._triedFallback) return;
+          imgEl.dataset._triedFallback = '1';
+          imgEl.src = fallback;
+        };
+      }
+      const titleDiv = document.createElement('div'); titleDiv.className='ads-title'; titleDiv.textContent = s.title || '';
+      slide.append(imgEl, titleDiv);
       if (s.action) {
         slide.style.cursor='pointer';
         slide.addEventListener('click', () => {
@@ -76,16 +91,21 @@
     try { window.dispatchEvent(new CustomEvent('preload:ads-ready')); } catch(_) {}
   }
 
-  async function renderTopMatchOfWeek(){
+  async function renderTopMatchOfWeek(overrideMatch){
     try {
       if ((window.__ACTIVE_LEAGUE__ || 'UFO') !== 'UFO') {
         const host = document.getElementById('home-pane');
         if (host) host.innerHTML='';
         return;
       }
-      const res = await fetch(`/api/schedule?_=${Date.now()}`);
-      const data = await res.json();
-      const m = data?.match_of_week;
+      let m = null;
+      if (overrideMatch && typeof overrideMatch === 'object') {
+        m = overrideMatch;
+      } else {
+        const res = await fetch(`/api/schedule?_=${Date.now()}`);
+        const data = await res.json();
+        m = data?.match_of_week;
+      }
       const host = document.getElementById('home-pane');
       if (!host) return; host.innerHTML='';
       if (!m) { host.innerHTML='<div style="color: var(--gray);">Скоро анонс матча недели</div>'; return; }

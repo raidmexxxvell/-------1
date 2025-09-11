@@ -465,7 +465,7 @@
     }
 
     // Блок «Топ матч недели» под рекламой на Главной
-    async function renderTopMatchOfWeek() {
+    async function renderTopMatchOfWeek(overrideMatch) {
         try {
             // Показываем на Главной только для активной лиги (по ТЗ)
             if ((window.__ACTIVE_LEAGUE__ || 'UFO') !== 'UFO') {
@@ -473,9 +473,14 @@
                 if (host) host.innerHTML = '';
                 return;
             }
-            const res = await fetch(`/api/schedule?_=${Date.now()}`);
-            const data = await res.json();
-            const m = data?.match_of_week;
+            let m = null;
+            if (overrideMatch && typeof overrideMatch === 'object') {
+                m = overrideMatch;
+            } else {
+                const res = await fetch(`/api/schedule?_=${Date.now()}`);
+                const data = await res.json();
+                m = data?.match_of_week;
+            }
             const host = document.getElementById('home-pane');
             if (!host) return;
             host.innerHTML = '';

@@ -4121,7 +4121,14 @@ def api_feature_match_set():
             ok = _snapshot_set(db, Snapshot, 'feature-match', payload, app.logger)
             if not ok:
                 return jsonify({'error': 'store failed'}), 500
-            return jsonify({'status': 'ok'})
+            # Инвалидация связанных снапшотов/кэшей (расписание и матч недели на главной)
+            try:
+                if cache_manager:
+                    cache_manager.invalidate('schedule')
+                    cache_manager.invalidate('feature_match')
+            except Exception:
+                pass
+            return jsonify({'status': 'ok', 'match': payload['match']})
         finally:
             db.close()
     except Exception as e:
@@ -7151,7 +7158,7 @@ def api_schedule():
             if SessionLocal is not None:
                 db2 = get_db()
                 try:
-                    fm = _snapshot_get(db2, 'feature-match') or {}
+                    fm = _snapshot_get(db2, Snapshot, 'feature-match', app.logger) or {}
                     manual = (fm.get('payload') or {}).get('match') or None
                 finally:
                     db2.close()

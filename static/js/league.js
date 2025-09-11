@@ -295,7 +295,7 @@
               const r = await fetch('/api/feature-match/set', { method: 'POST', body: fd }); const j = await r.json().catch(()=>({}));
           if (!r.ok) throw new Error(j?.error || 'Ошибка'); star.textContent = 'Закреплено';
           try { localStorage.setItem('feature:current', JSON.stringify({ home: m.home||'', away: m.away||'', ts: Date.now() })); } catch(_) {}
-              try { window.renderTopMatchOfWeek?.(); } catch(_) {}
+              try { window.renderTopMatchOfWeek?.({ home: m.home, away: m.away, date: m.date, datetime: m.datetime, time: m.time }); } catch(_) {}
               try { document.dispatchEvent(new CustomEvent('feature-match:set', { detail: { match: m } })); } catch(_) {}
             } catch(_) { try { window.Telegram?.WebApp?.showAlert?.('Не удалось назначить матч недели'); } catch(_) {} }
           });
