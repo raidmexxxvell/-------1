@@ -7471,7 +7471,7 @@ def api_betting_tours():
             if SessionLocal is not None:
                 db2: Session = get_db()
                 try:
-                    _snapshot_set(db2, 'betting-tours', payload)
+                    _snapshot_set(db2, Snapshot, 'betting-tours', payload, app.logger)
                 finally:
                     db2.close()
             return payload
@@ -11237,7 +11237,50 @@ def api_admin_full_reset():
         except Exception:
             pass
 
-        return jsonify({'status': 'ok', 'summary': summary})
+        # После полного сброса: повторная очистка снапшотов ключей (защита от гонок фоновых задач)
+        try:
+            if SessionLocal is not None:
+                dbc: Session = get_db()
+                try:
+                    for k in ('schedule', 'results', 'league-table', 'stats-table', 'feature-match'):
+                        try:
+                            _snapshot_set(dbc, Snapshot, k, None, app.logger)
+                        except Exception:
+                            pass
+                    dbc.commit()
+                finally:
+                    try: dbc.close()
+                    except Exception: pass
+        except Exception:
+            pass
+
+        # Пробуем сразу же инициировать импорт расписания из Google Sheets, если админ хочет получить актуальные данные.
+        # Это best-effort: если не настроена интеграция — пропускаем.
+        post_import = {'schedule_imported': False}
+        try:
+            if os.environ.get('AUTO_IMPORT_SCHEDULE_AFTER_RESET','1') == '1':
+                # Используем билдера напрямую (не обращаемся к внешнему HTTP снова)
+                try:
+                    payload = _build_schedule_payload_from_sheet()
+                    if SessionLocal is not None:
+                        dbi: Session = get_db()
+                        try:
+                            _snapshot_set(dbi, Snapshot, 'schedule', payload, app.logger)
+                            post_import['schedule_imported'] = True
+                        finally:
+                            try: dbi.close()
+                            except Exception: pass
+                    try:
+                        if cache_manager:
+                            cache_manager.invalidate('schedule')
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return jsonify({'status': 'ok', 'summary': summary, 'post': post_import})
     except Exception as e:
         try:
             app.logger.error(f"full-reset error: {e}")
