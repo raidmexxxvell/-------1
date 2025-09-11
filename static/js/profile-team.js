@@ -87,14 +87,14 @@
     const l = Math.max(0, stats.losses||0);
     let wn=w, dn=d, ln=l, sum = w+d+l;
     if (total && sum && sum !== total){ const k= total/sum; wn=w*k; dn=d*k; ln=l*k; }
-    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-    svg.setAttribute('width','140'); svg.setAttribute('height','72'); svg.setAttribute('viewBox','0 0 140 72');
-    const centerX=70, centerY=70, radius=60; // полукруг над областью
+  const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('width','140'); svg.setAttribute('height','80'); svg.setAttribute('viewBox','0 0 140 80');
+  const centerX=70, centerY=70, radius=60; // центр ниже видимой области — показываем верхнюю половину
     // Фон-трек
     const track = document.createElementNS('http://www.w3.org/2000/svg','path');
     track.setAttribute('d', describeArc(centerX, centerY, radius, 180, 0));
     track.setAttribute('class','track');
-    svg.appendChild(track);
+  svg.appendChild(track);
     // Подготовка сегментов
     const segments = [];
     if (wn>0) segments.push({label:'Победы', short:'W', value:w, adj:wn, colorClass:'seg-win'});
@@ -126,12 +126,12 @@
     const tip = document.createElement('div'); tip.className='gauge-tooltip'; tip.style.opacity='0';
     gauge.append(svg, tip);
     // Текст по центру
-    const gText = document.createElement('div'); gText.className='gauge-text';
-    const gVal = document.createElement('div'); gVal.className='gauge-value'; gVal.textContent = String(total);
+  const gText = document.createElement('div'); gText.className='gauge-text';
+  const gVal = document.createElement('div'); gVal.className='gauge-value'; gVal.textContent = String(total);
     const pluralMatches = (n)=>{ n=Math.abs(n||0); if(n%10===1&&n%100!==11)return 'матч'; if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100)) return 'матча'; return 'матчей'; };
-    const gLab = document.createElement('div'); gLab.className='gauge-label'; gLab.textContent = pluralMatches(total);
-    gText.append(gVal, gLab);
-    gauge.append(gText);
+  const gLab = document.createElement('div'); gLab.className='gauge-label'; gLab.textContent = pluralMatches(total);
+  gText.append(gVal, gLab);
+  gauge.append(gText);
     // Наведение: показываем tooltip
     svg.addEventListener('mousemove', (e)=>{
       const target = e.target.closest('.segment');
@@ -149,10 +149,11 @@
     left.appendChild(gauge);
     // Функция описания дуги (startAngle -> endAngle, углы в градусах, 0° справа, растёт по часовой стрелке)
     function describeArc(cx, cy, r, startAngle, endAngle){
+      // Рисуем по часовой стрелке (sweep=1) чтобы визуально шло слева направо сверху
       const start = polar(cx, cy, r, startAngle);
       const end = polar(cx, cy, r, endAngle);
-      const large = (startAngle - endAngle) > 180 ? 1 : 0; // не будет >180 здесь, но на будущее
-      const sweep = 0; // против часовой стрелки (верхняя дуга)
+      const large = Math.abs(startAngle - endAngle) > 180 ? 1 : 0;
+      const sweep = 1; // по часовой
       return `M ${start.x} ${start.y} A ${r} ${r} 0 ${large} ${sweep} ${end.x} ${end.y}`;
     }
     function polar(cx, cy, r, deg){

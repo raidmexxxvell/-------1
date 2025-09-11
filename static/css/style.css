@@ -469,6 +469,9 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     width: 140px; height: 72px; /* полукруг */
     display:flex; align-items:flex-end; justify-content:center;
 }
+#ufo-team .stat-summary { position:relative; }
+#ufo-team .summary-right { padding-left:6px; }
+#ufo-team .gauge .gauge-text { position:absolute; top:8px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; }
 #ufo-team .gauge svg { overflow: visible; }
 #ufo-team .gauge path.track { stroke: rgba(255,255,255,0.08); stroke-width: 10; fill:none; stroke-linecap:round; }
 #ufo-team .gauge path.segment { stroke-width: 10; fill:none; stroke-linecap: round; filter: drop-shadow(0 0 2px rgba(0,0,0,0.3)); }
