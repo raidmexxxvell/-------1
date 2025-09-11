@@ -99,6 +99,20 @@
     - Клиентский загрузчик: `static/js/match-details-fetch.js` → `window.fetchMatchDetails`
     - Пуллинг статов: `static/js/profile-match-stats.js` (10–15с, ETag)
     - Анти‑фликер после админских правок: `static/js/profile-match-advanced.js`
+        - Унифицированная финализация матча: сервис `services/match_finalize.py` → `finalize_match_core()` вызывается из:
+                - `POST /api/match/status/set` (когда `status=finished`, с параметром `settle_open_bets=True`)
+                - `POST /api/match/settle` (после ручного расчёта ставок, `settle_open_bets=False` — ставки уже обработаны локально)
+            Поведение раньше: две почти идентичные ветки кода в `app.py` (дублирование ~450+ строк) — риск расхождений, сложнее вносить изменения.
+            Сейчас: единая функция шагов:
+                1) Upsert финального счёта в snapshot `results` (+ инвалидация `results`, WS оповещение, очистка `team-overview:*` ETag)
+                2) Автофикс спецрынков (penalty/redcard) → 0 если не установлен
+                3) (опционально) массовый settle открытых ставок (`_settle_open_bets`) + синхронизация турнирной таблицы (через внутренние вызовы)
+                4) Применение составов и событий в расширенную схему (`_apply_lineups_to_adv_stats`)
+                5) Идемпотентная локальная агрегация `TeamPlayerStats` (через `MatchStatsAggregationState`) + пересбор `SCORERS_CACHE` и снапшота `stats-table`
+                6) Обновление снапшота `schedule` (удаление завершённого матча из активных)
+                7) Пересборка снапшота `league-table` и широковещательная нотификация
+            Идемпотентность: повторный вызов не удваивает `games/goals/...` за счёт флагов `lineup_counted` и `events_applied` в таблице `MatchStatsAggregationState`.
+            Архитектурная цель: изолировать доменную логику матча от монолита `app.py` и подготовить почву для дальнейшего вынесения в пакет `services/`.
 
 - Лидерборды и достижения
     - Серверные эндпоинты (ETag): `app.py` → `/api/leaderboard/*`, `/api/achievements`

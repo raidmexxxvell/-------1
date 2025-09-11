@@ -5696,224 +5696,13 @@ def api_match_status_set():
         except Exception as e:
             app.logger.warning(f"Failed to build betting tours payload: {e}")
         if status == 'finished':
-            try: 
-                # 1) Зафиксируем итоговый счёт в snapshot 'results' (если счёт внесён)
-                try:
-                    ms = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
-                    if ms and (ms.score_home is not None) and (ms.score_away is not None):
-                        snap = _snapshot_get(db, 'results') if SessionLocal is not None else None
-                        payload = (snap and snap.get('payload')) or {'results': [], 'updated_at': datetime.now(timezone.utc).isoformat()}
-                        results = payload.get('results') or []
-                        # Найдём запись, если уже была
-                        found_idx = None
-                        for i, r in enumerate(results):
-                            if (r.get('home') or '').strip() == home and (r.get('away') or '').strip() == away:
-                                found_idx = i
-                                break
-                        extra = _get_match_tour_and_dt(home, away)
-                        result_entry = {
-                            'home': home,
-                            'away': away,
-                            'score_home': int(ms.score_home),
-                            'score_away': int(ms.score_away),
-                            'tour': extra.get('tour'),
-                            'date': extra.get('date') or '',
-                            'time': extra.get('time') or '',
-                            'datetime': extra.get('datetime') or ''
-                        }
-                        if found_idx is not None:
-                            results[found_idx] = result_entry
-                        else:
-                            results.append(result_entry)
-                        payload['results'] = results
-                        payload['updated_at'] = datetime.now(timezone.utc).isoformat()
-                        _snapshot_set(db, 'results', payload)
-                        # Инвалидация кэшей и WS оповещение (best-effort)
-                        try:
-                            if cache_manager: cache_manager.invalidate('results')
-                        except Exception:
-                            pass
-                        try:
-                            if websocket_manager: websocket_manager.notify_data_change('results', payload)
-                        except Exception:
-                            pass
-                        # Инвалидация team overview ETag cache
-                        try:
-                            for k in list(_ETAG_HELPER_CACHE.keys()):
-                                if k.startswith('team-overview:'):
-                                    _ETAG_HELPER_CACHE.pop(k, None)
-                        except Exception:
-                            pass
-                        # Отзеркалим счёт в Google Sheets (best-effort)
-                        try:
-                            mirror_match_score_to_schedule(home, away, int(ms.score_home), int(ms.score_away))
-                        except Exception:
-                            pass
-                except Exception as write_res_err:
-                    try: app.logger.warning(f"api_match_status_set: failed to upsert results snapshot for {home} vs {away}: {write_res_err}")
-                    except Exception: pass
-                # 2) Автофикс спецрынков как "Нет", если админ не устанавливал явно
-                try:
-                    spec_row = db.query(MatchSpecials).filter(MatchSpecials.home==home, MatchSpecials.away==away).first()
-                    auto_fixed = False
-                    if not spec_row:
-                        spec_row = MatchSpecials(home=home, away=away)
-                        db.add(spec_row)
-                        spec_row.penalty_yes = 0
-                        spec_row.redcard_yes = 0
-                        auto_fixed = True
-                    else:
-                        if spec_row.penalty_yes is None:
-                            spec_row.penalty_yes = 0; auto_fixed = True
-                        if spec_row.redcard_yes is None:
-                            spec_row.redcard_yes = 0; auto_fixed = True
-                    if auto_fixed:
-                        spec_row.updated_at = datetime.now(timezone.utc)
-                        db.flush()
-                except Exception as _spec_auto_err:
-                    try: app.logger.warning(f"api_match_status_set: auto specials fix failed: {_spec_auto_err}")
-                    except Exception: pass
-                # 3) После фиксации результата/спецрынков — расчёт ставок
-                _settle_open_bets()
-                # После расчёта обновим турнирную таблицу (сразу, без ожидания фонового цикла)
-                try:
-                    _sync_league_table()
-                except Exception:
-                    pass
-                # 4) Инкремент matches_played для всех игроков составов (расширенная схема)
-                try:
-                    _apply_lineups_to_adv_stats(home, away)
-                except Exception as _lineup_stat_err:
-                    try: app.logger.warning(f"apply_lineups_stats_failed {home} vs {away}: {_lineup_stat_err}")
-                    except Exception: pass
-                # 5) Агрегация локальной статистики игроков (TeamPlayerStats) и обновление stats-table
-                #    (адаптация логики из /api/match/settle — защищено от повторного подсчёта через MatchStatsAggregationState)
-                try:
-                    lineup_rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
-                    event_rows = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).all()
-                    from collections import defaultdict
-                    team_players_games = defaultdict(set)
-                    real_home = (home or '').strip(); real_away = (away or '').strip()
-                    for r in lineup_rows:
-                        side_team = real_home if (r.team or 'home') == 'home' else real_away
-                        team_players_games[side_team].add((r.player or '').strip())
-
-                    def _upsert_player(team_name, player_name):
-                        pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_name, TeamPlayerStats.player==player_name).first()
-                        if not pl:
-                            pl = TeamPlayerStats(team=team_name, player=player_name)
-                            db.add(pl)
-                        return pl
-
-                    state = db.query(MatchStatsAggregationState).filter(MatchStatsAggregationState.home==home, MatchStatsAggregationState.away==away).first()
-                    if not state:
-                        state = MatchStatsAggregationState(home=home, away=away, lineup_counted=0, events_applied=0)
-                        db.add(state)
-                        db.flush()
-
-                    if state.lineup_counted == 0:
-                        for team_name, players_set in team_players_games.items():
-                            for p in players_set:
-                                if not p: continue
-                                pl = _upsert_player(team_name, p)
-                                pl.games = (pl.games or 0) + 1
-                                pl.updated_at = datetime.now(timezone.utc)
-                        state.lineup_counted = 1
-                        state.updated_at = datetime.now(timezone.utc)
-
-                    if state.events_applied == 0:
-                        for ev in event_rows:
-                            player = (ev.player or '').strip()
-                            if not player: continue
-                            team_name = real_home if (ev.team or 'home') == 'home' else real_away
-                            pl = _upsert_player(team_name, player)
-                            if not pl.games:
-                                pl.games = 1
-                            if ev.type == 'goal': pl.goals = (pl.goals or 0) + 1
-                            elif ev.type == 'assist': pl.assists = (pl.assists or 0) + 1
-                            elif ev.type == 'yellow': pl.yellows = (pl.yellows or 0) + 1
-                            elif ev.type == 'red': pl.reds = (pl.reds or 0) + 1
-                            pl.updated_at = datetime.now(timezone.utc)
-                        state.events_applied = 1
-                        state.updated_at = datetime.now(timezone.utc)
-                    db.commit()
-
-                    # Пересоберём глобальный кэш бомбардиров (SCORERS_CACHE)
-                    try:
-                        all_rows = db.query(TeamPlayerStats).all()
-                        scorers = []
-                        for r in all_rows:
-                            total = (r.goals or 0) + (r.assists or 0)
-                            scorers.append({
-                                'player': r.player,
-                                'team': r.team,
-                                'games': r.games or 0,
-                                'goals': r.goals or 0,
-                                'assists': r.assists or 0,
-                                'yellows': r.yellows or 0,
-                                'reds': r.reds or 0,
-                                'total_points': total
-                            })
-                        scorers.sort(key=lambda x: (-x['total_points'], x['games'], -x['goals']))
-                        for i, s in enumerate(scorers, start=1):
-                            s['rank'] = i
-                        global SCORERS_CACHE
-                        SCORERS_CACHE = {'ts': time.time(), 'items': scorers}
-                    except Exception as _sc_err:
-                        try: app.logger.warning(f"scorers cache rebuild failed (status finished): {_sc_err}")
-                        except Exception: pass
-
-                    # Обновим snapshot stats-table из TeamPlayerStats
-                    try:
-                        header = ['Игрок', 'Матчи', 'Голы', 'Пасы', 'ЖК', 'КК', 'Очки']
-                        rows = db.query(TeamPlayerStats).all()
-                        rows_sorted = sorted(rows, key=lambda r: (-((r.goals or 0)+(r.assists or 0)), -(r.goals or 0)))
-                        vals = []
-                        for r in rows_sorted[:10]:
-                            name = (r.player or '')
-                            matches = int(r.games or 0)
-                            goals = int(r.goals or 0)
-                            assists = int(r.assists or 0)
-                            yellows = int(r.yellows or 0)
-                            reds = int(r.reds or 0)
-                            points = goals + assists
-                            vals.append([name, matches, goals, assists, yellows, reds, points])
-                        if len(vals) < 10:
-                            for i in range(len(vals)+1, 11):
-                                vals.append([f'Игрок {i}', 0, 0, 0, 0, 0, 0])
-                        stats_payload = {
-                            'range': 'A1:G11',
-                            'values': [header] + vals,
-                            'updated_at': datetime.now(timezone.utc).isoformat()
-                        }
-                        try: _snapshot_set(db, 'stats-table', stats_payload)
-                        except Exception: pass
-                        try:
-                            if cache_manager: cache_manager.invalidate('stats_table')
-                        except Exception: pass
-                        try:
-                            if websocket_manager: websocket_manager.notify_data_change('stats_table', stats_payload)
-                        except Exception: pass
-                    except Exception:
-                        pass
-                except Exception as _agg_err:
-                    try: app.logger.warning(f"post-finish player stats aggregation failed: {_agg_err}")
-                    except Exception: pass
-
-                # 6) (best-effort) обновим snapshot schedule (удаление завершённого матча из активного расписания)
-                try:
-                    schedule_payload = _build_schedule_payload_from_sheet()
-                    _snapshot_set(db, 'schedule', schedule_payload)
-                except Exception:
-                    pass
-                # Закрепим изменения, включая автофикс спецрынков
-                try:
-                    db.commit()
-                except Exception:
-                    try: db.rollback()
-                    except Exception: pass
+            try:
+                _finalize_match_core(db, home, away, settle_open_bets=True)
             except Exception as e:
-                app.logger.error(f"Failed to settle open bets: {e}")
+                try:
+                    app.logger.error(f"Failed to finalize match via status/set: {e}")
+                except Exception:
+                    pass
         # Логирование успешной смены статуса
         try:
             admin_id_int = int(admin_id)
@@ -5933,6 +5722,10 @@ def api_match_status_set():
         return jsonify({'ok': True, 'status': status})
     finally:
         db.close()
+
+# --- Унифицированная функция финализации матча ---
+from services.match_finalize import finalize_match_core as _finalize_match_core
+
 
 @app.route('/api/match/status/get', methods=['GET'])
 def api_match_status_get():
@@ -11428,9 +11221,27 @@ def api_admin_full_reset():
                 except Exception:
                     return 0
 
+            # Основные промежуточные таблицы/агрегаты
             summary['db_deleted']['league_table'] = _safe_delete(db.query(LeagueTableRow))
             summary['db_deleted']['stats_table'] = _safe_delete(db.query(StatsTableRow))
             summary['db_deleted']['match_votes'] = _safe_delete(db.query(MatchVote))
+            # Новое: полное очищение счётов, игровых событий и составов, чтобы после сброса UI показывал чистый сланец
+            try:
+                summary['db_deleted']['match_scores'] = _safe_delete(db.query(MatchScore))
+            except Exception:
+                pass
+            try:
+                summary['db_deleted']['match_player_events'] = _safe_delete(db.query(MatchPlayerEvent))
+            except Exception:
+                pass
+            try:
+                summary['db_deleted']['match_lineups'] = _safe_delete(db.query(MatchLineupPlayer))
+            except Exception:
+                pass
+            try:
+                summary['db_deleted']['match_stats_state'] = _safe_delete(db.query(MatchStatsAggregationState))
+            except Exception:
+                pass
             summary['db_deleted']['shop_order_items'] = _safe_delete(db.query(ShopOrderItem))
             summary['db_deleted']['shop_orders'] = _safe_delete(db.query(ShopOrder))
             summary['db_deleted']['bets'] = _safe_delete(db.query(Bet))
@@ -11550,6 +11361,18 @@ def api_admin_full_reset():
                 except Exception:
                     pass
                 summary['db_deleted']['advanced_player_stats_and_events'] = deleted
+        except Exception:
+            pass
+
+        # Принудительная инвалидация ключевых snapshot-ключей (если не удалены ранее) – защита от устаревших ETag в памяти
+        try:
+            cm = globals().get('cache_manager')
+            if cm is not None:
+                for k in ('results', 'schedule', 'league_table', 'stats_table', 'scorers'):
+                    try:
+                        cm.invalidate(k)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -12442,88 +12265,6 @@ def api_match_settle():
         db: Session = get_db()
         try:
             now = datetime.now()
-            # Принудительно записываем результат в снапшот results после settle
-            ms = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
-            if ms and (ms.score_home is not None) and (ms.score_away is not None):
-                # Читаем снапшот
-                snap = _snapshot_get(db, 'results') if SessionLocal is not None else None
-                payload = (snap and snap.get('payload')) or {'results': [], 'updated_at': datetime.now(timezone.utc).isoformat()}
-                results = payload.get('results') or []
-                
-                # Ищем существующий результат
-                found_idx = None
-                for i, r in enumerate(results):
-                    if r.get('home') == home and r.get('away') == away:
-                        found_idx = i
-                        break
-                
-                # Обновляем или добавляем (с определением тура и даты/времени)
-                extra = _get_match_tour_and_dt(home, away)
-                result_entry = {
-                    'home': home,
-                    'away': away,
-                    'score_home': int(ms.score_home),
-                    'score_away': int(ms.score_away),
-                    'tour': extra.get('tour'),
-                    'date': extra.get('date') or '',
-                    'time': extra.get('time') or '',
-                    'datetime': extra.get('datetime') or ''
-                }
-                if found_idx is not None:
-                    results[found_idx] = result_entry
-                else:
-                    results.append(result_entry)
-                
-                payload['results'] = results
-                payload['updated_at'] = datetime.now(timezone.utc).isoformat()
-                _snapshot_set(db, 'results', payload)
-                try:
-                    if cache_manager: cache_manager.invalidate('results')
-                except Exception:
-                    pass
-                try:
-                    if websocket_manager: websocket_manager.notify_data_change('results', payload)
-                except Exception:
-                    pass
-                # Инвалидация team overview ETag cache (все команды могли поменять агрегаты)
-                try:
-                    for k in list(_ETAG_HELPER_CACHE.keys()):
-                        if k.startswith('team-overview:'):
-                            _ETAG_HELPER_CACHE.pop(k, None)
-                except Exception:
-                    pass
-                
-                # Также записываем в Google Sheets
-                try:
-                    mirror_match_score_to_schedule(home, away, int(ms.score_home), int(ms.score_away))
-                except Exception:
-                    pass
-            # Автоматически зафиксируем спецрынки как 'Нет', если админ их не установил
-            try:
-                spec_row = db.query(MatchSpecials).filter(MatchSpecials.home==home, MatchSpecials.away==away).first()
-                auto_fixed = False
-                if not spec_row:
-                    spec_row = MatchSpecials(home=home, away=away)
-                    db.add(spec_row)
-                    # оба None => выставим 0 (нет события)
-                    spec_row.penalty_yes = 0
-                    spec_row.redcard_yes = 0
-                    auto_fixed = True
-                else:
-                    # Если отдельный расчёт не производился (поля None) — устанавливаем 0
-                    if spec_row.penalty_yes is None:
-                        spec_row.penalty_yes = 0
-                        auto_fixed = True
-                    if spec_row.redcard_yes is None:
-                        spec_row.redcard_yes = 0
-                        auto_fixed = True
-                if auto_fixed:
-                    spec_row.updated_at = datetime.now(timezone.utc)
-                    db.flush()
-            except Exception as _spec_auto_err:
-                try: app.logger.warning(f"auto specials fix failed: {_spec_auto_err}")
-                except Exception: pass
-
             # Подсчёт total_bets до расчёта (все ставки по матчу)
             total_bets_cnt = db.query(func.count(Bet.id)).filter(Bet.home==home, Bet.away==away).scalar() or 0
             open_before_cnt = db.query(func.count(Bet.id)).filter(Bet.home==home, Bet.away==away, Bet.status=='open').scalar() or 0
@@ -12612,228 +12353,12 @@ def api_match_settle():
                 changed += 1
             if changed:
                 db.commit()
-            # После фиксации ставок попробуем записать счёт в Google Sheets (best-effort)
+            # Унифицированная финализация матча (результаты, спецрынки, статистика игроков, снапшоты)
             try:
-                ms = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
-                if ms and (ms.score_home is not None) and (ms.score_away is not None):
-                    mirror_match_score_to_schedule(home, away, int(ms.score_home), int(ms.score_away))
-            except Exception:
-                pass
-            # --- Агрегация статистики игроков ---
-            try:
-                # 1. Получаем составы из MatchLineupPlayer (для игр)
-                lineup_rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
-                # 2. Получаем события (goal/assist/yellow/red)
-                event_rows = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).all()
-                # 3. Обновляем games для всех игроков из составов обеих команд (старт + запасные считаются как сыгравшие, по требованиям)
-                from collections import defaultdict
-                team_players_games = defaultdict(set)  # real_team_name -> set(player)
-                real_home = home
-                real_away = away
-                try:
-                    # Нормализуем реальные имена команд из параметров эндпоинта
-                    real_home = (home or '').strip()
-                    real_away = (away or '').strip()
-                except Exception:
-                    pass
-                for r in lineup_rows:
-                    team_name = real_home if (r.team or 'home') == 'home' else real_away
-                    team_players_games[team_name].add((r.player or '').strip())
-                def upsert_player(team, player):
-                    pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team, TeamPlayerStats.player==player).first()
-                    if not pl:
-                        pl = TeamPlayerStats(team=team, player=player)
-                        db.add(pl)
-                    return pl
-                for team_name, players_set in team_players_games.items():
-                    for p in players_set:
-                        if not p:
-                            continue
-                        entry = upsert_player(team_name, p)
-                        entry.games = (entry.games or 0) + 1  # инкрементируем; защита от повторного вызова ниже
-                        entry.updated_at = datetime.now(timezone.utc)
-                # 4. Применяем события. Чтобы избежать двойного подсчёта при повторном settle, проверим state.
-                state = db.query(MatchStatsAggregationState).filter(MatchStatsAggregationState.home==home, MatchStatsAggregationState.away==away).first()
-                if not state:
-                    state = MatchStatsAggregationState(home=home, away=away, lineup_counted=1, events_applied=0)
-                    db.add(state)
-                    db.flush()
-                else:
-                    # Если lineup уже считался ранее — откатим games инкремент чтобы не удваивать
-                    if state.lineup_counted == 1:
-                        # Мы уже когда-то добавляли games. Поэтому теперь откатим предыдущее добавление и пересчитаем games корректно.
-                        # Для простоты: пересчитаем games заново — установим games = games (без +1) (т.к. удвоения).
-                        # NOTE: Для предотвращения двукратного увеличения можно пропустить инкремент, если уже counted.
-                        for team_name, players_set in team_players_games.items():
-                            for p in players_set:
-                                pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_name, TeamPlayerStats.player==p).first()
-                                if pl and pl.games>0:
-                                    pl.games -= 1  # откат предыдущего добавления
-                        # Не инкрементируем второй раз
-                    else:
-                        state.lineup_counted = 1
-                # После нормализации: гарантированно games +=1 один раз
-                if state and state.lineup_counted == 0:
-                    for team_name, players_set in team_players_games.items():
-                        for p in players_set:
-                            pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_name, TeamPlayerStats.player==p).first()
-                            if pl:
-                                pl.games = (pl.games or 0) + 1
-                # Обновляем события если ещё не применены
-                if state.events_applied == 0:
-                    for ev in event_rows:
-                        player = (ev.player or '').strip();
-                        if not player: continue
-                        team_name = real_home if (ev.team or 'home') == 'home' else real_away
-                        pl = upsert_player(team_name, player)
-                        # Если у игрока ещё 0 игр (и не добавлялся по составу) — считаем, что сыграл
-                        if not pl.games:
-                            pl.games = 1
-                        if ev.type == 'goal': pl.goals = (pl.goals or 0) + 1
-                        elif ev.type == 'assist': pl.assists = (pl.assists or 0) + 1
-                        elif ev.type == 'yellow': pl.yellows = (pl.yellows or 0) + 1
-                        elif ev.type == 'red': pl.reds = (pl.reds or 0) + 1
-                        pl.updated_at = datetime.now(timezone.utc)
-                    state.events_applied = 1
-                    state.updated_at = datetime.now(timezone.utc)
-                db.commit()
-                # 5. Перестраиваем глобальный кэш бомбардиров (по всем командам)
-                try:
-                    all_rows = db.query(TeamPlayerStats).all()
-                    scorers = []
-                    for r in all_rows:
-                        total = (r.goals or 0) + (r.assists or 0)
-                        scorers.append({
-                            'player': r.player,
-                            'team': r.team,
-                            'games': r.games or 0,
-                            'goals': r.goals or 0,
-                            'assists': r.assists or 0,
-                            'yellows': r.yells if hasattr(r,'yells') else (r.yellows or 0),
-                            'reds': r.reds or 0,
-                            'total_points': total
-                        })
-                    scorers.sort(key=lambda x: (-x['total_points'], x['games'], -x['goals']))
-                    for i,s in enumerate(scorers, start=1):
-                        s['rank'] = i
-                    # Сохраняем в простой глобальный кэш
-                    global SCORERS_CACHE
-                    SCORERS_CACHE = { 'ts': time.time(), 'items': scorers }
-                except Exception as scorers_err:
-                    app.logger.warning(f"Failed to cache scorers: {scorers_err}")
-                # --- Обновим snapshot stats-table из TeamPlayerStats (чтобы фронтенд видел игры) ---
-                try:
-                    header = ['Игрок', 'Матчи', 'Голы', 'Пасы', 'ЖК', 'КК', 'Очки']
-                    rows = db.query(TeamPlayerStats).all()
-                    # Сортируем по очкам (goals+assists), затем по голам
-                    rows_sorted = sorted(rows, key=lambda r: (-( (r.goals or 0) + (r.assists or 0) ), -(r.goals or 0) ))
-                    vals = []
-                    for r in rows_sorted[:10]:
-                        name = (r.player or '')
-                        matches = int(r.games or 0)
-                        goals = int(r.goals or 0)
-                        assists = int(r.assists or 0)
-                        yellows = int(r.yellows or 0)
-                        reds = int(r.reds or 0)
-                        points = goals + assists
-                        vals.append([name, matches, goals, assists, yellows, reds, points])
-                    # Дополняем до 10 строк, если нужно
-                    if len(vals) < 10:
-                        for i in range(len(vals)+1, 11):
-                            vals.append([f'Игрок {i}', 0, 0, 0, 0, 0, 0])
-                    stats_payload = {
-                        'range': 'A1:G11',
-                        'values': [header] + vals,
-                        'updated_at': datetime.now(timezone.utc).isoformat()
-                    }
-                    try:
-                        _snapshot_set(db, 'stats-table', stats_payload)
-                    except Exception:
-                        pass
-                    try:
-                        if cache_manager:
-                            cache_manager.invalidate('stats_table')
-                    except Exception:
-                        pass
-                    try:
-                        if websocket_manager:
-                            websocket_manager.notify_data_change('stats_table', stats_payload)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            except Exception as agg_err:  # noqa: F841
-                try: 
-                    app.logger.error(f"player stats aggregation failed: {agg_err}")
-                except Exception as log_err:
-                    print(f"Failed to log aggregation error: {log_err}, original error: {agg_err}")
-
-            # --- Инкрементируем столбец И (сыгранные матчи) в snapshot league-table (best-effort) ---
-            # Допущение структуры: колонки = [#, Team, Games(И), Wins, Draws, Losses, Goals, Points]
-            # Чтобы избежать двойного подсчёта при повторном settle, используем payload.counted_matches (список ключей)
-            try:
-                if SessionLocal is not None:
-                    snap_lt = _snapshot_get(db, 'league-table')
-                    payload_lt = snap_lt.get('payload') if snap_lt else None
-                    if payload_lt and isinstance(payload_lt.get('values'), list):
-                        counted = set(payload_lt.get('counted_matches') or [])
-                        mkey = f"{home.lower().strip()}__{away.lower().strip()}"
-                        if mkey not in counted:
-                            changed_games = False
-                            vals = payload_lt['values']
-                            # Проходим по строкам, ищем home/away по второй колонке (index 1)
-                            for row in vals:
-                                try:
-                                    team_name = (row[1] if len(row) > 1 else '').strip().lower()
-                                except Exception:
-                                    team_name = ''
-                                if team_name in (home.lower().strip(), away.lower().strip()):
-                                    # Колонка игр индекс 2
-                                    while len(row) < 3:
-                                        row.append('')
-                                    try:
-                                        games = int(str(row[2]).strip() or '0')
-                                    except Exception:
-                                        games = 0
-                                    row[2] = str(games + 1)
-                                    changed_games = True
-                            if changed_games:
-                                counted.add(mkey)
-                                payload_lt['counted_matches'] = list(counted)
-                                payload_lt['updated_at'] = datetime.now(timezone.utc).isoformat()
-                                # Persist snapshot
-                                _snapshot_set(db, 'league-table', payload_lt)
-            except Exception as inc_err:  # noqa: F841
-                try: app.logger.warning(f"league-table games increment failed: {inc_err}")
+                _finalize_match_core(db, home, away, settle_open_bets=False)
+            except Exception as fin_err:  # noqa: F841
+                try: app.logger.error(f"finalize after settle failed: {fin_err}")
                 except Exception: pass
-            
-            # --- Обновляем снапшот расписания чтобы удалить завершённые матчи ---
-            try:
-                schedule_payload = _build_schedule_payload_from_sheet()
-                _snapshot_set(db, 'schedule', schedule_payload)
-                try:
-                    app.logger.info(f"Schedule snapshot updated after match settle: {home} vs {away}")
-                except: pass
-            except Exception as schedule_err:
-                try: app.logger.warning(f"schedule snapshot update failed: {schedule_err}")
-                except Exception: pass
-            
-            # --- Пересчитываем таблицу лиги и нотифицируем фронт ---
-            try:
-                league_payload = _build_league_payload_from_db()
-                _snapshot_set(db, 'league-table', league_payload)
-                try:
-                    if cache_manager: cache_manager.invalidate('league_table')
-                except Exception:
-                    pass
-                try:
-                    if websocket_manager: websocket_manager.notify_data_change('league_table', league_payload)
-                except Exception:
-                    pass
-            except Exception as lt_err:
-                try: app.logger.warning(f"league table rebuild after settle failed: {lt_err}")
-                except Exception: pass
-            
             return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt, 'total_bets': total_bets_cnt, 'open_before': open_before_cnt})
         finally:
             db.close()
