@@ -387,6 +387,13 @@
       window.addEventListener('scroll', onScroll, { passive: true });
     }
     pane.dataset.hasContent = '1';
+
+    // --- NEW: после начального рендера пытаемся догрузить туры для ставок (если ещё нет / устарели) и внедрить голосование ---
+    try {
+      ensureBettingToursFresh().then(() => {
+        try { patchScheduleVotes(pane); } catch(_) {}
+      });
+    } catch(_) {}
   }
 
   function renderResults(pane, data) {
@@ -484,6 +491,73 @@
   }
 
   window.League = { batchAppend, renderLeagueTable, renderStatsTable, renderSchedule, renderResults, setUpdatedLabelSafely, refreshTable, refreshSchedule };
+
+  // ================== A) Ранняя загрузка betting tours (только если отсутствует или устарел) ==================
+  const TOURS_CACHE_KEY = 'betting:tours';
+  const TOURS_FRESH_TTL = 5 * 60 * 1000; // 5 минут как в predictions.js
+  let __toursFetchPromise = null;
+  function readToursCache(){ try { return JSON.parse(localStorage.getItem(TOURS_CACHE_KEY) || 'null'); } catch(_) { return null; } }
+  function writeToursCache(obj){ try { localStorage.setItem(TOURS_CACHE_KEY, JSON.stringify(obj)); } catch(_) {} }
+  function ensureBettingToursFresh(){
+    try {
+      const cached = readToursCache();
+      const fresh = cached && Number.isFinite(cached.ts) && (Date.now() - cached.ts < TOURS_FRESH_TTL) && (Array.isArray(cached?.data?.tours) ? cached.data.tours.length>0 : Array.isArray(cached?.tours) && cached.tours.length>0);
+      if (fresh) return Promise.resolve(cached);
+      if (__toursFetchPromise) return __toursFetchPromise;
+      __toursFetchPromise = fetch('/api/betting/tours', { headers: { 'Cache-Control': 'no-cache' } })
+        .then(r => r.json().then(data => ({ data, version: r.headers.get('ETag') || null })))
+        .then(store => { writeToursCache({ data: store.data, version: store.version, ts: Date.now() }); return store; })
+        .catch(() => null)
+        .finally(() => { setTimeout(() => { __toursFetchPromise = null; }, 1000); });
+      return __toursFetchPromise;
+    } catch(_) { return Promise.resolve(null); }
+  }
+
+  // ================== B) Патч голосований после догрузки туров ==================
+  function buildTourMatchKey(obj){ try { const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=(obj?.date?String(obj.date):(obj?.datetime?String(obj.datetime):'')); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; } catch(_) { return ''; } }
+  function computeTourMatchSet(cache){
+    const s = new Set();
+    try {
+      const tours = cache?.data?.tours || cache?.tours || [];
+      (tours||[]).forEach(t => (t.matches||[]).forEach(m => { const k=buildTourMatchKey(m); if(k) s.add(k); }));
+    } catch(_) {}
+    return s;
+  }
+  function patchScheduleVotes(pane){
+    if (!pane) return;
+    const cache = readToursCache();
+    if (!cache) return;
+    const tourMatches = computeTourMatchSet(cache);
+    if (!tourMatches.size) return;
+    // Пройдём по матч-картам без уже вставленного голосования
+    pane.querySelectorAll('.match-card').forEach(card => {
+      try {
+        if (card.querySelector('.vote-inline')) return; // уже есть
+        const home = card.querySelector('.team.home .team-name')?.textContent?.trim() || '';
+        const away = card.querySelector('.team.away .team-name')?.textContent?.trim() || '';
+        // ищем дату в заголовке (может быть в формате DD.MM.YYYY HH:MM)
+        const headerSpan = card.querySelector('.match-header span') || card.querySelector('.match-header');
+        let dateKey = '';
+        try {
+          const txt = (headerSpan?.textContent||'').trim();
+            // Ищем паттерн dd.mm.yyyy
+          const m = txt.match(/(\d{2}\.\d{2}\.\d{4})/);
+          if (m) { const parts = m[1].split('.'); dateKey = `${parts[2]}-${parts[1]}-${parts[0]}`; }
+        } catch(_) {}
+        if (!dateKey) return;
+        const key = `${home.toLowerCase()}__${away.toLowerCase()}__${dateKey}`;
+        if (!tourMatches.has(key)) return;
+        // Создаём голосование
+        if (window.VoteInline && typeof window.VoteInline.create === 'function') {
+          const voteEl = window.VoteInline.create({ home, away, date: dateKey, getTeamColor });
+          if (voteEl) card.appendChild(voteEl);
+        }
+      } catch(_) {}
+    });
+  }
+
+  // Ранняя фоноваая инициализация при загрузке (не блокирует основной рендер)
+  try { ensureBettingToursFresh().then(()=>{ const pane=document.getElementById('league-pane-schedule'); if(pane && pane.dataset.hasContent==='1') { try { patchScheduleVotes(pane); } catch(_){} } }); } catch(_) {}
 
   // Фоновый опрос агрегатов голосования для непроголосовавших пользователей (каждые ~4s)
   function startVotePolling(){
