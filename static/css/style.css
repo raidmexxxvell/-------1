@@ -451,6 +451,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 
 /* Статистика: крупная карточка + мини-карточки */
 #ufo-team .stats-wrap { display: grid; gap: 10px; }
+#ufo-team .stats-title { font-size:14px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; opacity:.85; padding:2px 4px 0 4px; }
 #ufo-team .stat-summary {
     display: grid;
     grid-template-columns: 1fr 1fr;

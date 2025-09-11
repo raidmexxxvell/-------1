@@ -74,13 +74,22 @@
     section.append(title, form);
 
     // Статистика: сводная карта + мини-карточки
-    const statsWrap = document.createElement('div'); statsWrap.className='stats-wrap';
-    const summary = document.createElement('div'); summary.className='stat-summary';
+  const statsWrap = document.createElement('div'); statsWrap.className='stats-wrap';
+  // Заголовок блока статистики (как на эталонном макете)
+  const statsTitle = document.createElement('div'); statsTitle.className='stats-title'; statsTitle.textContent='Статистика';
+  const summary = document.createElement('div'); summary.className='stat-summary';
     const left = document.createElement('div'); left.className='summary-left';
     const gauge = document.createElement('div'); gauge.className='gauge'; gauge.style.setProperty('--pct', Math.max(0, Math.min(100, (stats.matches||0))));
     const gText = document.createElement('div'); gText.className='gauge-text';
     const gVal = document.createElement('div'); gVal.className='gauge-value'; gVal.textContent = String(stats.matches||0);
-    const gLab = document.createElement('div'); gLab.className='gauge-label'; gLab.textContent = 'матч';
+    // Русская плюрализация для "матч"
+    const pluralMatches = (n)=>{
+      n = Math.abs(n||0);
+      if (n % 10 === 1 && n % 100 !== 11) return 'матч';
+      if ([2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100)) return 'матча';
+      return 'матчей';
+    };
+    const gLab = document.createElement('div'); gLab.className='gauge-label'; gLab.textContent = pluralMatches(stats.matches||0);
     gText.append(gVal, gLab); gauge.appendChild(gText); left.appendChild(gauge);
     const right = document.createElement('div'); right.className='summary-right';
     const ul = document.createElement('div'); ul.className='summary-list';
@@ -108,7 +117,7 @@
       m('/static/img/icons/clean-sheet.svg', stats.clean_sheets||0, 'На «0»')
     );
 
-    statsWrap.append(summary, mini);
+    statsWrap.append(statsTitle, summary, mini);
     host.append(section, statsWrap);
   }
 
