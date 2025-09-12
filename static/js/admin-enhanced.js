@@ -63,8 +63,8 @@
           </span>
         </td>
         <td>
-          <button class="btn-small btn-edit" onclick="editTeam(${team.id})">Редактировать</button>
-          <button class="btn-small btn-delete" onclick="deleteTeam(${team.id}, '${team.name}')">Удалить</button>
+          <button class="btn-small btn-edit" onclick="window.AdminEnhanced.editTeam(${team.id})">Редактировать</button>
+          <button class="btn-small btn-delete" onclick="window.AdminEnhanced.deleteTeam(${team.id}, '${team.name}')">Удалить</button>
         </td>
       `;
       tbody.appendChild(row);
@@ -116,6 +116,15 @@
     }
     currentTeamId = null;
   }
+
+  // ESC и клик по overlay для закрытия модалки
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeTeamModal();
+  });
+  document.addEventListener('click', function(e) {
+    const modal = document.getElementById('team-modal');
+    if (modal && modal.style.display === 'block' && e.target === modal) closeTeamModal();
+  });
 
   async function saveTeam(event) {
     event.preventDefault();

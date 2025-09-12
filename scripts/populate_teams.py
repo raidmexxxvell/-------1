@@ -54,13 +54,13 @@ TEAMS_DATA = [
     {
         'name': 'ФК Обнинск',
         'city': 'Обнинск',
-        'logo_url': '/static/img/team-logos/фкобнинск.png',
+        'logo_url': 'static/img/team-logos/фкобнинск.png',
         'description': None
     },
     {
         'name': 'ФК Setka4Real',
         'city': 'Обнинск',
-        'logo_url': '/static/img/team-logos/фкsetka4real.png',
+        'logo_url': 'static/img/team-logos/фкsetka4real.png',
         'description': None
     },
     {
