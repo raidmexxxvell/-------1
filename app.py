@@ -151,7 +151,7 @@ check_required_environment_variables()
 
 # Импорты для новой системы БД
 try:
-    from database.database_models import db_manager, db_ops, Base, News
+    from database.database_models import db_manager, db_ops, Base, News, Match, Team
     from database.database_api import db_api
     DATABASE_SYSTEM_AVAILABLE = True
     print("[INFO] New database system initialized")
@@ -1992,6 +1992,413 @@ def api_admin_matches_upcoming():
     except Exception as e:
         app.logger.error(f"admin matches upcoming error: {e}")
         return jsonify({'error': 'internal'}), 500
+
+# -------------------- NEW MATCHES CRUD (Phase 1.3a: create/list) --------------------
+@app.route('/api/admin/matches', methods=['POST'])
+@require_admin()
+def api_admin_match_create():
+    """Создание матча (Phase 1.3a). Базовая версия без событий.
+    Валидация:
+      - feature flag MATCHES_MANUAL_EDIT_ENABLED
+      - home_team_id != away_team_id
+      - match_date (ISO8601) валиден
+      - команды существуют
+      - отсутствие конфликта временного слота по той же команде (± MATCH_CONFLICT_WINDOW_MIN)
+    Побочные эффекты: инвалидация schedule snapshot кэша (+ websocket уведомление)
+    """
+    from config import Config
+    from database.database_models import Team, Match  # локальный импорт
+    if not Config.MATCHES_MANUAL_EDIT_ENABLED:
+        return jsonify({'error': 'disabled'}), 403
+    if SessionLocal is None:
+        return jsonify({'error': 'db_unavailable'}), 503
+    payload = request.get_json(silent=True) or {}
+    home_team_id = payload.get('home_team_id')
+    away_team_id = payload.get('away_team_id')
+    match_date_raw = payload.get('match_date')
+    venue = (payload.get('venue') or '').strip() or None
+    notes = (payload.get('notes') or '').strip() or None
+    # status/score игнорируем при создании — устанавливаем дефолт
+    errors = []
+    if not isinstance(home_team_id, int): errors.append('home_team_id:int required')
+    if not isinstance(away_team_id, int): errors.append('away_team_id:int required')
+    if isinstance(home_team_id, int) and isinstance(away_team_id, int) and home_team_id == away_team_id:
+        errors.append('teams_must_differ')
+    if not match_date_raw:
+        errors.append('match_date required')
+    # parse date
+    match_dt = None
+    if match_date_raw:
+        try:
+            # Поддерживаем и с timezone и naive → считаем naive как локальную DEFAULT_TZ? Для упрощения — требуем UTC или offset.
+            match_dt = datetime.fromisoformat(str(match_date_raw))
+            if match_dt.tzinfo is None:
+                # трактуем как UTC
+                match_dt = match_dt.replace(tzinfo=timezone.utc)
+            else:
+                match_dt = match_dt.astimezone(timezone.utc)
+        except Exception:
+            errors.append('match_date invalid iso8601')
+    if errors:
+        return jsonify({'error': 'validation', 'details': errors}), 400
+    db = get_db()
+    try:
+        # Проверяем существование команд
+        home_team = db.get(Team, home_team_id)
+        away_team = db.get(Team, away_team_id)
+        if not home_team or not away_team:
+            return jsonify({'error': 'validation', 'details': ['team_not_found']}), 400
+        # Конфликт времени — ищем матчи в окне ± MATCH_CONFLICT_WINDOW_MIN
+        window_min = getattr(Config, 'MATCH_CONFLICT_WINDOW_MIN', 90)
+        low = match_dt - timedelta(minutes=window_min)
+        high = match_dt + timedelta(minutes=window_min)
+        conflict = db.query(Match).filter(
+            Match.match_date >= low,
+            Match.match_date <= high,
+            ((Match.home_team_id==home_team_id) | (Match.away_team_id==home_team_id) | (Match.home_team_id==away_team_id) | (Match.away_team_id==away_team_id))
+        ).first()
+        if conflict:
+            return jsonify({'error': 'validation', 'details': ['time_conflict']}), 409
+        # Создаём
+        m = Match(
+            home_team_id=home_team_id,
+            away_team_id=away_team_id,
+            match_date=match_dt,
+            venue=venue,
+            notes=notes,
+            status='scheduled'
+        )
+        db.add(m)
+        db.commit()
+        db.refresh(m)
+        # Инвалидация schedule snapshot / кэша
+        if cache_manager:
+            try: cache_manager.invalidate('schedule')
+            except Exception: pass
+        if websocket_manager:
+            try: websocket_manager.notify_data_change('schedule', {'changed': 'match_created', 'id': m.id})
+            except Exception: pass
+        return jsonify({'match': {
+            'id': m.id,
+            'home_team_id': m.home_team_id,
+            'away_team_id': m.away_team_id,
+            'match_date': m.match_date.isoformat() if m.match_date else None,
+            'venue': m.venue,
+            'status': m.status,
+            'home_score': m.home_score,
+            'away_score': m.away_score,
+            'notes': m.notes
+        }})
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"match_create error: {e}")
+        return jsonify({'error': 'internal'}), 500
+    finally:
+        db.close()
+
+@app.route('/api/admin/matches', methods=['GET'])
+@require_admin()
+def api_admin_match_list():
+    """Список матчей с простыми фильтрами ?from=&to=&team_id=&status= (Phase 1.3a)."""
+    from config import Config
+    from database.database_models import Match  # локальный импорт
+    if SessionLocal is None:
+        return jsonify({'error': 'db_unavailable'}), 503
+    q_from_raw = request.args.get('from')
+    q_to_raw = request.args.get('to')
+    team_id = request.args.get('team_id', type=int)
+    status = request.args.get('status')
+    try:
+        dt_from = datetime.fromisoformat(q_from_raw) if q_from_raw else None
+    except Exception:
+        return jsonify({'error': 'validation', 'details': ['from_invalid']}), 400
+    try:
+        dt_to = datetime.fromisoformat(q_to_raw) if q_to_raw else None
+    except Exception:
+        return jsonify({'error': 'validation', 'details': ['to_invalid']}), 400
+    # нормализуем к UTC
+    if dt_from and dt_from.tzinfo is None: dt_from = dt_from.replace(tzinfo=timezone.utc)
+    if dt_to and dt_to.tzinfo is None: dt_to = dt_to.replace(tzinfo=timezone.utc)
+    db = get_db()
+    try:
+        query = db.query(Match)
+        if dt_from: query = query.filter(Match.match_date >= dt_from)
+        if dt_to: query = query.filter(Match.match_date <= dt_to)
+        if team_id:
+            query = query.filter((Match.home_team_id==team_id) | (Match.away_team_id==team_id))
+        if status:
+            query = query.filter(Match.status==status)
+        query = query.order_by(Match.match_date.asc())
+        rows = query.limit(500).all()
+        out = []
+        for m in rows:
+            out.append({
+                'id': m.id,
+                'home_team_id': m.home_team_id,
+                'away_team_id': m.away_team_id,
+                'match_date': m.match_date.isoformat() if m.match_date else None,
+                'venue': m.venue,
+                'status': m.status,
+                'home_score': m.home_score,
+                'away_score': m.away_score,
+                'notes': m.notes
+            })
+        return jsonify({'matches': out})
+    except Exception as e:
+        app.logger.error(f"match_list error: {e}")
+        return jsonify({'error': 'internal'}), 500
+    finally:
+        db.close()
+
+@app.route('/api/admin/matches/<int:match_id>', methods=['PUT'])
+@require_admin()
+def api_admin_match_update(match_id: int):
+    """Изменение даты/времени, venue и notes для матча (без удаления и смены статуса).
+    Правила:
+      - Только если статус 'scheduled'
+      - Нельзя менять команды (требует будущий bulk/ручной пересоздание)
+      - Проверка конфликтов временного слота (исключая сам матч)
+    """
+    from config import Config
+    from database.database_models import Match  # локальный импорт
+    if SessionLocal is None:
+        return jsonify({'error': 'db_unavailable'}), 503
+    if not Config.MATCHES_MANUAL_EDIT_ENABLED:
+        return jsonify({'error': 'disabled'}), 403
+    payload = request.get_json(silent=True) or {}
+    new_date_raw = payload.get('match_date')
+    new_venue = (payload.get('venue') or '').strip() or None
+    new_notes = (payload.get('notes') or '').strip() or None
+    if not new_date_raw and new_venue is None and new_notes is None:
+        return jsonify({'error': 'validation', 'details': ['no_fields']}), 400
+    # Парсим дату если передана
+    new_dt = None
+    if new_date_raw:
+        try:
+            nd = datetime.fromisoformat(str(new_date_raw))
+            if nd.tzinfo is None:
+                nd = nd.replace(tzinfo=timezone.utc)
+            else:
+                nd = nd.astimezone(timezone.utc)
+            new_dt = nd
+        except Exception:
+            return jsonify({'error': 'validation', 'details': ['match_date invalid']}), 400
+    db = get_db()
+    try:
+        m = db.get(Match, match_id)
+        if not m:
+            return jsonify({'error': 'not_found'}), 404
+        if m.status != 'scheduled':
+            return jsonify({'error': 'forbidden', 'details': ['status_not_editable']}), 403
+        # Если обновляем дату — проверяем конфликт
+        if new_dt:
+            window_min = getattr(Config, 'MATCH_CONFLICT_WINDOW_MIN', 90)
+            low = new_dt - timedelta(minutes=window_min)
+            high = new_dt + timedelta(minutes=window_min)
+            conflict = db.query(Match).filter(
+                Match.id != m.id,
+                Match.match_date >= low,
+                Match.match_date <= high,
+                ((Match.home_team_id==m.home_team_id) | (Match.away_team_id==m.home_team_id) | (Match.home_team_id==m.away_team_id) | (Match.away_team_id==m.away_team_id))
+            ).first()
+            if conflict:
+                return jsonify({'error': 'validation', 'details': ['time_conflict']}), 409
+            m.match_date = new_dt
+        if payload.get('venue') is not None:
+            m.venue = new_venue
+        if payload.get('notes') is not None:
+            m.notes = new_notes
+        db.commit()
+        db.refresh(m)
+        # Инвалидация schedule
+        if cache_manager:
+            try: cache_manager.invalidate('schedule')
+            except Exception: pass
+        if websocket_manager:
+            try: websocket_manager.notify_data_change('schedule', {'changed': 'match_updated', 'id': m.id})
+            except Exception: pass
+        return jsonify({'match': {
+            'id': m.id,
+            'home_team_id': m.home_team_id,
+            'away_team_id': m.away_team_id,
+            'match_date': m.match_date.isoformat() if m.match_date else None,
+            'venue': m.venue,
+            'status': m.status,
+            'home_score': m.home_score,
+            'away_score': m.away_score,
+            'notes': m.notes
+        }})
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"match_update error: {e}")
+        return jsonify({'error': 'internal'}), 500
+    finally:
+        db.close()
+
+# -------------------- BULK IMPORT DRY-RUN (Phase 1.3b) --------------------
+@app.route('/api/admin/matches/import', methods=['POST'])
+@require_admin()
+def api_admin_matches_import():
+    """Dry-run diff или (в будущем) применение полного импорта расписания из Google Sheets в matches.
+    Сейчас реализуем только dry_run (?dry_run=1). Применение будет добавлено позже.
+    Алгоритм dry_run:
+      1. Читаем existing matches (scope: будущие и cancelled — пока используем match_date >= now-1d)
+      2. Читаем schedule snapshot (если нет Sheets sync сейчас) или напрямую из Sheets при наличии creds
+      3. Преобразуем строки в канонический список кандидатов с UTC datetime (дата + время если есть)
+      4. Формируем ключ key=(date_utc|home_team|away_team) — до появления событий/MatchEvent
+      5. Diff → insert/update/delete
+    Ограничения: если нет snapshot schedule и нет Sheets доступа — 503.
+    """
+    from config import Config
+    dry_run = request.args.get('dry_run', '0') in ('1','true','yes')
+    if not dry_run:
+        return jsonify({'error': 'not_implemented', 'details': ['apply_not_ready']}), 501
+    if SessionLocal is None:
+        return jsonify({'error': 'db_unavailable'}), 503
+    # Шаг 1: загружаем существующие матчи
+    now_ts = datetime.now(timezone.utc) - timedelta(days=1)
+    db = get_db()
+    try:
+        existing_rows = db.query(Match).filter(Match.match_date >= now_ts).all()
+        existing_map = {}
+        for m in existing_rows:
+            key = f"{m.match_date.date().isoformat()}|{m.home_team_id}|{m.away_team_id}"
+            existing_map[key] = m
+        # Подгрузим команды для name→id маппинга
+        team_rows = db.query(Team).all()
+        team_name_map = { (t.name or '').strip().lower(): t.id for t in team_rows }
+    except Exception as e:
+        db.close()
+        app.logger.error(f"bulk_import_dry_run db error: {e}")
+        return jsonify({'error': 'internal'}), 500
+    # Шаг 2: пытаемся получить schedule источник
+    schedule_payload = None
+    try:
+        snap = _snapshot_get(db, Snapshot, 'schedule', app.logger)
+        if snap and snap.get('payload'):
+            schedule_payload = snap['payload']
+    except Exception:
+        schedule_payload = None
+    if not schedule_payload:
+        # fallback попытка использовать Sheets напрямую (редкий случай)
+        try:
+            creds_b64 = getattr(Config, 'GOOGLE_CREDENTIALS_B64', '') or os.environ.get('GOOGLE_CREDENTIALS_B64','')
+            sheet_id = getattr(Config, 'SPREADSHEET_ID', '') or os.environ.get('SPREADSHEET_ID','')
+            if creds_b64 and sheet_id:
+                from utils.sheets import SheetsManager
+                sm = SheetsManager(creds_b64, sheet_id)
+                # используем DataSyncManager логику частично: просто чтение и преобразование через sync_schedule
+                from utils.sheets import DataSyncManager
+                dsm = DataSyncManager(sm, None)
+                schedule_payload = dsm.sync_schedule()
+            else:
+                schedule_payload = None
+        except Exception as e:
+            app.logger.warning(f"bulk_import_dry_run sheets fallback failed: {e}")
+            schedule_payload = None
+    if not schedule_payload or not schedule_payload.get('tours'):
+        db.close()
+        return jsonify({'error': 'schedule_unavailable'}), 503
+    # Шаг 3: строим кандидатов
+    candidates = []
+    tours = schedule_payload.get('tours') or []
+    for t in tours:
+        for rm in t.get('matches', []) or []:
+            home_name = (rm.get('home') or '').strip()
+            away_name = (rm.get('away') or '').strip()
+            if not home_name or not away_name:
+                continue
+            date_raw = rm.get('date') or ''  # Возможно формат '2025-09-12'
+            time_raw = rm.get('time') or ''  # 'HH:MM'
+            dt_utc = None
+            if date_raw:
+                # Пытаемся объединить дату и время
+                try:
+                    if time_raw:
+                        dt_local = datetime.fromisoformat(f"{date_raw}T{time_raw}:00")
+                    else:
+                        dt_local = datetime.fromisoformat(f"{date_raw}T00:00:00")
+                    # трактуем как локальную DEFAULT_TZ -> UTC
+                    # Пока просто считаем naive как UTC для упрощения (можно улучшить позже через zoneinfo)
+                    if dt_local.tzinfo is None:
+                        dt_local = dt_local.replace(tzinfo=timezone.utc)
+                    dt_utc = dt_local.astimezone(timezone.utc)
+                except Exception:
+                    dt_utc = None
+            # Маппинг команд — если команда не найдена, пометим validation error позже
+            candidates.append({
+                'home_name': home_name,
+                'away_name': away_name,
+                'home_team_id': team_name_map.get(home_name.lower()),
+                'away_team_id': team_name_map.get(away_name.lower()),
+                'match_date': dt_utc,
+                'venue': None,
+                'notes': None
+            })
+    # Шаг 4: формируем diff
+    inserts = []
+    updates = []
+    deletes = []
+    validation_errors = []
+    seen_candidate_keys = set()
+    for c in candidates:
+        if not c['home_team_id'] or not c['away_team_id']:
+            validation_errors.append({'type': 'team_not_found', 'home': c['home_name'], 'away': c['away_name']})
+            continue
+        if not c['match_date']:
+            validation_errors.append({'type': 'date_parse_failed', 'home': c['home_name'], 'away': c['away_name']})
+            continue
+        key = f"{c['match_date'].date().isoformat()}|{c['home_team_id']}|{c['away_team_id']}"
+        if key in seen_candidate_keys:
+            # дубликат в Sheets — игнорируем повтор
+            continue
+        seen_candidate_keys.add(key)
+        existing = existing_map.get(key)
+        if not existing:
+            inserts.append({
+                'home_team_id': c['home_team_id'],
+                'away_team_id': c['away_team_id'],
+                'match_date': c['match_date'].isoformat(),
+                'venue': None,
+                'notes': None
+            })
+        else:
+            # возможные обновления: пока только дата (если смещение больше tolerance)
+            tolerance = getattr(Config, 'MATCH_TIME_SHIFT_TOLERANCE_MIN', 15)
+            delta_min = abs(int((existing.match_date - c['match_date']).total_seconds() / 60)) if existing.match_date and c['match_date'] else 0
+            if delta_min > tolerance:
+                updates.append({
+                    'id': existing.id,
+                    'before': existing.match_date.isoformat() if existing.match_date else None,
+                    'after': c['match_date'].isoformat(),
+                    'shift_min': delta_min
+                })
+    # deletions: ключи, которые есть в existing_map, но отсутствуют среди candidate_keys
+    for key, m in existing_map.items():
+        if key not in seen_candidate_keys:
+            deletes.append({'id': m.id, 'match_date': m.match_date.isoformat() if m.match_date else None})
+    summary = {
+        'insert': len(inserts),
+        'update': len(updates),
+        'delete': len(deletes),
+        'validation_errors': len(validation_errors)
+    }
+    # warning thresholds
+    warnings = []
+    if summary['delete'] > 0 and (summary['delete'] / max(1, len(existing_map))) > 0.4:
+        warnings.append('high_delete_ratio')
+    if summary['validation_errors'] > 0:
+        warnings.append('has_validation_errors')
+    db.close()
+    return jsonify({
+        'dry_run': True,
+        'summary': summary,
+        'warnings': warnings,
+        'insert': inserts,
+        'update': updates,
+        'delete': deletes,
+        'validation_errors': validation_errors
+    })
 
 def _resolve_match_by_id(match_id: str, tours=None):
     """Восстанавливает (home,away,dt) по match_id (sha1 первые 12)."""

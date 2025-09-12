@@ -18,3 +18,7 @@ CREATE INDEX IF NOT EXISTS idx_shop_order_created ON shop_orders (created_at);
 CREATE INDEX IF NOT EXISTS idx_stream_home_away_date ON match_streams (home, away, date);
 CREATE INDEX IF NOT EXISTS idx_comment_match_time ON match_comments (home, away, date, created_at);
 CREATE INDEX IF NOT EXISTS idx_comment_user_match_time ON match_comments (user_id, home, away, date, created_at);
+
+-- Matches (planning & lookup)
+CREATE INDEX IF NOT EXISTS idx_matches_match_date ON matches (match_date);
+CREATE INDEX IF NOT EXISTS idx_matches_teams_date ON matches (home_team_id, away_team_id, match_date);

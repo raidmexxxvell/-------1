@@ -61,6 +61,14 @@ class Config:
 
     # Ops/health protection
     METRICS_SECRET = os.environ.get('METRICS_SECRET', '')
+
+    # Matches system feature flags & tuning
+    MATCHES_MANUAL_EDIT_ENABLED = os.environ.get('MATCHES_MANUAL_EDIT_ENABLED', '1').lower() in ('1','true','yes')
+    MATCHES_BULK_IMPORT_ENABLED = os.environ.get('MATCHES_BULK_IMPORT_ENABLED', '').lower() in ('1','true','yes')
+    MATCHES_IMPORT_COOLDOWN_MIN = int(os.environ.get('MATCHES_IMPORT_COOLDOWN_MIN', '10'))
+    MATCH_CONFLICT_WINDOW_MIN = int(os.environ.get('MATCH_CONFLICT_WINDOW_MIN', '90'))
+    MATCH_TIME_SHIFT_TOLERANCE_MIN = int(os.environ.get('MATCH_TIME_SHIFT_TOLERANCE_MIN', '15'))
+    DEFAULT_TZ = os.environ.get('DEFAULT_TZ', 'Europe/Moscow')
     
     @classmethod
     def validate(cls) -> tuple[bool, list[str]]:
