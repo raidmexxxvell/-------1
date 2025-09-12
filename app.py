@@ -6486,6 +6486,16 @@ def api_leader_goal_assist():
     Сборка: объединяем данные всех команд, сортируем по (total desc, matches_played asc, goals desc).
     Кэш: ETag + TTL (как другие leaderboards). Источник — динамические таблицы, без нормализации players.
     """
+    # Параметр limit (query param). По умолчанию 10, максимум ограничен LEADERBOARD_ITEMS_CAP
+    try:
+        req_limit = int(request.args.get('limit', 10))
+    except Exception:
+        req_limit = 10
+    if req_limit < 1:
+        req_limit = 1
+    if req_limit > LEADERBOARD_ITEMS_CAP:
+        req_limit = LEADERBOARD_ITEMS_CAP
+
     def _build():
         # 0) Попытка взять из Redis precompute (если позже будет добавлен) — используем общий namespace
         try:
@@ -6547,7 +6557,7 @@ def api_leader_goal_assist():
                     continue
             # Сортировка глобальная
             rows.sort(key=lambda x: (-x['goal_plus_assist'], x['matches_played'], -x['goals'], x['first_name']))
-            limit = min(LEADERBOARD_ITEMS_CAP, 50)  # ограничим до 50 для ответа
+            limit = min(req_limit, LEADERBOARD_ITEMS_CAP)
             rows = rows[:limit]
             return {'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat()}
         finally:
