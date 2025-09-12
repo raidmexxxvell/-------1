@@ -54,7 +54,6 @@
           </div>
         </td>
         <td>${team.city || '-'}</td>
-        <td>${team.founded_year || '-'}</td>
         <td>
           ${team.logo_url ? '<span class="status-badge status-yes">Есть</span>' : '<span class="status-badge status-no">Нет</span>'}
         </td>
