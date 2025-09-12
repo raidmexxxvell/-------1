@@ -6056,34 +6056,60 @@ def api_admin_teams_delete(team_id):
 
 # ---------------------- TEAM ROSTER (READ-ONLY STAGE 1.2) ----------------------
 
-@app.route('/api/admin/teams/<int:team_id>/roster', methods=['GET'])
-@require_admin()
-def api_admin_team_roster(team_id):
-    """Возвращает уникальный список игроков команды из team_roster.
-    На этапе 1.2 используем как источник игроков до нормализации.
-    Формат ответа: first_name, last_name, goals, assists, yellow_cards, red_cards (пока 0)."""
-    if SessionLocal is None:
-        return jsonify({'error': 'Database not available'}), 500
+# --- Dynamic per-team stats tables (stage 1.2b preparation) ---
+from sqlalchemy import text as _sql_text
 
-    db = get_db()
+def _team_stats_table_name(team_id: int) -> str:
+    return f"team_stats_{int(team_id)}"
+
+def _ensure_team_stats_table(team_id: int, engine):
+    """Создать таблицу статистики для команды если отсутствует.
+    Структура:
+        player_id (PRIMARY KEY) – id записи из team_roster
+        first_name, last_name
+        matches_played, goals, assists, yellow_cards, red_cards
+        last_updated (timestamp)
+    """
+    table_name = _team_stats_table_name(team_id)
+    ddl = f"""
+    CREATE TABLE IF NOT EXISTS {table_name} (
+        player_id INTEGER PRIMARY KEY,
+        first_name VARCHAR(100) NOT NULL,
+        last_name VARCHAR(150) NOT NULL DEFAULT '',
+        matches_played INTEGER NOT NULL DEFAULT 0,
+        goals INTEGER NOT NULL DEFAULT 0,
+        assists INTEGER NOT NULL DEFAULT 0,
+        yellow_cards INTEGER NOT NULL DEFAULT 0,
+        red_cards INTEGER NOT NULL DEFAULT 0,
+        last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    with engine.connect() as conn:
+        conn.execute(_sql_text(ddl))
+        conn.commit()
+
+def _init_team_stats_if_empty(team_id: int, team_name: str, session):
+    """Если таблица пуста – инициализировать из team_roster (все показатели 0)."""
+    table_name = _team_stats_table_name(team_id)
+    # Проверяем количество строк
+    cnt = session.execute(_sql_text(f"SELECT COUNT(*) FROM {table_name}")).scalar() or 0
+    if cnt > 0:
+        return
     try:
-        from database.database_models import Team, TeamRoster
-        team = db.query(Team).filter(Team.id == team_id, Team.is_active == True).first()
-        if not team:
-            return jsonify({'error': 'Team not found'}), 404
-
-        # Получаем всех игроков по имени команды
-        roster_entries = db.query(TeamRoster).filter(TeamRoster.team == team.name).order_by(TeamRoster.player).all()
-
-        players = []
+        from database.database_models import TeamRoster  # локальный импорт чтобы избежать циклов
+        roster_rows = session.query(TeamRoster).filter(TeamRoster.team == team_name).order_by(TeamRoster.player).all()
+        if not roster_rows:
+            return
+        inserts = []
         seen = set()
-        for entry in roster_entries:
-            raw = (entry.player or '').strip()
+        for r in roster_rows:
+            raw = (r.player or '').strip()
             if not raw:
                 continue
-            if raw.lower() in seen:
+            key = raw.lower()
+            if key in seen:
                 continue
-            seen.add(raw.lower())
+            seen.add(key)
             parts = raw.split()
             if len(parts) == 1:
                 first_name = parts[0]
@@ -6091,15 +6117,73 @@ def api_admin_team_roster(team_id):
             else:
                 first_name = parts[0]
                 last_name = ' '.join(parts[1:])
-            players.append({
-                'id': entry.id,
+            inserts.append({
+                'player_id': r.id,
                 'first_name': first_name,
-                'last_name': last_name,
-                'goals': 0,
-                'assists': 0,
-                'yellow_cards': 0,
-                'red_cards': 0
+                'last_name': last_name
             })
+        if inserts:
+            # Bulk insert через VALUES
+            values_sql = ",".join([
+                f"(:player_id_{i}, :first_name_{i}, :last_name_{i})" for i,_ in enumerate(inserts)
+            ])
+            params = {}
+            for i, row in enumerate(inserts):
+                params[f'player_id_{i}'] = row['player_id']
+                params[f'first_name_{i}'] = row['first_name']
+                params[f'last_name_{i}'] = row['last_name']
+            insert_sql = f"INSERT INTO {table_name} (player_id, first_name, last_name) VALUES {values_sql}"
+            session.execute(_sql_text(insert_sql), params)
+            session.commit()
+    except Exception as e:
+        session.rollback()
+        app.logger.error(f"Init team stats table failed (team_id={team_id}): {e}")
+
+def _fetch_team_stats(team_id: int, session):
+    table_name = _team_stats_table_name(team_id)
+    rows = session.execute(_sql_text(
+        f"SELECT player_id, first_name, last_name, matches_played, goals, assists, yellow_cards, red_cards, last_updated FROM {table_name} ORDER BY last_name, first_name"
+    )).mappings().all()
+    players = []
+    for r in rows:
+        players.append({
+            'id': r['player_id'],
+            'first_name': r['first_name'],
+            'last_name': r['last_name'],
+            'matches_played': r['matches_played'],
+            'goals': r['goals'],
+            'assists': r['assists'],
+            'goal_actions': (r['goals'] or 0) + (r['assists'] or 0),
+            'yellow_cards': r['yellow_cards'],
+            'red_cards': r['red_cards'],
+            'last_updated': (r['last_updated'].isoformat() if getattr(r['last_updated'], 'isoformat', None) else r['last_updated'])
+        })
+    return players
+
+@app.route('/api/admin/teams/<int:team_id>/roster', methods=['GET'])
+@require_admin()
+def api_admin_team_roster(team_id):
+    """Возвращает список игроков команды с накопленной статистикой из динамической таблицы team_stats_<team_id>.
+    Ленивая инициализация: при первом запросе создаётся таблица и заполняется из team_roster (все значения = 0).
+    Формат ответа: first_name, last_name, matches_played, goals, assists, goal_actions, yellow_cards, red_cards, last_updated."""
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+
+    db = get_db()
+    try:
+        from database.database_models import Team
+        team = db.query(Team).filter(Team.id == team_id, Team.is_active == True).first()
+        if not team:
+            return jsonify({'error': 'Team not found'}), 404
+        # ensure table + init if empty
+        try:
+            _ensure_team_stats_table(team.id, db.get_bind())
+            _init_team_stats_if_empty(team.id, team.name, db)
+        except Exception as e:
+            app.logger.error(f"Ensure/init team stats failed team_id={team.id}: {e}")
+            return jsonify({'error': 'Failed to init team stats'}), 500
+
+        players = _fetch_team_stats(team.id, db)
 
         return jsonify({
             'status': 'success',

@@ -295,6 +295,134 @@ def finalize_match_core(
                 logger.warning(f"finalize: scorers/stats rebuild failed {home} vs {away}: {sc_err}")
             except Exception:
                 pass
+
+        # --- Update dynamic per-team stats tables (team_stats_<team_id>) ---
+        try:
+            # Импортирующиеся здесь, чтобы не тянуть heavy объекты выше
+            from sqlalchemy import text as _sql_text
+            from database.database_models import Team
+            # 0. Таблица идемпотентности для динамических инкрементов
+            db.execute(_sql_text("""
+            CREATE TABLE IF NOT EXISTS dynamic_team_stats_applied (
+                home VARCHAR(120) NOT NULL,
+                away VARCHAR(120) NOT NULL,
+                applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (home, away)
+            );"""))
+            already_applied = db.execute(_sql_text(
+                "SELECT 1 FROM dynamic_team_stats_applied WHERE home=:h AND away=:a"), {'h': home, 'a': away}
+            ).first()
+            if already_applied:
+                # Идемпотентность: пропускаем повторный динамический апдейт
+                pass
+            else:
+                # Получаем id команд по имени (допускаем уникальность name среди активных)
+                teams = db.query(Team).filter(Team.name.in_([home, away])).all()
+                name_to_id = {t.name: t.id for t in teams}
+
+                def _ensure_table(team_id: int):
+                    table = f"team_stats_{team_id}";
+                    ddl = f"""
+                    CREATE TABLE IF NOT EXISTS {table} (
+                        player_id INTEGER PRIMARY KEY,
+                        first_name VARCHAR(100) NOT NULL,
+                        last_name VARCHAR(150) NOT NULL DEFAULT '',
+                        matches_played INTEGER NOT NULL DEFAULT 0,
+                        goals INTEGER NOT NULL DEFAULT 0,
+                        assists INTEGER NOT NULL DEFAULT 0,
+                        yellow_cards INTEGER NOT NULL DEFAULT 0,
+                        red_cards INTEGER NOT NULL DEFAULT 0,
+                        last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );"""
+                    db.execute(_sql_text(ddl))
+
+                # Агрегация по строкам lineup_rows / event_rows (они используют player как строковое поле)
+                from collections import defaultdict as _dd
+                per_team_player = _dd(lambda: _dd(int))  # team_name -> player_name -> counters
+                # matches_played: учитываем уникальный игрок в составе
+                seen_match_presence = set()
+                for lr in lineup_rows:
+                    pname = (lr.player or '').strip()
+                    if not pname:
+                        continue
+                    team_name = home if (lr.team or 'home') == 'home' else away
+                    key = (team_name, pname)
+                    if key not in seen_match_presence:
+                        per_team_player[team_name][pname]['matches_played'] += 1
+                        seen_match_presence.add(key)
+                for ev in event_rows:
+                    pname = (ev.player or '').strip()
+                    if not pname:
+                        continue
+                    team_name = home if (ev.team or 'home') == 'home' else away
+                    if ev.type == 'goal':
+                        per_team_player[team_name][pname]['goals'] += 1
+                    elif ev.type == 'assist':
+                        per_team_player[team_name][pname]['assists'] += 1
+                    elif ev.type == 'yellow':
+                        per_team_player[team_name][pname]['yellow_cards'] += 1
+                    elif ev.type == 'red':
+                        per_team_player[team_name][pname]['red_cards'] += 1
+
+                # Обновление по двум командам
+                for team_name, players_map in per_team_player.items():
+                    team_id = name_to_id.get(team_name)
+                    if not team_id:
+                        continue
+                    _ensure_table(team_id)
+                    table = f"team_stats_{team_id}"
+                    for full_name, stats_map in players_map.items():
+                        parts = full_name.split()
+                        if len(parts) == 1:
+                            first_name = parts[0]; last_name = ''
+                        else:
+                            first_name = parts[0]; last_name = ' '.join(parts[1:])
+                        # Находим/создаём player_id в team_roster (без fallback hash)
+                        roster_row = db.execute(_sql_text(
+                            "SELECT id FROM team_roster WHERE team = :t AND lower(player)=lower(:p) ORDER BY id LIMIT 1"
+                        ), {'t': team_name, 'p': full_name}).first()
+                        if roster_row:
+                            player_id = roster_row[0]
+                        else:
+                            # Авто-добавление в roster чтобы сохранить консистентность
+                            ins = db.execute(_sql_text(
+                                "INSERT INTO team_roster (team, player, created_at) VALUES (:t, :p, CURRENT_TIMESTAMP) RETURNING id"
+                            ), {'t': team_name, 'p': full_name}).first()
+                            player_id = ins[0]
+                        up_sql = f"""
+                        INSERT INTO {table} (player_id, first_name, last_name, matches_played, goals, assists, yellow_cards, red_cards, last_updated)
+                        VALUES (:pid, :fn, :ln, :mp, :g, :a, :yc, :rc, CURRENT_TIMESTAMP)
+                        ON CONFLICT (player_id) DO UPDATE SET
+                            first_name = EXCLUDED.first_name,
+                            last_name = EXCLUDED.last_name,
+                            matches_played = {table}.matches_played + EXCLUDED.matches_played,
+                            goals = {table}.goals + EXCLUDED.goals,
+                            assists = {table}.assists + EXCLUDED.assists,
+                            yellow_cards = {table}.yellow_cards + EXCLUDED.yellow_cards,
+                            red_cards = {table}.red_cards + EXCLUDED.red_cards,
+                            last_updated = CURRENT_TIMESTAMP
+                        """
+                        db.execute(_sql_text(up_sql), {
+                            'pid': player_id,
+                            'fn': first_name,
+                            'ln': last_name,
+                            'mp': stats_map.get('matches_played', 0),
+                            'g': stats_map.get('goals', 0),
+                            'a': stats_map.get('assists', 0),
+                            'yc': stats_map.get('yellow_cards', 0),
+                            'rc': stats_map.get('red_cards', 0),
+                        })
+                # Фиксируем применение, чтобы избежать повторного инкремента
+                db.execute(_sql_text(
+                    "INSERT INTO dynamic_team_stats_applied (home, away) VALUES (:h, :a) ON CONFLICT (home, away) DO NOTHING"
+                ), {'h': home, 'a': away})
+                db.commit()
+            db.commit()  # commit при no-op (already_applied)
+        except Exception as dyn_err:
+            try:
+                logger.warning(f"finalize: dynamic team stats update failed {home} vs {away}: {dyn_err}")
+            except Exception:
+                pass
     except Exception as agg_err:
         try:
             logger.warning(f"finalize: aggregation failed {home} vs {away}: {agg_err}")

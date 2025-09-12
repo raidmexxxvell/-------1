@@ -1370,11 +1370,11 @@
 
 /* Light / dark adjustments */
 body:not(.dark-theme) #team-roster-modal .table-container {
-    background: #fff;
+    background: #413f3f;
     border-color: #e0e0e0;
 }
 body:not(.dark-theme) #team-roster-modal table.admin-table thead th {
-    background: linear-gradient(135deg, var(--primary, #2563eb), var(--primary-dark, #1e40af));
+    background: linear-gradient(135deg, var(--primary, #182b53), var(--primary-dark, #202d55));
 }
 body:not(.dark-theme) #team-roster-modal table.admin-table td {
     border-bottom: 1px solid #ececec;
