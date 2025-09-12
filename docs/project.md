@@ -51,10 +51,11 @@
 │   ├── websocket_manager.py   # WebSocket менеджер
 │   ├── smart_invalidator.py   # Умная инвалидация кэша
 │   └── optimized_sheets.py    # Оптимизированная работа с Sheets
-├── scripts/                   # Скрипты инициализации
-│   ├── init_database.py       # Инициализация БД
-│   ├── create_admin_logs.py   # Создание таблицы логов админа
-│   └── create_admin_logs_table.sql # SQL миграция для логов
+    ├── scripts/                   # Скрипты инициализации
+    │   ├── init_database.py       # Инициализация БД
+    │   ├── create_admin_logs.py   # Создание таблицы логов админа
+    │   ├── create_admin_logs_table.sql # SQL миграция для логов
+    │   └── populate_teams.py      # Автоматически создает/обновляет команды по логотипам из static/img/team-logos/
 ├── static/                    # Статические файлы
 │   ├── css/                   # Стили
 │   │   ├── style.css          # Основные стили

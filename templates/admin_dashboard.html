@@ -25,6 +25,7 @@
             <!-- Admin Subtabs -->
             <div id="admin-subtabs" class="subtabs">
                 <div class="subtab-item active" data-atab="matches">Матчи и составы</div>
+                <div class="subtab-item" data-atab="teams">Команды</div>
                 <div class="subtab-item" data-atab="players">Управление игроками</div>
                 <div class="subtab-item" data-atab="news">Новости</div>
                 <div class="subtab-item" data-atab="service">Сервис</div>
@@ -84,6 +85,75 @@
                                 <button id="save-lineups-btn" class="action-btn">Сохранить составы</button>
                                 <button class="cancel-btn" onclick="closeMatchModal()">Отмена</button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Players Management Pane -->
+            <!-- Teams Management Pane -->
+            <div id="admin-pane-teams" class="admin-pane" style="display: none;">
+                <div class="admin-section">
+                    <h3>Управление командами</h3>
+                    <div class="teams-controls">
+                        <input type="text" id="team-search" placeholder="Поиск команд..." class="search-input">
+                        <button id="add-new-team-btn" class="action-btn">+ Новая команда</button>
+                        <button id="refresh-teams-btn" class="action-btn">Обновить</button>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Название</th>
+                                    <th>Город</th>
+                                    <th>Год основания</th>
+                                    <th>Логотип</th>
+                                    <th>Статус</th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="teams-table">
+                                <!-- Динамически заполняется -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Add/Edit Team Modal -->
+                <div id="team-modal" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 id="team-modal-title">Добавить команду</h3>
+                            <button class="modal-close" onclick="closeTeamModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="team-form">
+                                <div class="form-group">
+                                    <label for="team-name">Название команды:</label>
+                                    <input type="text" id="team-name" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="team-city">Город:</label>
+                                    <input type="text" id="team-city">
+                                </div>
+                                <div class="form-group">
+                                    <label for="team-founded-year">Год основания:</label>
+                                    <input type="number" id="team-founded-year" min="1900" max="2030">
+                                </div>
+                                <div class="form-group">
+                                    <label for="team-logo-url">URL логотипа:</label>
+                                    <input type="url" id="team-logo-url" placeholder="https://example.com/logo.png">
+                                </div>
+                                <div class="form-group">
+                                    <label for="team-description">Описание:</label>
+                                    <textarea id="team-description" rows="3"></textarea>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="action-btn">Сохранить</button>
+                                    <button type="button" class="cancel-btn" onclick="closeTeamModal()">Отмена</button>
+                                </div>
+                            </form>
                         </div>
                     </div>
                 </div>

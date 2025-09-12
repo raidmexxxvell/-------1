@@ -16,6 +16,209 @@
     c.style.pointerEvents='none';
     document.addEventListener('DOMContentLoaded',()=>{ document.body.appendChild(c); });
   }
+  // Teams management functions
+  let currentTeamId = null;
+  let allTeams = [];
+
+  async function loadTeams() {
+    try {
+      const response = await fetch('/api/admin/teams');
+      const result = await response.json();
+      
+      if (response.ok) {
+        allTeams = result.teams || [];
+        displayTeams(allTeams);
+        showToast(`Загружено ${allTeams.length} команд`, 'success');
+      } else {
+        showToast(`Ошибка загрузки команд: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      console.error('Load teams error:', error);
+      showToast('Ошибка соединения при загрузке команд', 'error');
+    }
+  }
+
+  function displayTeams(teams) {
+    const tbody = document.getElementById('teams-table');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    teams.forEach(team => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>
+          <div class="team-info">
+            ${team.logo_url ? `<img src="${team.logo_url}" alt="${team.name}" class="team-logo-small">` : ''}
+            <span>${team.name}</span>
+          </div>
+        </td>
+        <td>${team.city || '-'}</td>
+        <td>${team.founded_year || '-'}</td>
+        <td>
+          ${team.logo_url ? '<span class="status-badge status-yes">Есть</span>' : '<span class="status-badge status-no">Нет</span>'}
+        </td>
+        <td>
+          <span class="status-badge ${team.is_active ? 'status-active' : 'status-inactive'}">
+            ${team.is_active ? 'Активна' : 'Неактивна'}
+          </span>
+        </td>
+        <td>
+          <button class="btn-small btn-edit" onclick="editTeam(${team.id})">Редактировать</button>
+          <button class="btn-small btn-delete" onclick="deleteTeam(${team.id}, '${team.name}')">Удалить</button>
+        </td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  function filterTeams() {
+    const searchTerm = document.getElementById('team-search').value.toLowerCase();
+    const filteredTeams = allTeams.filter(team => 
+      team.name.toLowerCase().includes(searchTerm) ||
+      (team.city && team.city.toLowerCase().includes(searchTerm))
+    );
+    displayTeams(filteredTeams);
+  }
+
+  function openTeamModal(teamId = null) {
+    const modal = document.getElementById('team-modal');
+    const title = document.getElementById('team-modal-title');
+    const form = document.getElementById('team-form');
+    
+    if (!modal || !title || !form) return;
+    
+    currentTeamId = teamId;
+    
+    if (teamId) {
+      // Edit mode
+      title.textContent = 'Редактировать команду';
+      const team = allTeams.find(t => t.id === teamId);
+      if (team) {
+        document.getElementById('team-name').value = team.name;
+        document.getElementById('team-city').value = team.city || '';
+        document.getElementById('team-founded-year').value = team.founded_year || '';
+        document.getElementById('team-logo-url').value = team.logo_url || '';
+        document.getElementById('team-description').value = team.description || '';
+      }
+    } else {
+      // Create mode
+      title.textContent = 'Добавить команду';
+      form.reset();
+    }
+    
+    modal.style.display = 'block';
+  }
+
+  function closeTeamModal() {
+    const modal = document.getElementById('team-modal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+    currentTeamId = null;
+  }
+
+  async function saveTeam(event) {
+    event.preventDefault();
+    
+    const teamData = {
+      name: document.getElementById('team-name').value.trim(),
+      city: document.getElementById('team-city').value.trim(),
+      founded_year: parseInt(document.getElementById('team-founded-year').value) || null,
+      logo_url: document.getElementById('team-logo-url').value.trim(),
+      description: document.getElementById('team-description').value.trim()
+    };
+    
+    if (!teamData.name) {
+      showToast('Название команды обязательно', 'error');
+      return;
+    }
+    
+    try {
+      let response;
+      if (currentTeamId) {
+        // Update
+        response = await fetch(`/api/admin/teams/${currentTeamId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(teamData)
+        });
+      } else {
+        // Create
+        response = await fetch('/api/admin/teams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(teamData)
+        });
+      }
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        closeTeamModal();
+        loadTeams();
+        showToast(
+          currentTeamId ? 'Команда обновлена' : 'Команда создана', 
+          'success'
+        );
+      } else {
+        showToast(`Ошибка: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      console.error('Save team error:', error);
+      showToast('Ошибка соединения при сохранении команды', 'error');
+    }
+  }
+
+  async function deleteTeam(teamId, teamName) {
+    if (!confirm(`Удалить команду "${teamName}"?`)) {
+      return;
+    }
+    
+    try {
+      const response = await fetch(`/api/admin/teams/${teamId}`, {
+        method: 'DELETE'
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok) {
+        loadTeams();
+        showToast(`Команда "${teamName}" удалена`, 'success');
+      } else {
+        showToast(`Ошибка удаления: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      console.error('Delete team error:', error);
+      showToast('Ошибка соединения при удалении команды', 'error');
+    }
+  }
+
+  function editTeam(teamId) {
+    openTeamModal(teamId);
+  }
+
+    // Teams management buttons
+    const addNewTeamBtn = document.getElementById('add-new-team-btn');
+    if (addNewTeamBtn) {
+      addNewTeamBtn.addEventListener('click', () => openTeamModal());
+    }
+
+    const refreshTeamsBtn = document.getElementById('refresh-teams-btn');
+    if (refreshTeamsBtn) {
+      refreshTeamsBtn.addEventListener('click', loadTeams);
+    }
+
+    const teamSearch = document.getElementById('team-search');
+    if (teamSearch) {
+      teamSearch.addEventListener('input', debounce(() => filterTeams(), 300));
+    }
+
+    const teamForm = document.getElementById('team-form');
+    if (teamForm) {
+      teamForm.addEventListener('submit', saveTeam);
+    }
+
   function showToast(msg,type='info',timeout=3000){
     try { ensureToastContainer(); const c=document.getElementById('toast-container'); if(!c) return; const box=document.createElement('div'); box.textContent=msg; box.style.pointerEvents='auto'; box.style.padding='10px 14px'; box.style.borderRadius='8px'; box.style.fontSize='13px'; box.style.maxWidth='340px'; box.style.lineHeight='1.35'; box.style.fontFamily='inherit'; box.style.color='#fff'; box.style.background= type==='error'? 'linear-gradient(135deg,#d9534f,#b52a25)': (type==='success'? 'linear-gradient(135deg,#28a745,#1e7e34)': 'linear-gradient(135deg,#444,#222)'); box.style.boxShadow='0 4px 12px rgba(0,0,0,0.35)'; box.style.opacity='0'; box.style.transform='translateY(-6px)'; box.style.transition='opacity .25s ease, transform .25s ease'; const close=document.createElement('span'); close.textContent='×'; close.style.marginLeft='8px'; close.style.cursor='pointer'; close.style.fontWeight='600'; close.onclick=()=>{ box.style.opacity='0'; box.style.transform='translateY(-6px)'; setTimeout(()=>box.remove(),220); }; const wrap=document.createElement('div'); wrap.style.display='flex'; wrap.style.alignItems='flex-start'; wrap.style.justifyContent='space-between'; wrap.style.gap='6px'; const textSpan=document.createElement('span'); textSpan.style.flex='1'; textSpan.textContent=msg; wrap.append(textSpan,close); box.innerHTML=''; box.appendChild(wrap); c.appendChild(box); requestAnimationFrame(()=>{ box.style.opacity='1'; box.style.transform='translateY(0)'; }); if(timeout>0){ setTimeout(()=>close.click(), timeout); } } catch(e){ console.warn('toast fail',e); }
   }
@@ -47,6 +250,7 @@
     const tabs = document.querySelectorAll('#admin-subtabs .subtab-item');
     const panes = {
       'matches': document.getElementById('admin-pane-matches'),
+  'teams': document.getElementById('admin-pane-teams'),
       'players': document.getElementById('admin-pane-players'),
       'news': document.getElementById('admin-pane-news'),
       'service': document.getElementById('admin-pane-service'),
@@ -71,6 +275,8 @@
         
         // Load data for active pane
         if (targetPane === 'matches') {
+        } else if (targetPane === 'teams') {
+          loadTeams();
           loadMatches();
         } else if (targetPane === 'players') {
           loadPlayers();
@@ -1368,7 +1574,11 @@
     saveNews,
     deleteNews,
     loadNews,
-    loadAdminLogs
+  loadAdminLogs,
+  openTeamModal,
+  closeTeamModal,
+  editTeam,
+  deleteTeam
   };
 
   // Initialize when DOM is ready

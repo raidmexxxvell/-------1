@@ -5788,6 +5788,272 @@ def api_admin_fix_results_tours():
     finally:
         db.close()
 
+# ---------------------- TEAMS MANAGEMENT API ----------------------
+
+@app.route('/api/admin/teams', methods=['GET'])
+@require_admin()
+def api_admin_teams_list():
+    """Получить список всех команд."""
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+    
+    db = get_db()
+    try:
+        from database.database_models import Team
+        teams = db.query(Team).filter(Team.is_active == True).order_by(Team.name).all()
+        
+        teams_data = []
+        for team in teams:
+            teams_data.append({
+                'id': team.id,
+                'name': team.name,
+                'logo_url': team.logo_url or '',
+                'description': team.description or '',
+                'founded_year': team.founded_year,
+                'city': team.city or '',
+                'is_active': team.is_active,
+                'created_at': team.created_at.isoformat() if team.created_at else '',
+                'updated_at': team.updated_at.isoformat() if team.updated_at else ''
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'teams': teams_data,
+            'total': len(teams_data)
+        })
+    
+    except Exception as e:
+        app.logger.error(f"Get teams failed: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+@app.route('/api/admin/teams', methods=['POST'])
+@require_admin()
+def api_admin_teams_create():
+    """Создать новую команду."""
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+    
+    db = get_db()
+    try:
+        from database.database_models import Team
+        
+        # Получаем данные из request
+        data = request.get_json() or {}
+        
+        # Валидация обязательных полей
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify({'error': 'Team name is required'}), 400
+        
+        # Проверяем уникальность имени
+        existing = db.query(Team).filter(Team.name == name, Team.is_active == True).first()
+        if existing:
+            return jsonify({'error': 'Team with this name already exists'}), 400
+        
+        # Создаем команду
+        team = Team(
+            name=name,
+            logo_url=(data.get('logo_url') or '').strip(),
+            description=(data.get('description') or '').strip(),
+            founded_year=data.get('founded_year'),
+            city=(data.get('city') or '').strip(),
+            is_active=True
+        )
+        
+        db.add(team)
+        db.commit()
+        db.refresh(team)
+        
+        # Логируем действие
+        try:
+            from utils.admin_logger import log_admin_action
+            log_admin_action(
+                admin_id=1,  # TODO: Получить real admin_id из токена
+                action="create_team",
+                description=f"Created team: {team.name}",
+                endpoint="/api/admin/teams",
+                request_data=data,
+                result_status="success",
+                affected_entities=[{"type": "team", "id": team.id}]
+            )
+        except Exception:
+            pass  # Не критично если логирование не сработало
+        
+        return jsonify({
+            'status': 'success',
+            'team': {
+                'id': team.id,
+                'name': team.name,
+                'logo_url': team.logo_url or '',
+                'description': team.description or '',
+                'founded_year': team.founded_year,
+                'city': team.city or '',
+                'is_active': team.is_active
+            }
+        }), 201
+    
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Create team failed: {e}")
+        
+        # Логируем ошибку
+        try:
+            from utils.admin_logger import log_admin_action
+            log_admin_action(
+                admin_id=1,
+                action="create_team",
+                description="Failed to create team",
+                endpoint="/api/admin/teams",
+                request_data=data,
+                result_status="error",
+                result_message=str(e)
+            )
+        except Exception:
+            pass
+        
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+@app.route('/api/admin/teams/<int:team_id>', methods=['PUT'])
+@require_admin()
+def api_admin_teams_update(team_id):
+    """Обновить команду."""
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+    
+    db = get_db()
+    try:
+        from database.database_models import Team
+        
+        # Находим команду
+        team = db.query(Team).filter(Team.id == team_id, Team.is_active == True).first()
+        if not team:
+            return jsonify({'error': 'Team not found'}), 404
+        
+        # Получаем данные из request
+        data = request.get_json() or {}
+        old_data = {
+            'name': team.name,
+            'logo_url': team.logo_url,
+            'description': team.description,
+            'founded_year': team.founded_year,
+            'city': team.city
+        }
+        
+        # Обновляем поля
+        if 'name' in data:
+            name = (data['name'] or '').strip()
+            if not name:
+                return jsonify({'error': 'Team name cannot be empty'}), 400
+            
+            # Проверяем уникальность имени (если имя изменилось)
+            if name != team.name:
+                existing = db.query(Team).filter(Team.name == name, Team.is_active == True).first()
+                if existing:
+                    return jsonify({'error': 'Team with this name already exists'}), 400
+            
+            team.name = name
+        
+        if 'logo_url' in data:
+            team.logo_url = (data['logo_url'] or '').strip()
+        
+        if 'description' in data:
+            team.description = (data['description'] or '').strip()
+        
+        if 'founded_year' in data:
+            team.founded_year = data['founded_year']
+        
+        if 'city' in data:
+            team.city = (data['city'] or '').strip()
+        
+        db.commit()
+        
+        # Логируем действие
+        try:
+            from utils.admin_logger import log_admin_action
+            log_admin_action(
+                admin_id=1,
+                action="update_team",
+                description=f"Updated team: {team.name}",
+                endpoint=f"/api/admin/teams/{team_id}",
+                request_data={'old': old_data, 'new': data},
+                result_status="success",
+                affected_entities=[{"type": "team", "id": team.id}]
+            )
+        except Exception:
+            pass
+        
+        return jsonify({
+            'status': 'success',
+            'team': {
+                'id': team.id,
+                'name': team.name,
+                'logo_url': team.logo_url or '',
+                'description': team.description or '',
+                'founded_year': team.founded_year,
+                'city': team.city or '',
+                'is_active': team.is_active
+            }
+        })
+    
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Update team failed: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+@app.route('/api/admin/teams/<int:team_id>', methods=['DELETE'])
+@require_admin()
+def api_admin_teams_delete(team_id):
+    """Удалить команду (soft delete)."""
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+    
+    db = get_db()
+    try:
+        from database.database_models import Team
+        
+        # Находим команду
+        team = db.query(Team).filter(Team.id == team_id, Team.is_active == True).first()
+        if not team:
+            return jsonify({'error': 'Team not found'}), 404
+        
+        team_name = team.name
+        
+        # Soft delete - помечаем как неактивную
+        team.is_active = False
+        db.commit()
+        
+        # Логируем действие
+        try:
+            from utils.admin_logger import log_admin_action
+            log_admin_action(
+                admin_id=1,
+                action="delete_team",
+                description=f"Deleted team: {team_name}",
+                endpoint=f"/api/admin/teams/{team_id}",
+                result_status="success",
+                affected_entities=[{"type": "team", "id": team.id}]
+            )
+        except Exception:
+            pass
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Team "{team_name}" deleted successfully'
+        })
+    
+    except Exception as e:
+        db.rollback()
+        app.logger.error(f"Delete team failed: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
 @app.route('/api/match/status/get', methods=['GET'])
 def api_match_status_get():
     """Авто: scheduled/soon/live/finished по времени начала матча.
