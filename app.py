@@ -398,6 +398,54 @@ if DATABASE_SYSTEM_AVAILABLE:
         print(f"[ERROR] Failed to register database API: {e}")
         DATABASE_SYSTEM_AVAILABLE = False
 
+# Helper: rebuild schedule snapshot from current matches table
+def _update_schedule_snapshot_from_matches(db_session, logger):
+    """Builds a minimal schedule payload from `matches` table and writes snapshot 'schedule'."""
+    try:
+        # Load teams mapping
+        try:
+            team_rows = db_session.query(Team).all()
+            team_map = {t.id: (t.name or '') for t in team_rows}
+        except Exception:
+            team_map = {}
+        # Load matches ordered
+        try:
+            match_rows = db_session.query(Match).order_by(Match.match_date.asc()).all()
+        except Exception:
+            match_rows = []
+        tour_matches = []
+        for mm in match_rows:
+            dt = mm.match_date
+            date_s = None
+            time_s = None
+            try:
+                if dt:
+                    # iso date and HH:MM
+                    date_s = dt.date().isoformat()
+                    time_s = dt.time().strftime('%H:%M')
+            except Exception:
+                pass
+            tour_matches.append({
+                'home': team_map.get(mm.home_team_id, ''),
+                'away': team_map.get(mm.away_team_id, ''),
+                'date': date_s,
+                'time': time_s,
+                'status': getattr(mm, 'status', None)
+            })
+        payload = {
+            'tours': [ { 'name': 'matches', 'matches': tour_matches } ],
+            'updated_at': datetime.now(timezone.utc).isoformat()
+        }
+        try:
+            _snapshot_set(db_session, Snapshot, 'schedule', payload, logger)
+        except Exception as e:
+            logger.warning(f"schedule snapshot set failed: {e}")
+    except Exception as e:
+        try:
+            logger.warning(f"update_schedule_snapshot_from_matches error: {e}")
+        except Exception:
+            pass
+
 # Регистрация админского API с логированием
 try:
     from api.admin import init_admin_routes
@@ -2070,6 +2118,14 @@ def api_admin_match_create():
         )
         db.add(m)
         db.commit()
+        # rebuild schedule snapshot
+        try:
+            try:
+                _update_schedule_snapshot_from_matches(db, app.logger)
+            except Exception:
+                pass
+        except Exception:
+            pass
         db.refresh(m)
         # Инвалидация schedule snapshot / кэша
         if cache_manager:
@@ -2436,6 +2492,14 @@ def api_admin_matches_import():
                     mm.status = 'cancelled'
                     db.add(mm)
             # apply updates (only match_date in our diff)
+                    try:
+                        # rebuild schedule snapshot from matches after change
+                        try:
+                            _update_schedule_snapshot_from_matches(db, app.logger)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
             for u in updates:
                 mm = db.get(Match, u['id'])
                 if mm:
@@ -2453,6 +2517,14 @@ def api_admin_matches_import():
                 )
                 db.add(nm)
             db.commit()
+            # rebuild schedule snapshot after commit
+            try:
+                try:
+                    _update_schedule_snapshot_from_matches(db, app.logger)
+                except Exception:
+                    pass
+            except Exception:
+                pass
             # metrics & notification
             try:
                 _metrics_inc('import_matches_total', 1)
