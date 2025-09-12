@@ -1116,11 +1116,15 @@
     }catch(e){ console.error('apply error', e); if(status) status.textContent = 'Ошибка применения изменений'; diffBox.innerHTML = '<div style="color:#f55;">'+escapeHtml(String(e))+'</div>'; }
   }
 
-  // expose to global
-  window.AdminEnhanced.openImportModal = openImportModal;
-  window.AdminEnhanced.closeImportModal = closeImportModal;
-  window.AdminEnhanced.runImportDryRun = runImportDryRun;
-  window.AdminEnhanced.runImportApply = runImportApply;
+  // Ensure global namespace object exists before exposing functions
+  window.AdminEnhanced = window.AdminEnhanced || {};
+  // expose to global (merge without overwriting existing handlers)
+  Object.assign(window.AdminEnhanced, {
+    openImportModal,
+    closeImportModal,
+    runImportDryRun,
+    runImportApply
+  });
 
   function createNewsElement(news) {
     const newsEl = document.createElement('div');
@@ -1684,7 +1688,9 @@
   }
 
   // Global functions for HTML onclick handlers
-  window.AdminEnhanced = {
+  // Initialize or merge into window.AdminEnhanced to avoid clobbering other scripts
+  window.AdminEnhanced = window.AdminEnhanced || {};
+  Object.assign(window.AdminEnhanced, {
     openMatchModal,
     closeMatchModal,
     addPlayerToLineup,
@@ -1697,19 +1703,14 @@
     saveNews,
     deleteNews,
     loadNews,
-  loadAdminLogs,
-  openTeamModal,
-  closeTeamModal,
-  editTeam,
-  deleteTeam,
-  openTeamRoster,
-  closeTeamRoster
-  ,
-  openImportModal,
-  closeImportModal,
-  runImportDryRun,
-  runImportApply
-  };
+    loadAdminLogs,
+    openTeamModal,
+    closeTeamModal,
+    editTeam,
+    deleteTeam,
+    openTeamRoster,
+    closeTeamRoster
+  });
 
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {

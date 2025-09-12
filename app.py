@@ -7,6 +7,8 @@ import hashlib
 import hmac
 from datetime import datetime, date, timezone
 from datetime import timedelta
+import gzip
+import base64
 from services import (
     snapshot_get as _snapshot_get,
     snapshot_set as _snapshot_set,
@@ -445,6 +447,47 @@ def _update_schedule_snapshot_from_matches(db_session, logger):
             logger.warning(f"update_schedule_snapshot_from_matches error: {e}")
         except Exception:
             pass
+
+# Durable backup helper: write gzipped JSON to admin_backups
+def _write_admin_backup(db_session, action: str, payload: dict, created_by: str = None, metadata: dict = None):
+    try:
+        # gzip payload
+        raw = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        gz = gzip.compress(raw)
+        # Use raw DB connection to INSERT bytea
+        try:
+            # Try SQLAlchemy core insert
+            db_session.execute(text("""
+                INSERT INTO admin_backups(action, payload_gz, metadata, created_by, created_at)
+                VALUES(:action, :payload, :metadata::jsonb, :created_by, now()) RETURNING id
+            """), {
+                'action': action,
+                'payload': gz,
+                'metadata': json.dumps(metadata or {}),
+                'created_by': created_by
+            })
+            # fetch last id
+            res = db_session.execute(text("SELECT currval(pg_get_serial_sequence('admin_backups','id')) as id")).fetchone()
+            db_session.commit()
+            return res['id'] if res else None
+        except Exception:
+            # Fallback: try raw connection
+            conn = db_session.connection().connection
+            cur = conn.cursor()
+            cur.execute("INSERT INTO admin_backups(action, payload_gz, metadata, created_by, created_at) VALUES(%s,%s,%s,%s,now()) RETURNING id", (action, gz, json.dumps(metadata or {}), created_by))
+            rid = cur.fetchone()[0]
+            conn.commit()
+            return rid
+    except Exception as e:
+        try:
+            app.logger.warning(f"admin backup write failed: {e}")
+        except Exception:
+            pass
+        try:
+            db_session.rollback()
+        except Exception:
+            pass
+        return None
 
 # Регистрация админского API с логированием
 try:
@@ -2470,16 +2513,75 @@ def api_admin_matches_import():
             force = request.args.get('force', '0') in ('1','true','yes')
             if not force:
                 return jsonify({'error': 'requires_force', 'details': ['high_delete_ratio']}), 412
-        # backup current state via manual_log (if available)
+        # cooldown + durable backup: try to persist a gzipped backup in admin_backups before applying
+        backup_id = None
         try:
-            backup_payload = {
-                'existing': [{ 'id': m.id, 'home_team_id': m.home_team_id, 'away_team_id': m.away_team_id, 'match_date': m.match_date.isoformat() if m.match_date else None, 'venue': m.venue, 'status': m.status, 'notes': m.notes } for m in existing_rows]
-            }
+            # admin identity (best-effort from env)
+            admin_id_env = os.environ.get('ADMIN_USER_ID', '')
             try:
-                manual_log(action='matches_bulk_import_backup', description='Backup before bulk apply', result_status='ok', affected_data=backup_payload)
+                admin_id_val = int(admin_id_env) if admin_id_env else None
             except Exception:
-                # best-effort
+                admin_id_val = None
+
+            # Cooldown enforcement: if a recent successful bulk apply exists, block until cooldown expires
+            try:
+                cooldown_min = int(getattr(Config, 'MATCHES_IMPORT_COOLDOWN_MIN', 0) or 0)
+                if cooldown_min and SessionLocal is not None:
+                    _tmpdb = get_db()
+                    try:
+                        r = _tmpdb.execute(text("SELECT id, created_at FROM admin_backups WHERE action=:action ORDER BY created_at DESC LIMIT 1"), {'action': 'matches_bulk_import_apply'}).fetchone()
+                        if r and r['created_at'] is not None:
+                            last_ts = r['created_at']
+                            try:
+                                now_ts = datetime.now(timezone.utc)
+                                delta = (now_ts - last_ts).total_seconds()
+                                if delta < (cooldown_min * 60):
+                                    retry_after = int(cooldown_min * 60 - delta)
+                                    try:
+                                        _tmpdb.close()
+                                    except Exception:
+                                        pass
+                                    return jsonify({'error': 'cooldown', 'retry_after': retry_after, 'last_backup_id': r['id']}), 429
+                            except Exception:
+                                pass
+                    except Exception:
+                        # if admin_backups table missing or query fails, skip cooldown enforcement
+                        pass
+                    finally:
+                        try:
+                            _tmpdb.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # Build backup payload and persist it (durable backup)
+            try:
+                backup_payload = {
+                    'existing': [{ 'id': m.id, 'home_team_id': m.home_team_id, 'away_team_id': m.away_team_id, 'match_date': m.match_date.isoformat() if m.match_date else None, 'venue': m.venue, 'status': m.status, 'notes': m.notes } for m in existing_rows],
+                    'diff': { 'inserts': inserts, 'updates': updates, 'deletes': deletes },
+                    'summary': summary,
+                }
+                if SessionLocal is not None:
+                    _bdb = get_db()
+                    try:
+                        backup_id = _write_admin_backup(_bdb, 'matches_bulk_import_apply', backup_payload, created_by=str(admin_id_val) if admin_id_val else None, metadata={'summary': summary})
+                    except Exception:
+                        backup_id = None
+                    finally:
+                        try:
+                            _bdb.close()
+                        except Exception:
+                            pass
+            except Exception as e:
+                app.logger.warning(f'bulk_apply durable backup failed: {e}')
+
+            # best-effort admin logging (legacy)
+            try:
+                manual_log(action='matches_bulk_import_backup', description='Backup before bulk apply', admin_id=admin_id_val, result_status='ok', affected_data={'backup_id': backup_id})
+            except Exception:
                 app.logger.warning('manual_log not available for backup')
+
         except Exception as e:
             app.logger.error(f'bulk_apply backup error: {e}')
         # apply changes in transaction
@@ -2538,7 +2640,10 @@ def api_admin_matches_import():
             except Exception:
                 pass
             db.close()
-            return jsonify({'applied': True, 'summary': summary})
+            resp = {'applied': True, 'summary': summary}
+            if backup_id:
+                resp['backup_id'] = backup_id
+            return jsonify(resp)
         except Exception as e:
             try:
                 db.rollback()
