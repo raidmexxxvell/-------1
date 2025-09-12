@@ -301,6 +301,17 @@ def finalize_match_core(
             # Импортирующиеся здесь, чтобы не тянуть heavy объекты выше
             from sqlalchemy import text as _sql_text
             from database.database_models import Team
+            # Инвалидация глобального goal+assist лидерборда (двухуровневый кэш)
+            try:
+                if cache_manager:
+                    cache_manager.invalidate('leaderboards', identifier='goal-assist')
+            except Exception:
+                pass
+            try:
+                if websocket_manager:
+                    websocket_manager.notify_data_change('leader-goal-assist', {'reason': 'invalidate', 'ts': datetime.now(timezone.utc).isoformat()})
+            except Exception:
+                pass
             # 0. Таблица идемпотентности для динамических инкрементов
             db.execute(_sql_text("""
             CREATE TABLE IF NOT EXISTS dynamic_team_stats_applied (

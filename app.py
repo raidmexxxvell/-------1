@@ -6457,13 +6457,19 @@ def api_leader_top_rich():
             db.close()
     return etag_json('leader-top-rich', _build, cache_ttl=LEADER_TTL, max_age=3600, swr=600, core_filter=lambda p: {'items': p.get('items')})
 
+LEADER_GOAL_ASSIST_CACHE = {'data': None, 'ts': 0, 'etag': None, 'limit': None}
+
 @app.route('/api/leaderboard/goal-assist')
 def api_leader_goal_assist():
-    """Глобальный лидерборд по (goals+assists) из динамических team_stats_<team_id>.
-    Сборка: объединяем данные всех команд, сортируем по (total desc, matches_played asc, goals desc).
-    Кэш: ETag + TTL (как другие leaderboards). Источник — динамические таблицы, без нормализации players.
+    """Глобальный лидерборд (goals+assists) с двухуровневым кэшированием.
+    Источник: динамические таблицы team_stats_<team_id>.
+    Кэширование:
+      - In-memory: LEADER_GOAL_ASSIST_CACHE (TTL = LEADER_TTL)
+      - Redis (через cache_manager): namespace 'leaderboards', key 'goal-assist'
+    Инвалидация выполняется при финализации матча (match_finalize -> invalidate 'leaderboards:goal-assist').
+    ETag: через etag_json (core_filter исключает updated_at).
+    Параметр limit применяется как soft-ограничение поверх полного кэша.
     """
-    # Параметр limit (query param). По умолчанию 10, максимум ограничен LEADERBOARD_ITEMS_CAP
     try:
         req_limit = int(request.args.get('limit', 10))
     except Exception:
@@ -6474,24 +6480,41 @@ def api_leader_goal_assist():
         req_limit = LEADERBOARD_ITEMS_CAP
 
     def _build():
-        # 0) Попытка взять из Redis precompute (если позже будет добавлен) — используем общий namespace
+        now_ts = time.time()
+        # 0) In-memory свежий?
+        global LEADER_GOAL_ASSIST_CACHE
+        ce = LEADER_GOAL_ASSIST_CACHE
+        if ce.get('data') is not None and (now_ts - (ce.get('ts') or 0) < LEADER_TTL):
+            base_rows = ce['data']
+            return {
+                'items': base_rows[:min(req_limit, LEADERBOARD_ITEMS_CAP)],
+                'updated_at': datetime.fromtimestamp(ce['ts']).isoformat()
+            }
+        # 1) Redis слой
         try:
             if cache_manager:
                 cached = cache_manager.get('leaderboards', 'goal-assist')
-                if cached and isinstance(cached, dict) and (cached.get('items') is not None):
-                    items = cached.get('items')
-                    if isinstance(items, list):
-                        cached = {**cached, 'items': items[:LEADERBOARD_ITEMS_CAP]}
-                    return cached
+                if cached and isinstance(cached, dict) and isinstance(cached.get('items'), list):
+                    items_full = cached['items'][:LEADERBOARD_ITEMS_CAP]
+                    # Гидратируем память
+                    LEADER_GOAL_ASSIST_CACHE = {
+                        'data': items_full,
+                        'ts': now_ts,
+                        'etag': None,
+                        'limit': LEADERBOARD_ITEMS_CAP
+                    }
+                    return {
+                        'items': items_full[:min(req_limit, LEADERBOARD_ITEMS_CAP)],
+                        'updated_at': cached.get('updated_at') or datetime.fromtimestamp(now_ts).isoformat()
+                    }
         except Exception:
             pass
-        # 1) Прямое построение (ленивое объединение)
+        # 2) Построение заново
         if SessionLocal is None:
             return {'items': [], 'updated_at': None}
         db: Session = get_db()
         try:
             from sqlalchemy import text as _sql_text
-            # Собираем список команд
             teams = []
             try:
                 teams = db.execute(_sql_text("SELECT id, name FROM teams"))
@@ -6499,9 +6522,8 @@ def api_leader_goal_assist():
                 return {'items': [], 'updated_at': datetime.now(timezone.utc).isoformat()}
             rows = []
             for tid, tname in teams:
-                table = f"team_stats_{tid}";
+                table = f"team_stats_{tid}"
                 try:
-                    # Проверяем существует ли таблица (информация в catalog)
                     exists = db.execute(_sql_text("""
                         SELECT 1 FROM information_schema.tables
                         WHERE table_name = :tn LIMIT 1
@@ -6530,13 +6552,26 @@ def api_leader_goal_assist():
                             'goal_plus_assist': total,
                         })
                 except Exception:
-                    # Если конкретная таблица битая — пропускаем
                     continue
-            # Сортировка глобальная
             rows.sort(key=lambda x: (-x['goal_plus_assist'], x['matches_played'], -x['goals'], x['first_name']))
-            limit = min(req_limit, LEADERBOARD_ITEMS_CAP)
-            rows = rows[:limit]
-            return {'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat()}
+            full_rows = rows[:LEADERBOARD_ITEMS_CAP]
+            # Сохраняем в Redis
+            try:
+                if cache_manager:
+                    cache_manager.set('leaderboards', 'goal-assist', {'items': full_rows, 'updated_at': datetime.now(timezone.utc).isoformat()}, ttl=LEADER_TTL)
+            except Exception:
+                pass
+            # Сохраняем в память
+            LEADER_GOAL_ASSIST_CACHE = {
+                'data': full_rows,
+                'ts': now_ts,
+                'etag': None,
+                'limit': LEADERBOARD_ITEMS_CAP
+            }
+            return {
+                'items': full_rows[:min(req_limit, LEADERBOARD_ITEMS_CAP)],
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }
         finally:
             db.close()
     return etag_json('leader-goal-assist', _build, cache_ttl=LEADER_TTL, max_age=1800, swr=600, core_filter=lambda p: {'items': p.get('items')})

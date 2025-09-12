@@ -115,7 +115,8 @@
             Архитектурная цель: изолировать доменную логику матча от монолита `app.py` и подготовить почву для дальнейшего вынесения в пакет `services/`.
 
 - Лидерборды и достижения
-    - Серверные эндпоинты (ETag): `app.py` → `/api/leaderboard/*`, `/api/achievements` (legacy `/api/stats-table` → 410 GONE)
+    - Серверные эндпоинты (ETag): `app.py` → `/api/leaderboard/*`, `/api/achievements` (legacy `/api/stats-table` → 410 GONE). `goal-assist` использует `etag_json` с core_filter для стабильного ETag (исключает updated_at).
+    - Goal+Assist кэш: двухуровневый (in-memory + Redis namespace `leaderboards:goal-assist`, TTL = LEADER_TTL). Инвалидация вызывается при финализации матча (services/match_finalize.py) перед динамическим апдейтом per-team stats. WebSocket нотификация `leader-goal-assist` (reason=invalidate) может использоваться клиентом для ускоренного refetch.
     - API `/api/achievements`: добавлено поле `best_tier` (наивысший достигнутый уровень), сохранены `all_targets` и `next_target` для клиентского прогресса.
     - Клиентские вызовы: `static/js/profile.js` (leaderboards) и `static/js/profile-achievements.js`
     - Рендер достижений: бейдж (иконка/цвет) определяется по `best_tier`; список «Цели: <all_targets.join('/')>» показывается внутри секции «Подробнее» (скрыт в кратком описании); прогресс остаётся в краткой части как `value/next_target`.
