@@ -415,27 +415,113 @@ def _update_schedule_snapshot_from_matches(db_session, logger):
             match_rows = db_session.query(Match).order_by(Match.match_date.asc()).all()
         except Exception:
             match_rows = []
-        tour_matches = []
+
+        # Group matches into tours. Prefer explicit tour stored in Match.notes as JSON {'tour': N}.
+        tours_map = {}
+        tour_order = []
         for mm in match_rows:
+            # parse note-based tour if present
+            tour_key = None
+            try:
+                if mm.notes:
+                    try:
+                        n = json.loads(mm.notes)
+                        if isinstance(n, dict) and 'tour' in n:
+                            tour_key = n.get('tour')
+                    except Exception:
+                        # allow legacy string like 'tour:5'
+                        s = str(mm.notes or '')
+                        if s.startswith('tour:'):
+                            try:
+                                tour_key = int(s.split(':',1)[1])
+                            except Exception:
+                                tour_key = s
+            except Exception:
+                tour_key = None
+
+            if tour_key is None:
+                # fallback grouping by ISO week start date to create deterministic buckets
+                try:
+                    dt = mm.match_date
+                    if dt:
+                        wk = dt.date().isoformat()
+                        tour_key = f'date:{wk}'
+                    else:
+                        tour_key = 'unknown'
+                except Exception:
+                    tour_key = 'unknown'
+
+            if tour_key not in tours_map:
+                tours_map[tour_key] = []
+                tour_order.append(tour_key)
+
             dt = mm.match_date
             date_s = None
             time_s = None
             try:
                 if dt:
-                    # iso date and HH:MM
                     date_s = dt.date().isoformat()
                     time_s = dt.time().strftime('%H:%M')
             except Exception:
                 pass
-            tour_matches.append({
+
+            tours_map[tour_key].append({
                 'home': team_map.get(mm.home_team_id, ''),
                 'away': team_map.get(mm.away_team_id, ''),
                 'date': date_s,
                 'time': time_s,
                 'status': getattr(mm, 'status', None)
             })
+
+        # Build simple tours list sorted by first match date within each tour
+        tours_list = []
+        for k in tour_order:
+            matches = tours_map.get(k, [])
+            # compute min date for sorting
+            min_dt = None
+            for m in matches:
+                try:
+                    if m.get('date'):
+                        d = datetime.fromisoformat(m['date'])
+                        if min_dt is None or d < min_dt:
+                            min_dt = d
+                except Exception:
+                    continue
+            tours_list.append({'tour': k, 'matches': matches, 'start_at': (min_dt.isoformat() if min_dt else '')})
+
+        # sort by start_at
+        try:
+            tours_list.sort(key=lambda t: t.get('start_at') or '')
+        except Exception:
+            pass
+
+        # pick up to 3 upcoming tours: prefer those with start_at >= today
+        now_local = datetime.now()
+        filtered = []
+        for t in tours_list:
+            try:
+                sa = t.get('start_at')
+                if not sa:
+                    filtered.append(t)
+                    continue
+                sa_dt = datetime.fromisoformat(sa)
+                if sa_dt.date() >= (now_local.date()):
+                    filtered.append(t)
+            except Exception:
+                filtered.append(t)
+            if len(filtered) >= 3:
+                break
+
+        if not filtered:
+            filtered = tours_list[:3]
+
+        # Normalize tour entries for snapshot (strip internal keys)
+        out_tours = []
+        for t in filtered:
+            out_tours.append({ 'tour': t.get('tour'), 'matches': t.get('matches', []) })
+
         payload = {
-            'tours': [ { 'name': 'matches', 'matches': tour_matches } ],
+            'tours': out_tours,
             'updated_at': datetime.now(timezone.utc).isoformat()
         }
         try:
@@ -10060,7 +10146,71 @@ def api_admin_google_import_schedule():
             return jsonify({'error': 'sheet_read_failed'}), 500
         db = get_db()
         try:
-            _snapshot_set(db, Snapshot, 'schedule', payload, app.logger)
+            # Persist all tours/matches into `matches` table: full load from sheet
+            try:
+                # load team name -> id map
+                team_rows = db.query(Team).all()
+                team_name_map = { (t.name or '').strip().lower(): t.id for t in team_rows }
+            except Exception:
+                team_name_map = {}
+
+            # Option: we perform upsert-like behavior: find existing by home/away/date and update or insert
+            for t in payload.get('tours', []) or []:
+                for m in t.get('matches', []) or []:
+                    try:
+                        home_name = (m.get('home') or '').strip()
+                        away_name = (m.get('away') or '').strip()
+                        date_s = m.get('datetime') or m.get('date') or ''
+                        if not home_name or not away_name or not date_s:
+                            continue
+                        # parse datetime
+                        try:
+                            dt = datetime.fromisoformat(date_s)
+                        except Exception:
+                            try:
+                                dt = datetime.fromisoformat(m.get('date'))
+                            except Exception:
+                                dt = None
+
+                        home_id = team_name_map.get(home_name.lower())
+                        away_id = team_name_map.get(away_name.lower())
+                        if not home_id or not away_id or dt is None:
+                            continue
+
+                        # find existing match with same home/away and date within tolerance (exact match preferred)
+                        existing = None
+                        try:
+                            existing = db.query(Match).filter(Match.home_team_id==home_id, Match.away_team_id==away_id, Match.match_date==dt).first()
+                        except Exception:
+                            existing = None
+
+                        if existing:
+                            # update minimal fields
+                            existing.match_date = dt
+                            existing.home_team_id = home_id
+                            existing.away_team_id = away_id
+                            existing.status = existing.status or 'scheduled'
+                            db.add(existing)
+                        else:
+                            # insert new match
+                            nm = Match(home_team_id=home_id, away_team_id=away_id, match_date=dt, status='scheduled')
+                            db.add(nm)
+                    except Exception:
+                        app.logger.debug('failed to persist match row from sheet', exc_info=True)
+            # commit persisted matches
+            try:
+                db.commit()
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+
+            # After persisting full set into matches, rebuild snapshot from DB (keeps 3-tour logic)
+            try:
+                _update_schedule_snapshot_from_matches(db, app.logger)
+            except Exception:
+                app.logger.warning('failed to rebuild snapshot from matches after google import')
         finally:
             db.close()
         # Инвалидируем кэши и уведомим клиентов
