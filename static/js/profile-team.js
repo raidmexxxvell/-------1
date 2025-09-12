@@ -189,37 +189,8 @@
     statsWrap.append(statsTitle, summary, mini);
     host.append(section, statsWrap);
 
-    // Асинхронная подгрузка глобального лидерборда (G+A) — не блокирует основной рендер
-    (async function loadGlobalLeaders(){
-      try {
-        const limit = 10;
-        const resp = await fetch(`/api/leaderboard/goal-assist?limit=${limit}`, { credentials: 'same-origin' });
-        if (!resp.ok) return; // silently ignore
-        const json = await resp.json();
-        const items = Array.isArray(json?.items) ? json.items : [];
-        if (!items.length) return;
-        // Построим карточку лидеров и вставим в statsWrap
-        const leadersCard = document.createElement('div'); leadersCard.className = 'leaders-card';
-        const h = document.createElement('div'); h.className = 'leaders-title'; h.textContent = 'Лидеры (Голы + Передачи)';
-        const list = document.createElement('ol'); list.className = 'leaders-list';
-        items.forEach(it => {
-          try {
-            const li = document.createElement('li'); li.className = 'leader-item';
-            const name = document.createElement('div'); name.className = 'leader-name';
-            const team = document.createElement('div'); team.className = 'leader-team';
-            const stats = document.createElement('div'); stats.className = 'leader-stats';
-            name.textContent = `${it.first_name||''} ${it.last_name||''}`.trim() || (it.player_id ? `#${it.player_id}` : '—');
-            team.textContent = it.team || '';
-            stats.textContent = `${it.goals||0} + ${it.assists||0} = ${it.goal_plus_assist|| ( (it.goals||0)+(it.assists||0) ) }`;
-            li.append(name, team, stats);
-            list.appendChild(li);
-          } catch(_){}
-        });
-        leadersCard.append(h, list);
-        // вставляем в начало мини-карточек, но после заголовка статистики
-        try { statsWrap.insertBefore(leadersCard, mini); } catch(e){ statsWrap.appendChild(leadersCard); }
-      } catch(_) { /* fail silently */ }
-    })();
+    // (раньше здесь подгружался глобальный лидерборд, но по требованиям на странице команды
+    // статистика игроков не должна отображаться — логика перенесена в общий раздел Лига→Статистика)
   }
 
   async function openTeam(teamName){

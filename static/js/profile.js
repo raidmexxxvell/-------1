@@ -650,10 +650,21 @@
         if (tbody) { tbody.innerHTML = ''; tbody.style.display = 'none'; }
         if (updated) updated.textContent = '';
         _statsLoading = true;
-        fetch('/api/stats-table')
-            .then(r => r.json())
-            .then(data => { try { window.League?.renderStatsTable?.(table, updated, data); } catch(_) {} })
-            .catch(err => { console.error('stats table load error', err); })
+        // Используем новый глобальный лидерборд (G+A) для заполнения таблицы статистики
+        fetch('/api/leaderboard/goal-assist?limit=10')
+            .then(async (r) => {
+                if (!r.ok) throw new Error('leaderboard fetch failed');
+                const json = await r.json();
+                // Ожидаем json.items = [{ player_id, first_name, last_name, team, matches_played, goals, assists, goal_plus_assist }, ...]
+                const items = Array.isArray(json?.items) ? json.items : [];
+                const values = items.map((it, idx) => {
+                    const name = `${it.first_name||''} ${it.last_name||''}`.trim() || (it.player_id?`#${it.player_id}`:'');
+                    return [String(idx+1), name, it.team || '', String(it.matches_played||0), String(it.goals||0), String(it.assists||0), String(it.goal_plus_assist || ((it.goals||0)+(it.assists||0)))];
+                });
+                const payload = { values: values, updated_at: json?.updated_at || new Date().toISOString() };
+                try { window.League?.renderStatsTable?.(table, updated, payload); } catch(_) {}
+            })
+            .catch(err => { console.error('stats table load error (leaderboard)', err); })
             .finally(() => { _statsLoading = false; if (tbody) tbody.style.display = ''; });
     }
 
