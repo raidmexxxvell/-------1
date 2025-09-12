@@ -417,6 +417,16 @@ def finalize_match_core(
                     "INSERT INTO dynamic_team_stats_applied (home, away) VALUES (:h, :a) ON CONFLICT (home, away) DO NOTHING"
                 ), {'h': home, 'a': away})
                 db.commit()
+                # Инвалидация кэша глобального goal-assist лидерборда (если используется MultiLevelCache)
+                try:
+                    from optimizations.multilevel_cache import get_cache as _get_cache
+                    _cache = _get_cache()
+                    try:
+                        _cache.invalidate('leaderboards', 'goal-assist')
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             db.commit()  # commit при no-op (already_applied)
         except Exception as dyn_err:
             try:

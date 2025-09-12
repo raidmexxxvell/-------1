@@ -6480,6 +6480,80 @@ def api_leader_top_rich():
             db.close()
     return etag_json('leader-top-rich', _build, cache_ttl=LEADER_TTL, max_age=3600, swr=600, core_filter=lambda p: {'items': p.get('items')})
 
+@app.route('/api/leaderboard/goal-assist')
+def api_leader_goal_assist():
+    """Глобальный лидерборд по (goals+assists) из динамических team_stats_<team_id>.
+    Сборка: объединяем данные всех команд, сортируем по (total desc, matches_played asc, goals desc).
+    Кэш: ETag + TTL (как другие leaderboards). Источник — динамические таблицы, без нормализации players.
+    """
+    def _build():
+        # 0) Попытка взять из Redis precompute (если позже будет добавлен) — используем общий namespace
+        try:
+            if cache_manager:
+                cached = cache_manager.get('leaderboards', 'goal-assist')
+                if cached and isinstance(cached, dict) and (cached.get('items') is not None):
+                    items = cached.get('items')
+                    if isinstance(items, list):
+                        cached = {**cached, 'items': items[:LEADERBOARD_ITEMS_CAP]}
+                    return cached
+        except Exception:
+            pass
+        # 1) Прямое построение (ленивое объединение)
+        if SessionLocal is None:
+            return {'items': [], 'updated_at': None}
+        db: Session = get_db()
+        try:
+            from sqlalchemy import text as _sql_text
+            # Собираем список команд
+            teams = []
+            try:
+                teams = db.execute(_sql_text("SELECT id, name FROM teams"))
+            except Exception:
+                return {'items': [], 'updated_at': datetime.now(timezone.utc).isoformat()}
+            rows = []
+            for tid, tname in teams:
+                table = f"team_stats_{tid}";
+                try:
+                    # Проверяем существует ли таблица (информация в catalog)
+                    exists = db.execute(_sql_text("""
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_name = :tn LIMIT 1
+                    """), {'tn': table}).first()
+                    if not exists:
+                        continue
+                    data = db.execute(_sql_text(f"""
+                        SELECT player_id, first_name, last_name, matches_played, goals, assists
+                        FROM {table}
+                        ORDER BY goals DESC
+                    """))
+                    for r in data:
+                        goals = int(r.goals or 0)
+                        assists = int(r.assists or 0)
+                        matches = int(r.matches_played or 0)
+                        total = goals + assists
+                        rows.append({
+                            'player_id': int(r.player_id),
+                            'first_name': r.first_name,
+                            'last_name': r.last_name or '',
+                            'team_id': int(tid),
+                            'team': tname,
+                            'matches_played': matches,
+                            'goals': goals,
+                            'assists': assists,
+                            'goal_plus_assist': total,
+                        })
+                except Exception:
+                    # Если конкретная таблица битая — пропускаем
+                    continue
+            # Сортировка глобальная
+            rows.sort(key=lambda x: (-x['goal_plus_assist'], x['matches_played'], -x['goals'], x['first_name']))
+            limit = min(LEADERBOARD_ITEMS_CAP, 50)  # ограничим до 50 для ответа
+            rows = rows[:limit]
+            return {'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat()}
+        finally:
+            db.close()
+    return etag_json('leader-goal-assist', _build, cache_ttl=LEADER_TTL, max_age=1800, swr=600, core_filter=lambda p: {'items': p.get('items')})
+
 @app.route('/api/leaderboard/server-leaders')
 def api_leader_server_leaders():
     """Лидеры сервера: пример метрики — суммарный XP + streak (или уровень).
