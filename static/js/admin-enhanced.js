@@ -65,6 +65,7 @@
         <td>
           <button class="btn-small btn-edit" onclick="window.AdminEnhanced.editTeam(${team.id})">Редактировать</button>
           <button class="btn-small btn-delete" onclick="window.AdminEnhanced.deleteTeam(${team.id}, '${team.name}')">Удалить</button>
+          <button class="btn-small btn-secondary" onclick="window.AdminEnhanced.openTeamRoster(${team.id}, '${team.name.replace(/'/g, "\\'")}')">Состав</button>
         </td>
       `;
       tbody.appendChild(row);
@@ -204,6 +205,38 @@
 
   function editTeam(teamId) {
     openTeamModal(teamId);
+  }
+
+  // ------------ Team Roster (read-only) -------------
+  function openTeamRoster(teamId, teamName){
+    const modal = document.getElementById('team-roster-modal');
+    const title = document.getElementById('team-roster-title');
+    const statusBox = document.getElementById('team-roster-status');
+    const tbody = document.getElementById('team-roster-table');
+    if(!modal || !title || !tbody) return;
+    title.textContent = 'Состав: ' + teamName;
+    tbody.innerHTML = '';
+    statusBox.style.display='block';
+    statusBox.textContent='Загрузка...';
+    modal.style.display='block';
+    fetch(`/api/admin/teams/${teamId}/roster`).then(r=>r.json()).then(data=>{
+      if(!data || data.error){ statusBox.textContent = 'Ошибка загрузки'; return; }
+      statusBox.style.display='none';
+      if(!data.players || !data.players.length){
+        statusBox.style.display='block';
+        statusBox.textContent='Нет игроков';
+        return;
+      }
+      data.players.forEach((p,i)=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${i+1}</td><td>${p.first_name||''}</td><td>${p.last_name||''}</td><td>${p.goals}</td><td>${p.assists}</td><td>${p.yellow_cards}</td><td>${p.red_cards}</td>`;
+        tbody.appendChild(tr);
+      });
+    }).catch(err=>{ statusBox.textContent='Ошибка'; console.error(err); });
+  }
+  function closeTeamRoster(){
+    const modal = document.getElementById('team-roster-modal');
+    if(modal) modal.style.display='none';
   }
 
     // Teams management buttons
@@ -1586,7 +1619,9 @@
   openTeamModal,
   closeTeamModal,
   editTeam,
-  deleteTeam
+  deleteTeam,
+  openTeamRoster,
+  closeTeamRoster
   };
 
   // Initialize when DOM is ready

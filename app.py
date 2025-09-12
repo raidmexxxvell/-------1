@@ -6054,6 +6054,68 @@ def api_admin_teams_delete(team_id):
     finally:
         db.close()
 
+# ---------------------- TEAM ROSTER (READ-ONLY STAGE 1.2) ----------------------
+
+@app.route('/api/admin/teams/<int:team_id>/roster', methods=['GET'])
+@require_admin()
+def api_admin_team_roster(team_id):
+    """Возвращает уникальный список игроков команды из team_roster.
+    На этапе 1.2 используем как источник игроков до нормализации.
+    Формат ответа: first_name, last_name, goals, assists, yellow_cards, red_cards (пока 0)."""
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+
+    db = get_db()
+    try:
+        from database.database_models import Team, TeamRoster
+        team = db.query(Team).filter(Team.id == team_id, Team.is_active == True).first()
+        if not team:
+            return jsonify({'error': 'Team not found'}), 404
+
+        # Получаем всех игроков по имени команды
+        roster_entries = db.query(TeamRoster).filter(TeamRoster.team == team.name).order_by(TeamRoster.player).all()
+
+        players = []
+        seen = set()
+        for entry in roster_entries:
+            raw = (entry.player or '').strip()
+            if not raw:
+                continue
+            if raw.lower() in seen:
+                continue
+            seen.add(raw.lower())
+            parts = raw.split()
+            if len(parts) == 1:
+                first_name = parts[0]
+                last_name = ''
+            else:
+                first_name = parts[0]
+                last_name = ' '.join(parts[1:])
+            players.append({
+                'id': entry.id,
+                'first_name': first_name,
+                'last_name': last_name,
+                'goals': 0,
+                'assists': 0,
+                'yellow_cards': 0,
+                'red_cards': 0
+            })
+
+        return jsonify({
+            'status': 'success',
+            'team': {
+                'id': team.id,
+                'name': team.name
+            },
+            'players': players,
+            'total': len(players)
+        })
+    except Exception as e:
+        app.logger.error(f"Get team roster failed: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
 @app.route('/api/match/status/get', methods=['GET'])
 def api_match_status_get():
     """Авто: scheduled/soon/live/finished по времени начала матча.

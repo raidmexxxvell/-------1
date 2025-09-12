@@ -156,6 +156,37 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Team Roster Modal -->
+                <div id="team-roster-modal" class="modal" style="display:none;">
+                    <div class="modal-content" style="max-width:700px;">
+                        <div class="modal-header">
+                            <h3 id="team-roster-title">Состав команды</h3>
+                            <button class="modal-close" onclick="window.AdminEnhanced.closeTeamRoster()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="team-roster-status" class="status-text" style="display:none;"></div>
+                            <div class="table-container">
+                                <table class="admin-table">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Имя</th>
+                                            <th>Фамилия</th>
+                                            <th>Голы</th>
+                                            <th>Пасы</th>
+                                            <th>ЖК</th>
+                                            <th>КК</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="team-roster-table">
+                                        <!-- динамически -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Players Management Pane -->

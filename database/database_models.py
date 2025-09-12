@@ -78,6 +78,17 @@ class Player(Base):
         back_populates="assisted_by"
     )
 
+class TeamRoster(Base):
+    """Упрощённая модель существующей таблицы team_roster (исторический список участников матчей).
+    Используется на этапе 1.2 как источник игроков до нормализации сущности players.
+    Поле player содержит ФИО одной строкой. Далее будет миграция в players."""
+    __tablename__ = 'team_roster'
+
+    id = Column(Integer, primary_key=True)
+    team = Column(String(255), nullable=False, index=True)  # Имя команды (связываем по Team.name)
+    player = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=func.current_timestamp())
+
 class Match(Base):
     __tablename__ = 'matches'
     
