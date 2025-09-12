@@ -160,27 +160,23 @@
     if (!tbody) return;
     tbody.innerHTML = '';
     const rows = data?.values || [];
+    const MAX_ROWS = 10; // показываем максимум 10
     const nodes = [];
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < MAX_ROWS; i++) {
       const r = rows[i] || [];
       const tr = document.createElement('tr');
-      for (let j = 0; j < 7; j++) {
+      for (let j = 0; j < 5; j++) { // 5 колонок: Name, Matches, Goals, Assists, Total
         const td = document.createElement('td');
         td.textContent = (r[j] ?? '').toString();
         tr.appendChild(td);
       }
+      if (i === 0) tr.classList.add('rank-1');
+      else if (i === 1) tr.classList.add('rank-2');
+      else if (i === 2) tr.classList.add('rank-3');
       nodes.push(tr);
     }
     batchAppend(tbody, nodes, 10);
     raf(() => {
-      try {
-        const trs = tbody.querySelectorAll('tr');
-        trs.forEach((rowEl, idx) => {
-          if (idx === 1) rowEl.classList.add('rank-1');
-          if (idx === 2) rowEl.classList.add('rank-2');
-          if (idx === 3) rowEl.classList.add('rank-3');
-        });
-      } catch(_) {}
       try { if (updatedEl && data?.updated_at) updatedEl.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {}
     });
   }

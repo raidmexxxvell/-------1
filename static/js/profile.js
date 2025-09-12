@@ -240,7 +240,7 @@
                     const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
                     const reqs = [
                         fetch('/api/league-table/refresh', { method: 'POST', body: fd }),
-                        fetch('/api/stats-table/refresh', { method: 'POST', body: fd }),
+                        // Старый stats-table больше не используется во вкладке «Статистика», пропускаем refresh
                         fetch('/api/schedule/refresh', { method: 'POST', body: fd }),
                         fetch('/api/results/refresh', { method: 'POST', body: fd })
                     ];
@@ -651,17 +651,35 @@
         if (updated) updated.textContent = '';
         _statsLoading = true;
         // Используем новый глобальный лидерборд (G+A) для заполнения таблицы статистики
-        fetch('/api/leaderboard/goal-assist?limit=10')
+        fetch('/api/leaderboard/goal-assist?limit=50') // берём с запасом, потом сами отсортируем и обрежем до 10
             .then(async (r) => {
                 if (!r.ok) throw new Error('leaderboard fetch failed');
                 const json = await r.json();
                 // Ожидаем json.items = [{ player_id, first_name, last_name, team, matches_played, goals, assists, goal_plus_assist }, ...]
-                const items = Array.isArray(json?.items) ? json.items : [];
-                const values = items.map((it, idx) => {
-                    const name = `${it.first_name||''} ${it.last_name||''}`.trim() || (it.player_id?`#${it.player_id}`:'');
-                    return [String(idx+1), name, it.team || '', String(it.matches_played||0), String(it.goals||0), String(it.assists||0), String(it.goal_plus_assist || ((it.goals||0)+(it.assists||0)))];
+                let items = Array.isArray(json?.items) ? json.items.slice() : [];
+                // Сортировка: Г+П desc, затем И asc, затем Г desc, затем П desc
+                items.sort((a,b)=>{
+                    const at = (a.goal_plus_assist ?? (a.goals||0)+(a.assists||0));
+                    const bt = (b.goal_plus_assist ?? (b.goals||0)+(b.assists||0));
+                    if (bt !== at) return bt - at; // больше — выше
+                    const am = a.matches_played||0, bm = b.matches_played||0;
+                    if (am !== bm) return am - bm; // меньше матчей — выше
+                    const ag = a.goals||0, bg = b.goals||0;
+                    if (bg !== ag) return bg - ag; // больше голов — выше
+                    const aa = a.assists||0, ba = b.assists||0;
+                    if (ba !== aa) return ba - aa; // больше передач — выше
+                    return 0;
                 });
-                const payload = { values: values, updated_at: json?.updated_at || new Date().toISOString() };
+                items = items.slice(0,10);
+                const values = items.map(it => {
+                    const name = `${it.first_name||''} ${it.last_name||''}`.trim() || (it.player_id?`#${it.player_id}`:'');
+                    const matches = it.matches_played||0;
+                    const goals = it.goals||0;
+                    const assists = it.assists||0;
+                    const total = it.goal_plus_assist || (goals + assists);
+                    return [ name, String(matches), String(goals), String(assists), String(total) ];
+                });
+                const payload = { values, updated_at: json?.updated_at || new Date().toISOString() };
                 try { window.League?.renderStatsTable?.(table, updated, payload); } catch(_) {}
             })
             .catch(err => { console.error('stats table load error (leaderboard)', err); })
@@ -1313,10 +1331,9 @@
     let _schedulePreloaded = false;
     let _statsPreloaded = false;
     function preloadUfoData() {
-        // Статистика
-        fetch('/api/stats-table', { headers: { 'Cache-Control': 'no-cache' } })
-            .then(r => r.json()).then(() => { _statsPreloaded = true; trySignalAllReady(); })
-            .catch(() => { _statsPreloaded = true; trySignalAllReady(); });
+        // Новая статистика (goal+assist) загружается лениво через loadStatsTable при открытии вкладки,
+        // поэтому старый предварительный preload /api/stats-table удалён.
+        _statsPreloaded = true; trySignalAllReady();
         // Расписание — сохраним в кэш с версией
         fetch('/api/schedule', { headers: { 'Cache-Control': 'no-cache' } })
             .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('schedule:tours', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })

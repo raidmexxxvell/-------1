@@ -4901,7 +4901,7 @@ def _bg_sync_once():
     if task_manager:
         # Запускаем синхронизацию разных типов данных параллельно
         task_manager.submit_task("sync_league_table", _sync_league_table, priority=TaskPriority.HIGH)
-        task_manager.submit_task("sync_stats_table", _sync_stats_table, priority=TaskPriority.HIGH) 
+    # stats-table deprecated: задача отключена
         task_manager.submit_task("sync_schedule", _sync_schedule, priority=TaskPriority.HIGH)
         task_manager.submit_task("sync_results", _sync_results, priority=TaskPriority.NORMAL)
         task_manager.submit_task("sync_betting_tours", _sync_betting_tours, priority=TaskPriority.NORMAL)
@@ -5016,31 +5016,8 @@ def _persist_league_table(normalized_values):
         db.close()
 
 def _sync_stats_table():
-    """Синхронизация таблицы статистики"""
-    if SessionLocal is None:
-        return
-    db = get_db()
-    try:
-        _metrics_inc('bg_runs_total', 1)
-        t0 = time.time()
-        # DB-first билдер уже использует БД, не читаем Sheets
-        stats_payload = _build_stats_payload_from_sheet()
-        _snapshot_set(db, Snapshot, 'stats-table', stats_payload, app.logger)
-        _metrics_set('last_sync', 'stats-table', datetime.now(timezone.utc).isoformat())
-        _metrics_set('last_sync_status', 'stats-table', 'ok')
-        _metrics_set('last_sync_duration_ms', 'stats-table', int((time.time()-t0)*1000))
-        # Инвалидируем соответствующий кэш
-        if cache_manager:
-            cache_manager.invalidate('stats_table')
-        # Отправляем WebSocket уведомление
-        if websocket_manager:
-            websocket_manager.notify_data_change('stats_table', stats_payload)
-    except Exception as e:
-        app.logger.warning(f"Stats table sync failed: {e}")
-        _metrics_set('last_sync_status', 'stats-table', 'error')
-        _metrics_note_rate_limit(e)
-    finally:
-        db.close()
+    """DEPRECATED: no-op since legacy stats snapshot removed."""
+    return
 
 def _sync_schedule():
     """Синхронизация расписания"""
@@ -9261,35 +9238,12 @@ def api_league_table_refresh():
 
 @app.route('/api/stats-table/refresh', methods=['POST'])
 def api_stats_table_refresh():
-    """Принудительно обновляет таблицу статистики (только админ)."""
-    try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            return jsonify({'error': 'Недействительные данные'}), 401
-        user_id = str(parsed['user'].get('id'))
-        admin_id = os.environ.get('ADMIN_USER_ID', '')
-        if not admin_id or user_id != admin_id:
-            return jsonify({'error': 'forbidden'}), 403
-        # Используем тот же механизм, что и в фоне — вызов _sync_stats_table соберёт данные отовсюду и обновит снапшот
-        try:
-            _sync_stats_table()
-        except Exception as _e:
-            app.logger.warning(f"stats-table forced sync failed: {_e}")
-        updated_at = None
-        if SessionLocal is not None:
-            db = get_db()
-            try:
-                snap = _snapshot_get(db, Snapshot, 'stats-table', app.logger) or {}
-                payload = snap.get('payload') or {}
-                updated_at = payload.get('updated_at')
-            finally:
-                db.close()
-        if not updated_at:
-            updated_at = datetime.now(timezone.utc).isoformat()
-        return jsonify({'status': 'ok', 'updated_at': updated_at})
-    except Exception as e:
-        app.logger.error(f"Ошибка принудительного обновления статистики: {e}")
-        return jsonify({'error': 'Не удалось обновить статистику'}), 500
+    """DEPRECATED: endpoint more used. Returns 410 GONE with migration hint."""
+    return jsonify({
+        'error': 'deprecated',
+        'use': '/api/leaderboard/goal-assist',
+        'message': 'Legacy stats snapshot refresh removed; use dynamic per-team stats and global goal+assist leaderboard.'
+    }), 410
 
 @app.route('/api/schedule/refresh', methods=['POST'])
 def api_schedule_refresh():
@@ -10003,7 +9957,7 @@ def api_admin_refresh_all():
 
         steps = [
             ('league_table', _sync_league_table, 'sync_league_table'),
-            ('stats_table', _sync_stats_table, 'sync_stats_table'),
+            # ('stats_table', _sync_stats_table, 'sync_stats_table'),  # deprecated
             ('schedule', _sync_schedule, 'sync_schedule'),
             ('results', _sync_results, 'sync_results'),
             ('betting_tours', _sync_betting_tours, 'sync_betting_tours'),
@@ -12411,157 +12365,12 @@ def api_news_public():
 
 @app.route('/api/stats-table', methods=['GET'])
 def api_stats_table():
-    """Возвращает таблицу статистики из снапшота БД; при отсутствии — bootstrap из Sheets. ETag/304 поддерживаются."""
-    try:
-        if SessionLocal is not None:
-            db: Session = get_db()
-            try:
-                snap = _snapshot_get(db, Snapshot, 'stats-table', app.logger)
-                if snap and snap.get('payload'):
-                    payload = snap['payload']
-                    _core = {'range': payload.get('range'), 'values': payload.get('values')}
-                    _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-                    inm = request.headers.get('If-None-Match')
-                    if inm and inm == _etag:
-                        resp = app.response_class(status=304)
-                        resp.headers['ETag'] = _etag
-                        resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
-                        return resp
-                    resp = _json_response({**payload, 'version': _etag})
-                    resp.headers['ETag'] = _etag
-                    resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
-                    return resp
-                # Если снапшота нет – сформируем таблицу из реальных игроков БД
-                # Структура: A: Имя, B: Матчи, C: Голы, D: Пасы, E: Желтые, F: Красные, G: Очки
-                try:
-                    from database.database_models import PlayerStatistics, Player, MatchEvent
-                except Exception:
-                    PlayerStatistics = Player = MatchEvent = None
-                    
-                temp_values = []
-                header = ['Игрок', 'Матчи', 'Голы', 'Пасы', 'ЖК', 'КК', 'Очки']
-                
-                if Player and MatchEvent:
-                    try:
-                        # Получаем статистику игроков из событий матчей
-                        from sqlalchemy import func, desc
-                        
-                        # Подзапрос для подсчета голов
-                        goals_subq = db.query(
-                            MatchEvent.player_id,
-                            func.count(MatchEvent.id).label('goals')
-                        ).filter(MatchEvent.event_type == 'goal').group_by(MatchEvent.player_id).subquery()
-                        
-                        # Подзапрос для подсчета передач
-                        assists_subq = db.query(
-                            MatchEvent.assisted_by_player_id.label('player_id'),
-                            func.count(MatchEvent.id).label('assists')
-                        ).filter(
-                            MatchEvent.event_type == 'goal',
-                            MatchEvent.assisted_by_player_id.isnot(None)
-                        ).group_by(MatchEvent.assisted_by_player_id).subquery()
-                        
-                        # Подзапрос для желтых карточек
-                        yellow_subq = db.query(
-                            MatchEvent.player_id,
-                            func.count(MatchEvent.id).label('yellows')
-                        ).filter(MatchEvent.event_type == 'yellow_card').group_by(MatchEvent.player_id).subquery()
-                        
-                        # Подзапрос для красных карточек
-                        red_subq = db.query(
-                            MatchEvent.player_id,
-                            func.count(MatchEvent.id).label('reds')
-                        ).filter(MatchEvent.event_type == 'red_card').group_by(MatchEvent.player_id).subquery()
-                        
-                        # Основной запрос с джойнами
-                        stats_query = db.query(
-                            Player.first_name,
-                            Player.last_name,
-                            func.coalesce(goals_subq.c.goals, 0).label('goals'),
-                            func.coalesce(assists_subq.c.assists, 0).label('assists'),
-                            func.coalesce(yellow_subq.c.yellows, 0).label('yellows'),
-                            func.coalesce(red_subq.c.reds, 0).label('reds')
-                        ).outerjoin(goals_subq, Player.id == goals_subq.c.player_id
-                        ).outerjoin(assists_subq, Player.id == assists_subq.c.player_id
-                        ).outerjoin(yellow_subq, Player.id == yellow_subq.c.player_id
-                        ).outerjoin(red_subq, Player.id == red_subq.c.player_id
-                        ).order_by(
-                            desc(func.coalesce(goals_subq.c.goals, 0) + func.coalesce(assists_subq.c.assists, 0)),  # по голам+передачам
-                            desc(func.coalesce(goals_subq.c.goals, 0))  # затем по голам
-                        ).limit(10)
-                        
-                        results = stats_query.all()
-                        
-                        for row in results:
-                            name = (row.first_name or '') + ((' ' + row.last_name) if row.last_name else '')
-                            goals = int(row.goals or 0)
-                            assists = int(row.assists or 0)
-                            yellows = int(row.yellows or 0)
-                            reds = int(row.reds or 0)
-                            points = goals + assists
-                            matches = 0  # пока не считаем матчи, можно добавить позже
-                            
-                            temp_values.append([name, matches, goals, assists, yellows, reds, points])
-                            
-                        # Если игроков меньше 10, добавляем игроков без событий
-                        if len(temp_values) < 10:
-                            remaining_players = db.query(Player).filter(
-                                ~Player.id.in_([r[0] for r in results] if results else [])
-                            ).limit(10 - len(temp_values)).all()
-                            
-                            for p in remaining_players:
-                                name = (p.first_name or '') + ((' ' + p.last_name) if p.last_name else '')
-                                temp_values.append([name, 0, 0, 0, 0, 0, 0])
-                                
-                    except Exception as e:
-                        app.logger.warning(f"Stats query error: {e}")
-                        pass
-                        
-                # Если все еще нет данных, случайные игроки из Player таблицы
-                if not temp_values and Player:
-                    try:
-                        players = db.query(Player).limit(10).all()
-                        for p in players:
-                            name = (p.first_name or '') + ((' ' + p.last_name) if p.last_name else '')
-                            temp_values.append([name, 0, 0, 0, 0, 0, 0])
-                    except Exception:
-                        pass
-                        
-                if not temp_values:
-                    # Заглушки, если нет игроков
-                    temp_values = [[f'Игрок {i}', 0, 0, 0, 0, 0, 0] for i in range(1, 11)]
-                payload = {
-                    'range': 'A1:G11',
-                    'values': [header] + temp_values,
-                    'updated_at': datetime.now(timezone.utc).isoformat()
-                }
-                _snapshot_set(db, Snapshot, 'stats-table', payload, app.logger)
-                _core = {'range': 'A1:G11', 'values': payload.get('values')}
-                _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-                resp = jsonify({**payload, 'version': _etag})
-                resp.headers['ETag'] = _etag
-                resp.headers['Cache-Control'] = 'public, max-age=600, stale-while-revalidate=300'
-                return resp
-            finally:
-                db.close()
-
-        payload = _build_stats_payload_from_sheet()
-        _core = {'range': 'A1:G11', 'values': payload.get('values')}
-        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        if SessionLocal is not None:
-            db = get_db()
-            try:
-                _snapshot_set(db, Snapshot, 'stats-table', payload, app.logger)
-            finally:
-                db.close()
-
-        resp = jsonify({**payload, 'version': _etag})
-        resp.headers['ETag'] = _etag
-        resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
-        return resp
-    except Exception as e:
-        app.logger.error(f"Ошибка загрузки таблицы статистики: {str(e)}")
-        return jsonify({'error': 'Не удалось загрузить статистику'}), 500
+    """DEPRECATED: legacy stats snapshot removed. Always returns 410 GONE with migration hint."""
+    return jsonify({
+        'error': 'deprecated',
+        'use': '/api/leaderboard/goal-assist',
+        'message': 'Use global goal+assist leaderboard. This legacy stats snapshot endpoint was removed.'
+    }), 410
 
 @app.route('/api/specials/set', methods=['POST'])
 def api_specials_set():

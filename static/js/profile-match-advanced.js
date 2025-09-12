@@ -150,7 +150,7 @@
                 fd.append('initData', tg?.initData||''); 
                 await Promise.allSettled([ 
                     fetch('/api/league-table/refresh',{ method:'POST', body:fd }), 
-                    fetch('/api/stats-table/refresh',{ method:'POST', body:fd }), 
+                    // stats-table refresh deprecated
                     fetch('/api/schedule/refresh',{ method:'POST', body:fd }), 
                     fetch('/api/results/refresh',{ method:'POST', body:fd }) 
                 ]); 

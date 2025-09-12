@@ -36,7 +36,7 @@
       btnAll.disabled = true; const orig = btnAll.textContent; btnAll.textContent = 'Обновляю...';
       Promise.allSettled([
         fetch('/api/league-table/refresh', { method: 'POST', body: fd }),
-        fetch('/api/stats-table/refresh', { method: 'POST', body: fd }),
+  // stats-table refresh deprecated; endpoint removed
         fetch('/api/schedule/refresh', { method: 'POST', body: fd }),
   fetch('/api/results/refresh', { method: 'POST', body: fd }),
   // Также обновим туры для ставок, чтобы подтянулись прогнозы и «матч недели»
