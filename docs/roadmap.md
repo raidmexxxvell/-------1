@@ -70,14 +70,14 @@
 Подэтапы:
 
 1.3a Базовый CRUD API
-- [ ] `POST /api/admin/matches` — создание (валидация: уникальность пары (home_team, away_team, дата/временной слот), статус по умолчанию `scheduled`).
-- [ ] `PUT /api/admin/matches/<id>` — изменение будущих матчей (запрет редактирования статуса `finished` / `live`).
+- [x] `POST /api/admin/matches` — создание (валидация: уникальность пары (home_team, away_team, дата/временной слот), статус по умолчанию `scheduled`).
+- [x] `PUT /api/admin/matches/<id>` — изменение будущих матчей (запрет редактирования статуса `finished` / `live`).
 - [ ] `DELETE /api/admin/matches/<id>` — мягкое удаление (опция: `cancelled` статус) или жёсткое (решить до реализации; по умолчанию мягкое — статус `cancelled`).
-- [ ] `GET /api/admin/matches?from=&to=&team_id=` — фильтр для админ-планировщика.
+- [x] `GET /api/admin/matches?from=&to=&team_id=` — фильтр для админ-планировщика.
 - [ ] Фича-флаг: `MATCHES_MANUAL_EDIT_ENABLED` (True по умолчанию) — быстрый глобальный выключатель ручного редактирования.
 
 1.3b Bulk Import (Full Replace) из Google Sheets
-- [ ] Endpoint: `POST /api/admin/matches/import?dry_run=1` — возвращает JSON diff без модификации.
+- [x] Endpoint: `POST /api/admin/matches/import?dry_run=1` — возвращает JSON diff без модификации.
 - [ ] Endpoint: `POST /api/admin/matches/import` — выполняет транзакционную замену (см. алгоритм ниже).
 - [ ] Алгоритм:
 	1. Считать текущие матчи (scope: статус in (scheduled, cancelled) ИЛИ только будущие >= NOW - grace).  
@@ -91,6 +91,20 @@
 	9. Метрики: `import_matches_total`, `import_matches_duration_ms`, `import_matches_diff_{insert|update|delete}`.
 - [ ] Фича-флаг: `MATCHES_BULK_IMPORT_ENABLED` (False по умолчанию на проде; включается вручную).
 - [ ] Ограничение после 2.3: bulk не трогает матчи со статусами `live` / `finished` / имеющие события.
+- [ ] Bulk apply details (implementation plan):
+	- [ ] Подтвердить feature flag `MATCHES_BULK_IMPORT_ENABLED` перед применением.
+	- [ ] Dry-run должен быть выполнен и согласован (manual review) перед apply, либо apply принимает `force=1` + `reason`.
+	- [ ] Перед apply: создать JSON-бэкап текущего набора матчей (scope = future + cancelled) и записать в `admin_logs` (type `matches_bulk_import_backup`, payload gzip/base64).
+	- [ ] Выполнить транзакцию: (a) пометить/удалить лишние (soft cancel или hard delete — config-driven) (b) вставить новые (c) обновить существующие (d) commit.
+	- [ ] По завершении: записать метрики (`import_matches_total`, `import_matches_duration_ms`, `import_matches_diff_insert/update/delete`) и инвалидацию `schedule` + websocket notify.
+	- [ ] Ограничение cooldown: `MATCHES_IMPORT_COOLDOWN_MIN` (по умолчанию 10).
+	- [ ] Safety: если delete% > 40% — require `force=1` и explicit review; log warning.
+
+	- Acceptance tests for apply:
+		- Apply is atomic: induce an error during apply and ensure DB rolled back and backup present.
+		- Apply respects `MATCHES_BULK_IMPORT_ENABLED` and cooldown.
+		- Apply creates `admin_logs` backup with original payload.
+		- After apply, snapshot `schedule` is invalidated and reflects new DB state.
 
 1.3c Админ UI Планировщик
 - [ ] Таблица матчей: колонки (Дата/Время (локально + UTC tooltip), Дом, Гость, Статус, Venue, Действия).

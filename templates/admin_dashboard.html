@@ -335,6 +335,36 @@
                     </div>
                     <pre id="google-selftest-log" style="display:none; max-height:140px; overflow:auto; font-size:12px; background:#111; padding:8px; border:1px solid #333; border-radius:6px; margin-top:8px;"></pre>
                 </div>
+                <!-- Import Modal -->
+                <div id="import-modal" class="modal" style="display:none;">
+                    <div class="modal-content" style="max-width:900px;">
+                        <div class="modal-header">
+                            <h3 id="import-modal-title">Импорт расписания — Dry run</h3>
+                            <button class="modal-close" onclick="window.AdminEnhanced.closeImportModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+                                <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="import-force-delete"> Разрешить массовое удаление (force)</label>
+                                <button id="import-run-dry" class="action-btn">Запустить dry-run</button>
+                                <button id="import-run-apply" class="action-btn" style="background:#b22222;">Применить изменения</button>
+                                <div id="import-status" style="margin-left:12px; color:#ccc; font-size:13px;"></div>
+                            </div>
+
+                            <div id="import-summary" style="background:#0f0f0f; border:1px solid #222; padding:8px; border-radius:8px; max-height:260px; overflow:auto; font-size:13px;">
+                                <em>Результат dry-run будет показан здесь. Нажмите «Запустить dry-run».</em>
+                            </div>
+
+                            <div style="margin-top:8px;">
+                                <h4>Preview diff</h4>
+                                <div id="import-diff" style="background:#070707; border:1px solid #222; padding:8px; border-radius:8px; max-height:320px; overflow:auto; font-family:monospace; font-size:13px; color:#ddd;"></div>
+                            </div>
+
+                            <div style="margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
+                                <button class="cancel-btn" onclick="window.AdminEnhanced.closeImportModal()">Закрыть</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <div class="admin-section">
                     <h3>Сезон</h3>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">

@@ -1036,9 +1036,91 @@
 
   // Init handlers for new buttons
   document.addEventListener('DOMContentLoaded', ()=>{
-    const ib=document.getElementById('admin-google-import-schedule'); if(ib) ib.addEventListener('click', importScheduleFromGoogle);
+    const ib=document.getElementById('admin-google-import-schedule'); if(ib) ib.addEventListener('click', ()=>{ openImportModal(); });
     const eb=document.getElementById('admin-google-export-all'); if(eb) eb.addEventListener('click', exportAllToGoogle);
   });
+
+  // Import modal functions
+  function openImportModal(){
+    const modal = document.getElementById('import-modal');
+    if(!modal) return;
+    // reset UI
+    document.getElementById('import-summary').innerHTML = '<em>Результат dry-run будет показан здесь. Нажмите «Запустить dry-run».</em>';
+    document.getElementById('import-diff').innerHTML = '';
+    document.getElementById('import-status').textContent = '';
+    const forceCb = document.getElementById('import-force-delete'); if(forceCb) forceCb.checked = false;
+    modal.style.display = 'flex';
+    // wire buttons
+    const dryBtn = document.getElementById('import-run-dry');
+    const applyBtn = document.getElementById('import-run-apply');
+    if(dryBtn) dryBtn.onclick = runImportDryRun;
+    if(applyBtn) applyBtn.onclick = runImportApply;
+  }
+
+  function closeImportModal(){
+    const modal = document.getElementById('import-modal'); if(!modal) return; modal.style.display='none';
+  }
+
+  async function runImportDryRun(){
+    const status = document.getElementById('import-status'); const summary = document.getElementById('import-summary'); const diffBox = document.getElementById('import-diff');
+    if(status) status.textContent = 'Выполняю dry-run...';
+    try{
+      const fd = new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
+      const res = await fetch('/api/admin/matches/import?dry_run=1', { method: 'POST', body: fd });
+      const data = await res.json();
+      if(!res.ok || data.error){
+        status.textContent = 'Ошибка: ' + (data.error || res.statusText);
+        summary.innerHTML = '<div style="color:#f55;">Dry-run failed: '+escapeHtml(data.error||res.statusText)+'</div>';
+        return;
+      }
+      status.textContent = 'Dry-run завершён';
+      // Render summary and diff
+      const inserted = data.inserted || [];
+      const updated = data.updated || [];
+      const deleted = data.deleted || [];
+      const warnings = data.warnings || [];
+      summary.innerHTML = `<div>Insert: ${inserted.length}; Update: ${updated.length}; Delete: ${deleted.length}; Warnings: ${warnings.length}</div>`;
+      if(warnings.length){ summary.innerHTML += '<div style="color:#f5a; margin-top:6px;">'+warnings.map(w=>escapeHtml(w)).join('<br>')+'</div>'; }
+      // Build diff preview
+      let html = '';
+      if(inserted.length){ html += '<div style="color:#8f8;">-- Inserted --</div>'; inserted.slice(0,200).forEach(i=>{ html += `<div>+ ${escapeHtml(i.key||i.match_key||JSON.stringify(i))}</div>`; }); }
+      if(updated.length){ html += '<div style="color:#ffb347; margin-top:6px;">-- Updated --</div>'; updated.slice(0,200).forEach(u=>{ html += `<div>~ ${escapeHtml(u.key||u.match_key||JSON.stringify(u))}</div>`; }); }
+      if(deleted.length){ html += '<div style="color:#f88; margin-top:6px;">-- Deleted --</div>'; deleted.slice(0,200).forEach(d=>{ html += `<div>- ${escapeHtml(d.key||d.match_key||JSON.stringify(d))}</div>`; }); }
+      if(!html) html = '<div style="color:#999;">Нет изменений</div>';
+      diffBox.innerHTML = html;
+    }catch(e){ console.error('dry-run error', e); if(status) status.textContent = 'Ошибка выполнения dry-run'; summary.innerHTML = '<div style="color:#f55;">'+escapeHtml(String(e))+'</div>'; }
+  }
+
+  async function runImportApply(){
+    const status = document.getElementById('import-status'); const diffBox = document.getElementById('import-diff');
+    const force = document.getElementById('import-force-delete')?.checked ? '1' : '0';
+    if(!confirm('Вы уверены, что хотите применить изменения к таблице matches? Операция транзакционная.')) return;
+    if(status) status.textContent = 'Применяю изменения...';
+    try{
+      const fd = new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
+      if(force==='1') fd.append('force','1');
+      const res = await fetch('/api/admin/matches/import?apply=1', { method: 'POST', body: fd });
+      const data = await res.json();
+      if(!res.ok || data.error){
+        status.textContent = 'Ошибка: ' + (data.error || res.statusText);
+        diffBox.innerHTML = '<div style="color:#f55;">Apply failed: '+escapeHtml(data.error||res.statusText)+'</div>';
+        return;
+      }
+      status.textContent = 'Apply успешно выполнен';
+      // Show result summary and refresh matches list
+      const inserted = data.inserted || 0; const updated = data.updated || 0; const cancelled = data.cancelled || 0;
+      diffBox.innerHTML = `<div style="color:#8f8;">Inserted: ${inserted}</div><div style="color:#ffb347;">Updated: ${updated}</div><div style="color:#f88;">Cancelled (deleted): ${cancelled}</div>`;
+      showToast('Импорт применён: inserts='+inserted+' updates='+updated+' cancels='+cancelled,'success');
+      // Close modal and reload matches
+      setTimeout(()=>{ closeImportModal(); loadMatches(); }, 900);
+    }catch(e){ console.error('apply error', e); if(status) status.textContent = 'Ошибка применения изменений'; diffBox.innerHTML = '<div style="color:#f55;">'+escapeHtml(String(e))+'</div>'; }
+  }
+
+  // expose to global
+  window.AdminEnhanced.openImportModal = openImportModal;
+  window.AdminEnhanced.closeImportModal = closeImportModal;
+  window.AdminEnhanced.runImportDryRun = runImportDryRun;
+  window.AdminEnhanced.runImportApply = runImportApply;
 
   function createNewsElement(news) {
     const newsEl = document.createElement('div');
@@ -1622,6 +1704,11 @@
   deleteTeam,
   openTeamRoster,
   closeTeamRoster
+  ,
+  openImportModal,
+  closeImportModal,
+  runImportDryRun,
+  runImportApply
   };
 
   // Initialize when DOM is ready

@@ -2251,8 +2251,23 @@ def api_admin_matches_import():
     """
     from config import Config
     dry_run = request.args.get('dry_run', '0') in ('1','true','yes')
-    if not dry_run:
-        return jsonify({'error': 'not_implemented', 'details': ['apply_not_ready']}), 501
+    apply_run = request.args.get('apply', '0') in ('1','true','yes')
+    # Если запрошен apply — выполняем безопасную транзакционную замену
+    if apply_run:
+        from config import Config
+        if not Config.MATCHES_BULK_IMPORT_ENABLED:
+            return jsonify({'error': 'disabled', 'details': ['bulk_import_disabled']}), 403
+        # cooldown: проверяем последнее время импорта в admin_logs (если доступно)
+        try:
+            # quick heuristic: ищем последний manual_log вызов типа matches_bulk_import_apply
+            # здесь используем manual_log availability: assume manual_log записывает external store; если нет — пропускаем cooldown
+            # Для простоты — не реализуем чтение last timestamp; в production нужно хранить timestamp в metrics или admin_logs table
+            pass
+        except Exception:
+            pass
+        # Recompute diff (same logic as dry-run) — reuse existing variables computed below by running dry_run earlier
+        # Для стабильности — пересчитываем; для этого просто вызовем текущ endpoint logic up to diff generation
+        # Если dry_run не передан, мы всё равно имеем diff (пересчитанный ниже)
     if SessionLocal is None:
         return jsonify({'error': 'db_unavailable'}), 503
     # Шаг 1: загружаем существующие матчи
@@ -2389,6 +2404,77 @@ def api_admin_matches_import():
         warnings.append('high_delete_ratio')
     if summary['validation_errors'] > 0:
         warnings.append('has_validation_errors')
+    # Если apply_run — выполняем транзакционное применение
+    if apply_run:
+        # safety checks
+        if validation_errors:
+            return jsonify({'error': 'validation', 'details': validation_errors}), 400
+        if 'high_delete_ratio' in warnings:
+            # require explicit force
+            force = request.args.get('force', '0') in ('1','true','yes')
+            if not force:
+                return jsonify({'error': 'requires_force', 'details': ['high_delete_ratio']}), 412
+        # backup current state via manual_log (if available)
+        try:
+            backup_payload = {
+                'existing': [{ 'id': m.id, 'home_team_id': m.home_team_id, 'away_team_id': m.away_team_id, 'match_date': m.match_date.isoformat() if m.match_date else None, 'venue': m.venue, 'status': m.status, 'notes': m.notes } for m in existing_rows]
+            }
+            try:
+                manual_log(action='matches_bulk_import_backup', description='Backup before bulk apply', result_status='ok', affected_data=backup_payload)
+            except Exception:
+                # best-effort
+                app.logger.warning('manual_log not available for backup')
+        except Exception as e:
+            app.logger.error(f'bulk_apply backup error: {e}')
+        # apply changes in transaction
+        try:
+            db = get_db()
+            # soft-cancel deletions
+            for d in deletes:
+                mm = db.get(Match, d['id'])
+                if mm:
+                    mm.status = 'cancelled'
+                    db.add(mm)
+            # apply updates (only match_date in our diff)
+            for u in updates:
+                mm = db.get(Match, u['id'])
+                if mm:
+                    mm.match_date = datetime.fromisoformat(u['after'])
+                    db.add(mm)
+            # inserts
+            for it in inserts:
+                nm = Match(
+                    home_team_id=it['home_team_id'],
+                    away_team_id=it['away_team_id'],
+                    match_date=datetime.fromisoformat(it['match_date']) if it.get('match_date') else None,
+                    venue=it.get('venue'),
+                    notes=it.get('notes'),
+                    status='scheduled'
+                )
+                db.add(nm)
+            db.commit()
+            # metrics & notification
+            try:
+                _metrics_inc('import_matches_total', 1)
+                _metrics_set('import_matches_last_timestamp', datetime.now(timezone.utc).isoformat())
+                _metrics_set('import_matches_last_duration_ms', 0)
+            except Exception:
+                pass
+            try:
+                if cache_manager: cache_manager.invalidate('schedule')
+                if websocket_manager: websocket_manager.notify_data_change('schedule', {'changed': 'bulk_apply'})
+            except Exception:
+                pass
+            db.close()
+            return jsonify({'applied': True, 'summary': summary})
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            app.logger.error(f'bulk_apply error: {e}')
+            return jsonify({'error': 'internal', 'details': str(e)}), 500
+    # default: return dry-run result
     db.close()
     return jsonify({
         'dry_run': True,
