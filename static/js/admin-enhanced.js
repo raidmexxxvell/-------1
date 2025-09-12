@@ -1068,17 +1068,11 @@
   async function runImportDryRun(){
     const status = document.getElementById('import-status'); const summary = document.getElementById('import-summary'); const diffBox = document.getElementById('import-diff');
     const applyBtn = document.getElementById('import-run-apply');
-    const initData = window.Telegram?.WebApp?.initData || '';
-    if(!initData){
-      if(status) status.textContent = 'Authentication missing: откройте админку внутри Telegram WebApp или передайте initData.';
-      if(summary) summary.innerHTML = '';
-      if(diffBox) diffBox.innerHTML = '';
-      if(applyBtn) applyBtn.disabled = true;
-      return;
-    }
+    const initData = window.Telegram?.WebApp?.initData;
     if(status) status.textContent = 'Выполняю dry-run...';
     try{
-      const fd = new FormData(); fd.append('initData', initData);
+      const fd = new FormData();
+      if(initData) fd.append('initData', initData);
       const res = await fetch('/api/admin/matches/import?dry_run=1', { method: 'POST', body: fd });
       const data = await res.json();
       if(!res.ok || data.error){
@@ -1112,9 +1106,9 @@
     if(!confirm('Вы уверены, что хотите применить изменения к таблице matches? Операция транзакционная.')) return;
     if(status) status.textContent = 'Применяю изменения...';
     try{
-      const initData = window.Telegram?.WebApp?.initData || '';
-      if(!initData){ if(status) status.textContent = 'Authentication missing: откройте админку внутри Telegram WebApp.'; return; }
-      const fd = new FormData(); fd.append('initData', initData);
+  const initData = window.Telegram?.WebApp?.initData;
+  const fd = new FormData();
+  if(initData) fd.append('initData', initData);
       if(force==='1') fd.append('force','1');
       const res = await fetch('/api/admin/matches/import?apply=1', { method: 'POST', body: fd });
       const data = await res.json();
