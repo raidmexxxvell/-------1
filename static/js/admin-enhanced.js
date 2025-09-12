@@ -1054,7 +1054,11 @@
     const dryBtn = document.getElementById('import-run-dry');
     const applyBtn = document.getElementById('import-run-apply');
     if(dryBtn) dryBtn.onclick = runImportDryRun;
-    if(applyBtn) applyBtn.onclick = runImportApply;
+    if(applyBtn) {
+      applyBtn.onclick = runImportApply;
+      // disable apply until a successful dry-run with valid auth
+      applyBtn.disabled = true;
+    }
   }
 
   function closeImportModal(){
@@ -1063,14 +1067,24 @@
 
   async function runImportDryRun(){
     const status = document.getElementById('import-status'); const summary = document.getElementById('import-summary'); const diffBox = document.getElementById('import-diff');
+    const applyBtn = document.getElementById('import-run-apply');
+    const initData = window.Telegram?.WebApp?.initData || '';
+    if(!initData){
+      if(status) status.textContent = 'Authentication missing: откройте админку внутри Telegram WebApp или передайте initData.';
+      if(summary) summary.innerHTML = '';
+      if(diffBox) diffBox.innerHTML = '';
+      if(applyBtn) applyBtn.disabled = true;
+      return;
+    }
     if(status) status.textContent = 'Выполняю dry-run...';
     try{
-      const fd = new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
+      const fd = new FormData(); fd.append('initData', initData);
       const res = await fetch('/api/admin/matches/import?dry_run=1', { method: 'POST', body: fd });
       const data = await res.json();
       if(!res.ok || data.error){
-        status.textContent = 'Ошибка: ' + (data.error || res.statusText);
-        summary.innerHTML = '<div style="color:#f55;">Dry-run failed: '+escapeHtml(data.error||res.statusText)+'</div>';
+        if(status) status.textContent = 'Ошибка: ' + (data.error || res.statusText);
+        if(summary) summary.innerHTML = '<div style="color:#f55;">Dry-run failed: '+escapeHtml(data.error||res.statusText)+'</div>';
+        if(applyBtn) applyBtn.disabled = true;
         return;
       }
       status.textContent = 'Dry-run завершён';
@@ -1088,6 +1102,7 @@
       if(deleted.length){ html += '<div style="color:#f88; margin-top:6px;">-- Deleted --</div>'; deleted.slice(0,200).forEach(d=>{ html += `<div>- ${escapeHtml(d.key||d.match_key||JSON.stringify(d))}</div>`; }); }
       if(!html) html = '<div style="color:#999;">Нет изменений</div>';
       diffBox.innerHTML = html;
+      if(applyBtn) applyBtn.disabled = false;
     }catch(e){ console.error('dry-run error', e); if(status) status.textContent = 'Ошибка выполнения dry-run'; summary.innerHTML = '<div style="color:#f55;">'+escapeHtml(String(e))+'</div>'; }
   }
 
@@ -1097,7 +1112,9 @@
     if(!confirm('Вы уверены, что хотите применить изменения к таблице matches? Операция транзакционная.')) return;
     if(status) status.textContent = 'Применяю изменения...';
     try{
-      const fd = new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
+      const initData = window.Telegram?.WebApp?.initData || '';
+      if(!initData){ if(status) status.textContent = 'Authentication missing: откройте админку внутри Telegram WebApp.'; return; }
+      const fd = new FormData(); fd.append('initData', initData);
       if(force==='1') fd.append('force','1');
       const res = await fetch('/api/admin/matches/import?apply=1', { method: 'POST', body: fd });
       const data = await res.json();
