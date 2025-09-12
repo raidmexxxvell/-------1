@@ -154,6 +154,18 @@ class RealtimeUpdater {
                 } catch(_){}
                 // Обновление таблицы лиги (live проекция) — быстрый refresh чтобы отразить победы/очки
                 try { this.refreshTable(); } catch(_){}
+                // Принудительное обновление кэшей расписания и результатов для синхронизации
+                try { 
+                    localStorage.removeItem('league:schedule'); 
+                    localStorage.removeItem('league:results');
+                    localStorage.removeItem('schedule:tours');
+                } catch(_){}
+                // Дополнительно обновляем результаты если не было results_block
+                if(!payload.results_block){
+                    setTimeout(()=>{
+                        try { this.triggerDataRefresh('schedule'); } catch(_){}
+                    }, 300);
+                }
             } catch(_){}
         });
 

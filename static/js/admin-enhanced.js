@@ -36,6 +36,9 @@
     // Set up event listeners
     setupEventListeners();
     
+    // Set up data repair listeners
+    setupDataRepairListeners();
+    
     // Load initial data
     loadMatches();
   }
@@ -1301,6 +1304,55 @@
       link.textContent = 'Скрыть ↑';
     }
   };
+
+  // Setup data repair listeners
+  function setupDataRepairListeners() {
+    const fixResultsToursBtn = document.getElementById('fix-results-tours-btn');
+    const fixResultsToursStatus = document.getElementById('fix-results-tours-status');
+    
+    if (fixResultsToursBtn) {
+      fixResultsToursBtn.addEventListener('click', async () => {
+        try {
+          fixResultsToursBtn.disabled = true;
+          fixResultsToursBtn.textContent = 'Выполняется...';
+          
+          if (fixResultsToursStatus) {
+            fixResultsToursStatus.textContent = 'Починка номеров туров...';
+            fixResultsToursStatus.className = 'status-message loading';
+          }
+          
+          const response = await fetch('/api/admin/fix-results-tours', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          const result = await response.json();
+          
+          if (response.ok) {
+            showToast(`Успешно починено ${result.fixed_count} из ${result.total_results} записей результатов`, 'success');
+            if (fixResultsToursStatus) {
+              fixResultsToursStatus.textContent = `✅ Починено ${result.fixed_count} из ${result.total_results} записей`;
+              fixResultsToursStatus.className = 'status-message success';
+            }
+          } else {
+            throw new Error(result.error || 'Ошибка при починке данных');
+          }
+        } catch (error) {
+          console.error('Fix results tours error:', error);
+          showToast(`Ошибка починки: ${error.message}`, 'error');
+          if (fixResultsToursStatus) {
+            fixResultsToursStatus.textContent = `❌ Ошибка: ${error.message}`;
+            fixResultsToursStatus.className = 'status-message error';
+          }
+        } finally {
+          fixResultsToursBtn.disabled = false;
+          fixResultsToursBtn.textContent = 'Починить номера туров в результатах';
+        }
+      });
+    }
+  }
 
   // Global functions for HTML onclick handlers
   window.AdminEnhanced = {

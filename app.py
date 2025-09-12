@@ -4570,7 +4570,8 @@ def _build_schedule_payload_from_sheet():
             for r in (payload_res.get('results') or []):
                 try:
                     tr = r.get('tour')
-                    key_trip = ((r.get('home') or ''), (r.get('away') or ''), int(tr) if isinstance(tr, int) else tr)
+                    # Нормализуем tour: если это число, оставляем как есть, иначе оставляем как есть (может быть None)
+                    key_trip = ((r.get('home') or ''), (r.get('away') or ''), tr)
                     finished_triples.add(key_trip)
                     # карта счетов для оверлея
                     results_score_map[(r.get('home') or '', r.get('away') or '')] = (r.get('score_home'), r.get('score_away'))
@@ -4594,7 +4595,7 @@ def _build_schedule_payload_from_sheet():
             tour_total[trn] = cnt
         tour_finished_counts = {}
         for (h,a,trn) in finished_triples:
-            if trn in tour_total:
+            if trn is not None and trn in tour_total:  # Добавляем проверку на None
                 tour_finished_counts[trn] = tour_finished_counts.get(trn,0) + 1
         # последний тур, у которого finished == total >0
         for trn, total_cnt in tour_total.items():
@@ -4656,9 +4657,16 @@ def _build_schedule_payload_from_sheet():
                 if keep:
                     try:
                         trn = t.get('tour')
-                        key = ((m.get('home') or ''), (m.get('away') or ''), int(trn) if isinstance(trn, int) else trn)
+                        # Создаём ключ для проверки завершённости матча
+                        key = ((m.get('home') or ''), (m.get('away') or ''), trn)
                         if key in finished_triples:
                             keep = False
+                        # Дополнительная проверка: если в finished_triples есть матч с тем же home/away, но tour=None
+                        # (это может случиться если в момент завершения tour не был определён корректно)
+                        if keep:
+                            key_no_tour = ((m.get('home') or ''), (m.get('away') or ''), None)
+                            if key_no_tour in finished_triples:
+                                keep = False
                     except Exception:
                         pass
                 if keep:
@@ -4699,6 +4707,45 @@ def _build_schedule_payload_from_sheet():
 
     payload = { 'updated_at': datetime.now(timezone.utc).isoformat(), 'tours': upcoming }
     return payload
+
+def _build_match_meta(home: str, away: str) -> dict:
+    """Извлекает метаданные матча (номер тура, дату, время) из БД через snapshot."""
+    try:
+        if SessionLocal is None:
+            return {'tour': None, 'date': '', 'time': '', 'datetime': ''}
+        
+        db = get_db()
+        try:
+            from services.snapshots import get_snapshot
+            snap = get_snapshot(db, 'schedule')
+            if not snap or not snap.get('payload'):
+                return {'tour': None, 'date': '', 'time': '', 'datetime': ''}
+            
+            tours = snap['payload'].get('tours', [])
+            
+            # Ищем матч в турах
+            for tour in tours:
+                tour_num = tour.get('tour')
+                matches = tour.get('matches', [])
+                
+                for match in matches:
+                    if match.get('home') == home and match.get('away') == away:
+                        # Найден матч, возвращаем его метаданные
+                        return {
+                            'tour': tour_num,
+                            'date': match.get('date', ''),
+                            'time': match.get('time', ''),
+                            'datetime': match.get('datetime', '')
+                        }
+            
+            return {'tour': None, 'date': '', 'time': '', 'datetime': ''}
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        app.logger.warning(f"Failed to get match meta for {home} vs {away}: {e}")
+        return {'tour': None, 'date': '', 'time': '', 'datetime': ''}
 
 def _build_results_payload_from_sheet():
     ws = get_schedule_sheet()
@@ -5660,6 +5707,86 @@ def api_match_status_set():
 # --- Унифицированная функция финализации матча ---
 from services.match_finalize import finalize_match_core as _finalize_match_core
 
+
+@app.route('/api/admin/fix-results-tours', methods=['POST'])
+@require_admin()
+def api_admin_fix_results_tours():
+    """Починка записей результатов: обновляет номера туров для существующих записей."""
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+    
+    db = get_db()
+    try:
+        # Получаем текущий снапшот результатов
+        from services.snapshots import get_snapshot, set_snapshot
+        snap = get_snapshot(db, 'results')
+        if not snap:
+            return jsonify({'error': 'Results snapshot not found'}), 404
+        
+        payload = snap.get('payload') or {}
+        results = payload.get('results') or []
+        
+        fixed_count = 0
+        for r in results:
+            home = r.get('home')
+            away = r.get('away')
+            current_tour = r.get('tour')
+            
+            if home and away and current_tour is None:
+                # Пытаемся получить номер тура из расписания
+                meta = _build_match_meta(home, away)
+                if meta.get('tour') is not None:
+                    r['tour'] = meta['tour']
+                    # Также обновляем дату/время если их не было
+                    if not r.get('date') and meta.get('date'):
+                        r['date'] = meta['date']
+                    if not r.get('time') and meta.get('time'):
+                        r['time'] = meta['time']
+                    if not r.get('datetime') and meta.get('datetime'):
+                        r['datetime'] = meta['datetime']
+                    fixed_count += 1
+        
+        if fixed_count > 0:
+            # Сохраняем обновлённый снапшот
+            payload['updated_at'] = datetime.now(timezone.utc).isoformat()
+            set_snapshot(db, 'results', payload)
+            
+            # Принудительно обновляем также снапшот расписания для синхронизации
+            try:
+                schedule_payload = _build_schedule_payload_from_sheet()
+                set_snapshot(db, 'schedule', schedule_payload)
+            except Exception as e:
+                app.logger.warning(f"Failed to update schedule snapshot: {e}")
+            
+            # Инвалидируем кэши
+            try:
+                if cache_manager:
+                    cache_manager.invalidate('results')
+                    cache_manager.invalidate('schedule')
+                    cache_manager.invalidate('league_table')
+            except Exception:
+                pass
+            
+            # WebSocket уведомления
+            try:
+                ws_manager = current_app.config.get('websocket_manager')
+                if ws_manager:
+                    ws_manager.emit_to_topic('data', 'results_updated', payload)
+                    ws_manager.emit_to_topic('data', 'schedule_updated', {})
+            except Exception:
+                pass
+        
+        return jsonify({
+            'status': 'success',
+            'fixed_count': fixed_count,
+            'total_results': len(results)
+        })
+    
+    except Exception as e:
+        app.logger.error(f"Fix results tours failed: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
 
 @app.route('/api/match/status/get', methods=['GET'])
 def api_match_status_get():
