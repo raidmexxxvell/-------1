@@ -1253,6 +1253,141 @@
     transition: all 0.2s ease;
 }
 
+/* ================= Team Roster Modal (Compact) ================= */
+#team-roster-modal .modal-content {
+    max-width: 640px;
+}
+
+#team-roster-modal .modal-header {
+    padding: 14px 18px;
+}
+
+#team-roster-modal .modal-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: .5px;
+}
+
+#team-roster-modal .modal-body {
+    padding: 12px 16px 18px;
+}
+
+#team-roster-modal .table-container {
+    margin-top: 4px;
+    border: 1px solid var(--border-color, #2e2e2e);
+    border-radius: 10px;
+    background: linear-gradient(145deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+    backdrop-filter: blur(4px);
+}
+
+#team-roster-modal table.admin-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    background: transparent;
+}
+
+#team-roster-modal table.admin-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: linear-gradient(135deg, var(--primary, #3b82f6), var(--primary-dark, #1d4ed8));
+    font-size: 12px;
+    padding: 8px 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+#team-roster-modal table.admin-table tbody tr {
+    transition: background .15s ease, transform .15s ease;
+}
+
+#team-roster-modal table.admin-table tbody tr:hover {
+    background: rgba(255,255,255,0.05);
+}
+
+#team-roster-modal table.admin-table td {
+    padding: 6px 10px;
+    font-size: 13px;
+    line-height: 1.15;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+#team-roster-modal table.admin-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* Index column */
+#team-roster-modal table.admin-table td:first-child,
+#team-roster-modal table.admin-table th:first-child {
+    width: 36px;
+    text-align: right;
+    opacity: .8;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Stat number cells */
+#team-roster-modal table.admin-table td:nth-last-child(-n+4),
+#team-roster-modal table.admin-table th:nth-last-child(-n+4) {
+    text-align: center;
+}
+
+#team-roster-modal .status-text {
+    font-size: 13px;
+    margin-bottom: 6px;
+    color: var(--text-secondary, #888);
+}
+
+/* Dense mode for smaller screens */
+@media (max-width: 640px) {
+    #team-roster-modal .modal-content { max-width: 96%; }
+    #team-roster-modal .modal-body { padding: 10px 12px 14px; }
+    #team-roster-modal table.admin-table th,
+    #team-roster-modal table.admin-table td { padding: 6px 6px; font-size: 12px; }
+    #team-roster-modal table.admin-table thead th { font-size: 11px; }
+    #team-roster-modal table.admin-table td:first-child { width: 28px; }
+}
+
+/* Ultra-compact fallback when height is small */
+@media (max-height: 620px) {
+    #team-roster-modal .modal-content { max-height: 80vh; }
+    #team-roster-modal table.admin-table td { padding: 4px 6px; }
+}
+
+/* Scroll shadow effect */
+#team-roster-modal .table-container { position: relative; }
+#team-roster-modal .table-container::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 12px;
+    pointer-events: none;
+    background: linear-gradient(to top, rgba(0,0,0,0.35), rgba(0,0,0,0));
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+/* Light / dark adjustments */
+body:not(.dark-theme) #team-roster-modal .table-container {
+    background: #fff;
+    border-color: #e0e0e0;
+}
+body:not(.dark-theme) #team-roster-modal table.admin-table thead th {
+    background: linear-gradient(135deg, var(--primary, #2563eb), var(--primary-dark, #1e40af));
+}
+body:not(.dark-theme) #team-roster-modal table.admin-table td {
+    border-bottom: 1px solid #ececec;
+}
+body:not(.dark-theme) #team-roster-modal table.admin-table tbody tr:hover {
+    background: #f5f8ff;
+}
+
+/* Smooth appear */
+#team-roster-modal .modal-content { animation: rosterModalIn .25s ease; }
+@keyframes rosterModalIn { from { transform: translateY(12px); opacity:0; } to { transform: translateY(0); opacity:1; } }
+
+
 .match-item:hover {
     background: var(--bg-hover, #f5f5f5);
     border-color: var(--primary-color, #007aff);
