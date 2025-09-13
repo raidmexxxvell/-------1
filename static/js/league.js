@@ -225,7 +225,9 @@
       try {
         const bettingTours = JSON.parse(localStorage.getItem('betting:tours') || 'null');
         if (bettingTours) {
-          const helpers = await import('./helpers.js');
+          // В классических скриптах относительный импорт может резолвиться от корня документа и давать 404.
+          // Используем абсолютный путь в static для стабильной подгрузки помощника.
+          const helpers = await import('/static/js/helpers.js');
           if (helpers && typeof helpers.syncScheduleAndBettingTours === 'function') {
             helpers.syncScheduleAndBettingTours(ds, bettingTours);
             localStorage.setItem('betting:tours', JSON.stringify(bettingTours));
