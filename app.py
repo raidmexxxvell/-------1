@@ -35,39 +35,42 @@ try:
     SECURITY_SYSTEM_AVAILABLE = True
     print("[INFO] Phase 3: Security and monitoring system initialized")
 except ImportError as e:
-    print(f"[WARN] Phase 3 security system not available: {e}")
+    print(f"[WARN] Security system not available: {e}")
     SECURITY_SYSTEM_AVAILABLE = False
-    # --- Fallback lightweight no-op decorators & stubs so app can still start ---
     def _noop_decorator_factory(*dargs, **dkwargs):
         def _inner(f):
             return f
-        # Allow usage both as @decorator and @decorator(...)
-        if dargs and callable(dargs[0]) and len(dargs) == 1 and not dkwargs:
-            return dargs[0]
         return _inner
-
     require_telegram_auth = _noop_decorator_factory  # type: ignore
     require_admin = _noop_decorator_factory          # type: ignore
-    rate_limit = lambda *a, **k: _noop_decorator_factory  # type: ignore
-    validate_input = lambda *a, **k: _noop_decorator_factory  # type: ignore
-
+    rate_limit = _noop_decorator_factory             # type: ignore
+    validate_input = _noop_decorator_factory         # type: ignore
     class InputValidator:  # minimal stub to avoid attribute errors later
         def __getattr__(self, item):
             def _f(*a, **k):
                 return True, ''
             return _f
-
     class TelegramSecurity:
         def __init__(self, *a, **k):
             pass
         def verify_init_data(self, init_data, bot_token, max_age_seconds):
             return False, None
-
     class RateLimiter:
         def is_allowed(self, key, max_requests, time_window):
             return True
-
     class SQLInjectionPrevention: ...
+    # Stubs for monitoring/middleware in dev
+    class PerformanceMetrics: ...
+    class DatabaseMonitor: ...
+    class CacheMonitor: ...
+    class HealthCheck: ...
+    class SecurityMiddleware: ...
+    class PerformanceMiddleware: ...
+    class DatabaseMiddleware: ...
+    class ErrorHandlingMiddleware: ...
+    monitoring_bp = None
+    security_test_bp = None
+    class Config: ...
 
 # Импорт системы логирования администратора
 try:
@@ -479,14 +482,14 @@ def _update_schedule_snapshot_from_matches(db_session, logger):
         except Exception:
             match_rows = []
 
-        # Group matches into tours. Prefer explicit tour stored in Match.notes as JSON {'tour': N}.
+    # Group matches into tours. Prefer explicit Match.tour; затем Match.notes JSON {'tour': N}; иначе группировка по дате.
         tours_map = {}
         tour_order = []
         for mm in match_rows:
-            # parse note-based tour if present
-            tour_key = None
+            # explicit tour field
+            tour_key = getattr(mm, 'tour', None)
             try:
-                if mm.notes:
+                if tour_key is None and mm.notes:
                     try:
                         n = json.loads(mm.notes)
                         if isinstance(n, dict) and 'tour' in n:
@@ -550,7 +553,12 @@ def _update_schedule_snapshot_from_matches(db_session, logger):
                             min_dt = d
                 except Exception:
                     continue
-            tours_list.append({'tour': k, 'matches': matches, 'start_at': (min_dt.isoformat() if min_dt else '')})
+            # Если k — число, используем его как номер тура; иначе заголовок/ключ оставляем как есть
+            try:
+                tour_num = int(k) if isinstance(k, int) or (isinstance(k, str) and k.isdigit()) else k
+            except Exception:
+                tour_num = k
+            tours_list.append({'tour': tour_num, 'matches': matches, 'start_at': (min_dt.isoformat() if min_dt else '')})
 
         # sort by start_at
         try:
@@ -731,6 +739,21 @@ if DATABASE_URL:
             
         SessionLocal = sessionmaker(bind=engine)
         print("[INFO] PostgreSQL database connected successfully")
+        # Безопасная миграция для столбца tour в таблице matches (если включено INIT_DATABASE_TABLES)
+        try:
+            if os.environ.get('INIT_DATABASE_TABLES', '0') in ('1', 'true', 'True', 'yes'):
+                with engine.connect() as conn:
+                    # Проверяем наличие столбца tour
+                    col_exists = conn.execute(text("""
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='matches' AND column_name='tour'
+                    """)).fetchone()
+                    if not col_exists:
+                        conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS tour INTEGER"))
+                        conn.commit()
+                        print('[INFO] Added column matches.tour')
+        except Exception as mig_err:
+            print(f"[WARN] Tour column migration skipped/failed: {mig_err}")
         
     except Exception as e:
         print(f"[ERROR] Failed to connect to PostgreSQL: {e}")
@@ -2236,79 +2259,120 @@ def api_admin_matches_upcoming():
     match id: sha1(home|away|date) первые 12 hex.
     """
     try:
-        # auth уже прошёл через @require_admin; дополнительно верифицируем initData для единообразия
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
-        if not parsed or not parsed.get('user'):
-            return jsonify({'error': 'unauthorized'}), 401
+        # auth уже прошёл через @require_admin; доп. проверка initData не требуется (разрешаем вход по cookie)
         # грузим туры из снапшота (без Sheets)
         tours = []
         if SessionLocal is not None:
             try:
-                dbs = get_db()
-                try:
-                    snap = _snapshot_get(dbs, Snapshot, 'schedule', app.logger)
-                    payload = snap and snap.get('payload')
-                    tours = payload and payload.get('tours') or []
-                finally:
-                    dbs.close()
+                db = SessionLocal()
+                snap = db.query(Snapshot).filter(Snapshot.key == 'schedule').first()
+                if snap and snap.payload:
+                    import orjson
+                    parsed = orjson.loads(snap.payload)
+                    # payload может быть как {tours:[...]}, так и сразу массивом туров
+                    if isinstance(parsed, dict):
+                        tours = parsed.get('tours') or parsed.get('payload', {}).get('tours') or []
+                    elif isinstance(parsed, list):
+                        tours = parsed
+                    else:
+                        tours = []
+                db.close()
             except Exception as e:
-                app.logger.error(f"admin_upcoming: schedule snapshot error {e}")
-                return jsonify({'error': 'schedule_unavailable'}), 500
+                app.logger.error(f"admin matches upcoming: failed to load snapshot: {e}")
         now = datetime.now()
         out = []
-        import hashlib
         for t in tours or []:
-            for m in t.get('matches', []) or []:
-                # Берём будущие или начинающиеся через <= 1 день
-                dt = None
+            # Поддержка разных форматов тура: t может быть словарём с ключом matches или сам быть матчем
+            tour_matches = []
+            if isinstance(t, dict):
+                tour_matches = t.get('matches') or t.get('items') or []
+                # если t выглядит как матч, оборачиваем его в список
+                if not tour_matches and {'home','away','date'} <= set(t.keys()):
+                    tour_matches = [t]
+            elif isinstance(t, list):
+                tour_matches = t
+            for m in tour_matches or []:
+                # фильтруем только будущие или сегодняшние матчи
+                match_date = m.get('date')
                 try:
-                    if m.get('datetime'):
-                        dt = datetime.fromisoformat(str(m['datetime']))
-                    elif m.get('date'):
-                        dt = datetime.fromisoformat(str(m['date']))
+                    match_dt = datetime.strptime(match_date, '%Y-%m-%d').date() if match_date else None
                 except Exception:
-                    dt = None
-                if not dt or dt < (now - timedelta(hours=1)):
-                    continue
-                home = (m.get('home') or '').strip()
-                away = (m.get('away') or '').strip()
-                if not home or not away:
-                    continue
-                date_key = (dt.isoformat())
-                h = hashlib.sha1(f"{home}|{away}|{date_key[:10]}".encode('utf-8')).hexdigest()[:12]
-                # Попробуем достать уже сохранённые составы из БД (если доступна)
-                lineups = None
-                if SessionLocal is not None:
-                    db: Session = get_db()
-                    try:
-                        rows, db = _db_retry_read(
-                            db,
-                            lambda s: s.query(MatchLineupPlayer).filter(
-                                MatchLineupPlayer.home==home, MatchLineupPlayer.away==away
-                            ).all(),
-                            attempts=2, backoff_base=0.1, label='lineups:admin:upcoming'
-                        )
-                        if rows:
-                            def pack(team, pos):
-                                return [
-                                    { 'name': r.player, 'number': r.jersey_number, 'position': r.position if r.position!='starting_eleven' else None }
-                                    for r in rows if r.team==team and (pos=='main' and r.position=='starting_eleven' or pos=='sub' and r.position=='substitute')
-                                ]
-                            lineups = {
-                                'home': { 'main': pack('home','main'), 'sub': pack('home','sub') },
-                                'away': { 'main': pack('away','main'), 'sub': pack('away','sub') },
-                            }
-                    except Exception:
-                        lineups = None
-                    finally:
-                        db.close()
-                out.append({
-                    'id': h,
-                    'home_team': home,
-                    'away_team': away,
-                    'match_date': dt.isoformat() if dt else None,
-                    'lineups': lineups
-                })
+                    match_dt = None
+                if match_dt is not None and match_dt >= now.date():
+                    home = m.get('home'); away = m.get('away')
+                    # Составы: пробуем подтянуть из БД (точное совпадение по строкам)
+                    lineups = None
+                    if SessionLocal is not None and home and away:
+                        _sess = None
+                        try:
+                            _sess = SessionLocal()
+                            rows = _sess.query(MatchLineupPlayer).filter(
+                                MatchLineupPlayer.home==home,
+                                MatchLineupPlayer.away==away
+                            ).all()
+                            if rows:
+                                def pack(team, pos):
+                                    return [
+                                        { 'name': r.player, 'number': r.jersey_number, 'position': (r.position if r.position!='starting_eleven' else None) }
+                                        for r in rows
+                                        if r.team==team and (
+                                            (pos=='main' and r.position=='starting_eleven') or
+                                            (pos=='sub' and r.position=='substitute')
+                                        )
+                                    ]
+                                lineups = {
+                                    'home': { 'main': pack('home','main'), 'sub': pack('home','sub') },
+                                    'away': { 'main': pack('away','main'), 'sub': pack('away','sub') },
+                                }
+                        except Exception:
+                            lineups = None
+                        finally:
+                            try:
+                                _sess.close()
+                            except Exception:
+                                pass
+
+                    # Подготовка ISO-времени для UI: предпочитаем явное datetime; иначе date+time (+03:00)
+                    dt_iso = None
+                    raw_dt = m.get('datetime')
+                    if isinstance(raw_dt, str) and raw_dt:
+                        try:
+                            s = raw_dt.replace('Z', '+00:00')
+                            dtt = datetime.fromisoformat(s)
+                            if dtt.tzinfo is None:
+                                dtt = dtt.replace(tzinfo=timezone.utc)
+                            dtt = dtt.astimezone(timezone(timedelta(hours=3)))
+                            dt_iso = dtt.isoformat()
+                        except Exception:
+                            dt_iso = None
+                    if not dt_iso and match_date:
+                        time_str = None
+                        for key_name in ('time', 'start', 'kickoff', 'start_time', 'match_time'):
+                            v = m.get(key_name)
+                            if isinstance(v, str) and v.strip():
+                                time_str = v.strip()
+                                break
+                        if time_str and len(time_str) >= 4:
+                            parts = time_str.split(':')
+                            hh = parts[0].zfill(2)
+                            mm = parts[1].zfill(2) if len(parts) > 1 else '00'
+                            dt_iso = f"{match_date}T{hh}:{mm}:00+03:00"
+                        else:
+                            dt_iso = f"{match_date}T00:00:00+03:00"
+
+                    # fallback для id, если не задан
+                    mid = m.get('id')
+                    if not mid:
+                        import hashlib
+                        key = f"{home or ''}|{away or ''}|{match_date}"
+                        mid = hashlib.sha1(key.encode('utf-8')).hexdigest()[:12]
+                    out.append({
+                        'id': mid,
+                        'home_team': home,
+                        'away_team': away,
+                        'match_date': dt_iso or match_date,
+                        'lineups': lineups
+                    })
         # отсортируем по дате
         out.sort(key=lambda x: x.get('match_date') or '')
         return _json_response({'matches': out})
@@ -2644,6 +2708,7 @@ def api_admin_matches_import():
     candidates = []
     tours = schedule_payload.get('tours') or []
     for t in tours:
+        tour_num = t.get('tour') if isinstance(t.get('tour'), int) else None
         for rm in t.get('matches', []) or []:
             home_name = (rm.get('home') or '').strip()
             away_name = (rm.get('away') or '').strip()
@@ -2673,6 +2738,7 @@ def api_admin_matches_import():
                 'home_team_id': team_name_map.get(home_name.lower()),
                 'away_team_id': team_name_map.get(away_name.lower()),
                 'match_date': dt_utc,
+                'tour': (int(tour_num) if tour_num is not None else None),
                 'venue': None,
                 'notes': None
             })
@@ -2700,19 +2766,36 @@ def api_admin_matches_import():
                 'home_team_id': c['home_team_id'],
                 'away_team_id': c['away_team_id'],
                 'match_date': c['match_date'].isoformat(),
+                'tour': c.get('tour'),
                 'venue': None,
                 'notes': None
             })
         else:
             # возможные обновления: пока только дата (если смещение больше tolerance)
             tolerance = getattr(Config, 'MATCH_TIME_SHIFT_TOLERANCE_MIN', 15)
-            delta_min = abs(int((existing.match_date - c['match_date']).total_seconds() / 60)) if existing.match_date and c['match_date'] else 0
+            # Нормализуем в aware UTC, чтобы избежать TypeError (naive vs aware)
+            try:
+                ex_dt = existing.match_date
+                new_dt = c['match_date']
+                if ex_dt and ex_dt.tzinfo is None:
+                    ex_dt = ex_dt.replace(tzinfo=timezone.utc)
+                elif ex_dt:
+                    ex_dt = ex_dt.astimezone(timezone.utc)
+                if new_dt and new_dt.tzinfo is None:
+                    new_dt = new_dt.replace(tzinfo=timezone.utc)
+                elif new_dt:
+                    new_dt = new_dt.astimezone(timezone.utc)
+                delta_min = abs(int(((ex_dt or new_dt) and (ex_dt - new_dt)).total_seconds() / 60)) if ex_dt and new_dt else 0
+            except Exception:
+                delta_min = 0
             if delta_min > tolerance:
                 updates.append({
                     'id': existing.id,
                     'before': existing.match_date.isoformat() if existing.match_date else None,
                     'after': c['match_date'].isoformat(),
-                    'shift_min': delta_min
+                    'shift_min': delta_min,
+                    'tour_before': getattr(existing, 'tour', None),
+                    'tour_after': c.get('tour')
                 })
     # deletions: ключи, которые есть в existing_map, но отсутствуют среди candidate_keys
     for key, m in existing_map.items():
@@ -2833,6 +2916,11 @@ def api_admin_matches_import():
                 mm = db.get(Match, u['id'])
                 if mm:
                     mm.match_date = datetime.fromisoformat(u['after'])
+                    try:
+                        if 'tour_after' in u and u['tour_after'] is not None:
+                            mm.tour = int(u['tour_after'])
+                    except Exception:
+                        pass
                     db.add(mm)
             # inserts
             for it in inserts:
@@ -2840,6 +2928,7 @@ def api_admin_matches_import():
                     home_team_id=it['home_team_id'],
                     away_team_id=it['away_team_id'],
                     match_date=datetime.fromisoformat(it['match_date']) if it.get('match_date') else None,
+                    tour=(int(it['tour']) if it.get('tour') is not None else None),
                     venue=it.get('venue'),
                     notes=it.get('notes'),
                     status='scheduled'
@@ -2867,7 +2956,14 @@ def api_admin_matches_import():
             except Exception:
                 pass
             db.close()
-            resp = {'applied': True, 'summary': summary}
+            resp = {
+                'applied': True,
+                'summary': summary,
+                # фронтенд-совместимые числовые поля
+                'inserted': summary.get('insert', 0),
+                'updated': summary.get('update', 0),
+                'cancelled': summary.get('delete', 0)
+            }
             if backup_id:
                 resp['backup_id'] = backup_id
             return jsonify(resp)
@@ -2887,7 +2983,11 @@ def api_admin_matches_import():
         'insert': inserts,
         'update': updates,
         'delete': deletes,
-        'validation_errors': validation_errors
+        'validation_errors': validation_errors,
+        # фронтенд-совместимые алиасы
+        'inserted': inserts,
+        'updated': updates,
+        'deleted': deletes
     })
 
 def _resolve_match_by_id(match_id: str, tours=None):
@@ -6369,8 +6469,15 @@ def _build_betting_tours_payload():
                     if d < now_local.date():
                         started = True
                     elif d == now_local.date():
-                        # без точного времени — считаем что старт в полночь (уже начался)
-                        started = True
+                        # если есть точное время — сравниваем с текущим временем
+                        if m.get('time'):
+                            tm = datetime.strptime(m['time'], '%H:%M').time()
+                            match_dt = datetime.combine(d, tm)
+                            if match_dt <= now_local:
+                                started = True
+                        else:
+                            # без точного времени — считаем что старт в полночь (уже начался)
+                            started = True
             except Exception:
                 pass
             if started:
@@ -10478,29 +10585,18 @@ def api_results_refresh():
 
 # -------- Google Sheets Admin Sync (import/export) --------
 @app.route('/api/admin/google/import-schedule', methods=['POST'])
+@require_admin()
 @log_data_sync("Импорт расписания из Google Sheets")
 def api_admin_google_import_schedule():
     """Импорт расписания из Google Sheets (только админ): обновляет snapshot schedule. DB-only чтение для клиентов сохраняется."""
     try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            manual_log(
-                action="google_import_schedule",
-                description="Импорт расписания - неверные данные авторизации",
-                result_status='error',
-                affected_data={'error': 'Invalid auth data'}
-            )
-            return jsonify({'error': 'Недействительные данные'}), 401
-        user_id = str(parsed['user'].get('id'))
-        admin_id = os.environ.get('ADMIN_USER_ID', '')
-        if not admin_id or user_id != admin_id:
-            manual_log(
-                action="google_import_schedule",
-                description=f"Импорт расписания - доступ запрещен для пользователя {user_id}",
-                result_status='error',
-                affected_data={'user_id': user_id, 'admin_required': True}
-            )
-            return jsonify({'error': 'forbidden'}), 403
+        # Авторизация выполнена декоратором require_admin; возьмём идентификатор администратора из g.user
+        try:
+            user_id = str(getattr(g, 'user', {}).get('id', 'admin'))
+        except Exception:
+            user_id = 'admin'
+        # Авторизация уже пройдена через @require_admin (по cookie admin_auth или Telegram initData)
+        # g.user доступен (содержит id администратора)
         if SessionLocal is None:
             manual_log(
                 action="google_import_schedule",
@@ -10537,6 +10633,7 @@ def api_admin_google_import_schedule():
                     try:
                         home_name = (m.get('home') or '').strip()
                         away_name = (m.get('away') or '').strip()
+                        tour_num = t.get('tour') if isinstance(t.get('tour'), int) else None
                         date_s = m.get('datetime') or m.get('date') or ''
                         if not home_name or not away_name or not date_s:
                             continue
@@ -10566,11 +10663,16 @@ def api_admin_google_import_schedule():
                             existing.match_date = dt
                             existing.home_team_id = home_id
                             existing.away_team_id = away_id
+                            if tour_num is not None:
+                                try:
+                                    existing.tour = int(tour_num)
+                                except Exception:
+                                    pass
                             existing.status = existing.status or 'scheduled'
                             db.add(existing)
                         else:
                             # insert new match
-                            nm = Match(home_team_id=home_id, away_team_id=away_id, match_date=dt, status='scheduled')
+                            nm = Match(home_team_id=home_id, away_team_id=away_id, match_date=dt, status='scheduled', tour=(int(tour_num) if tour_num is not None else None))
                             db.add(nm)
                     except Exception:
                         app.logger.debug('failed to persist match row from sheet', exc_info=True)
@@ -10637,29 +10739,16 @@ def api_admin_google_import_schedule():
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/admin/google/export-all', methods=['POST'])
+@require_admin()
 @log_data_sync("Экспорт всех данных в Google Sheets")
 def api_admin_google_export_all():
     """Выгрузка актуальных данных из БД в Google Sheets (только админ)."""
     try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            manual_log(
-                action="google_export_all",
-                description="Экспорт в Google Sheets - неверные данные авторизации",
-                result_status='error',
-                affected_data={'error': 'Invalid auth data'}
-            )
-            return jsonify({'error': 'Недействительные данные'}), 401
-        user_id = str(parsed['user'].get('id'))
-        admin_id = os.environ.get('ADMIN_USER_ID', '')
-        if not admin_id or user_id != admin_id:
-            manual_log(
-                action="google_export_all",
-                description=f"Экспорт в Google Sheets - доступ запрещен для пользователя {user_id}",
-                result_status='error',
-                affected_data={'user_id': user_id, 'admin_required': True}
-            )
-            return jsonify({'error': 'forbidden'}), 403
+        # Авторизация выполнена декоратором require_admin; используем g.user
+        try:
+            user_id = str(getattr(g, 'user', {}).get('id', 'admin'))
+        except Exception:
+            user_id = 'admin'
         # Требуются env: GOOGLE_CREDENTIALS_B64 или GOOGLE_SHEETS_CREDENTIALS; SHEET_ID или SPREADSHEET_ID
         creds_b64 = os.environ.get('GOOGLE_CREDENTIALS_B64', '')
         if not creds_b64:
@@ -11986,14 +12075,15 @@ def admin_login_page():
     # Выдать cookie (HMAC(admin_pass, admin_id))
     token = hmac.new(admin_pass.encode('utf-8'), admin_id.encode('utf-8'), hashlib.sha256).hexdigest()
     resp = flask.make_response(flask.redirect('/admin'))
-    resp.set_cookie('admin_auth', token, httponly=True, secure=False, samesite='Lax', max_age=3600*6)
+    # Важно: path='/' чтобы cookie отправлялась и на /api/* маршруты
+    resp.set_cookie('admin_auth', token, httponly=True, secure=False, samesite='Lax', max_age=3600*6, path='/')
     return resp
 
 @app.route('/admin/logout')
 def admin_logout():
     resp = flask.make_response(flask.redirect('/admin/login'))
-    # сбрасываем cookie
-    resp.delete_cookie('admin_auth')
+    # сбрасываем cookie (учитываем path='/')
+    resp.delete_cookie('admin_auth', path='/')
     return resp
 
 # ---- Админ: сезонный rollover (дублируем здесь, т.к. blueprint admin не зарегистрирован) ----

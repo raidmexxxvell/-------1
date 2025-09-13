@@ -226,6 +226,7 @@ UI админ‑панели (`templates/admin_dashboard.html` + `static/js/admi
 - Во вкладке «Сервис» рядом с кнопками импорта/экспорта добавлен выпадающий список выбора листа (`#repair-sheet-select`) и кнопка «Почистить дубли».
 - Поддерживаемые значения: `users`, `achievements`, `referrals`, `bets`, `ТАБЛИЦА`.
 - При выполнении операций используется Telegram initData и проверка `ADMIN_USER_ID` на сервере.
+ - В модальном окне импорта расписания добавлена кнопка «Импорт из Google → заполнить matches», которая вызывает `POST /api/admin/google/import-schedule`, показывает статус операции и по завершении перезагружает список матчей. Это облегчает первичное заполнение БД и устранение ошибки `schedule_unavailable` перед dry‑run/apply.
 
 Переменные окружения для Sheets:
 - `GOOGLE_CREDENTIALS_B64` или `GOOGLE_SHEETS_CREDENTIALS` (raw JSON) — учётные данные сервис‑аккаунта.

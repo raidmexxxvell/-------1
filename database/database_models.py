@@ -97,6 +97,7 @@ class Match(Base):
     home_team_id = Column(Integer, ForeignKey('teams.id', ondelete='SET NULL'))
     away_team_id = Column(Integer, ForeignKey('teams.id', ondelete='SET NULL'))
     match_date = Column(DateTime, nullable=False)
+    tour = Column(Integer)  # номер тура (nullable для обратной совместимости)
     venue = Column(String(255))
     home_score = Column(Integer, default=0)
     away_score = Column(Integer, default=0)
