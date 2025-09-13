@@ -680,7 +680,18 @@
     const cache = readToursCache();
     if (!cache) return;
     const tourMatches = computeTourMatchSet(cache);
-    if (!tourMatches.size) return;
+    // Не выходим при пустом set — дадим шанс фолбэку на ближайшие матчи
+    const isUpcomingWithinDays = (obj, days=6) => {
+      try {
+        const now = new Date();
+        const d = normalizeDateStr(obj?.date || obj?.datetime || '');
+        if (!d) return false;
+        const dt = new Date(d);
+        if (isNaN(dt.getTime())) return false;
+        const diff = dt.getTime() - now.getTime();
+        return diff >= 0 && diff <= days*24*60*60*1000;
+      } catch(_) { return false; }
+    };
     // Пройдём по матч-картам без уже вставленного голосования
     pane.querySelectorAll('.match-card').forEach(card => {
       try {
@@ -701,7 +712,10 @@
         }
         if (!dateKey) return;
         const key = matchKey({ home, away, date: dateKey });
-        if (!tourMatches.has(key)) return;
+        if (!tourMatches.has(key)) {
+          // Фолбэк: если матч ближайшие 6 дней — всё равно показываем голосование
+          if (!isUpcomingWithinDays({ home, away, date: dateKey }, 6)) return;
+        }
         // Создаём голосование
         if (window.VoteInline && typeof window.VoteInline.create === 'function') {
           const voteEl = window.VoteInline.create({ home, away, date: dateKey, getTeamColor });
