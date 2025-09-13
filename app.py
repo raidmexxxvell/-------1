@@ -2017,7 +2017,12 @@ def api_shop_checkout():
                 app.logger.warning(f"Admin notify failed: {e}")
             return jsonify({'order_id': order.id, 'total': total, 'balance': int(u.credits or 0)})
         finally:
-            db.close()
+            try:
+                db.close()
+            except Exception:
+                # Suppress rollback/close errors (e.g., transient SSL bad record mac)
+                # to avoid bubbling up 500 from helper
+                pass
     except Exception as e:
         log_shop_order_event(
             user_id=parsed['user'].get('id') if 'parsed' in locals() and parsed and parsed.get('user') else None,
