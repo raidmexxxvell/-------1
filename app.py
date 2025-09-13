@@ -479,14 +479,14 @@ def _update_schedule_snapshot_from_matches(db_session, logger):
         except Exception:
             match_rows = []
 
-        # Group matches into tours. Prefer explicit tour stored in Match.notes as JSON {'tour': N}.
+    # Group matches into tours. Prefer explicit Match.tour; затем Match.notes JSON {'tour': N}; иначе группировка по дате.
         tours_map = {}
         tour_order = []
         for mm in match_rows:
-            # parse note-based tour if present
-            tour_key = None
+            # explicit tour field
+            tour_key = getattr(mm, 'tour', None)
             try:
-                if mm.notes:
+                if tour_key is None and mm.notes:
                     try:
                         n = json.loads(mm.notes)
                         if isinstance(n, dict) and 'tour' in n:
@@ -550,7 +550,12 @@ def _update_schedule_snapshot_from_matches(db_session, logger):
                             min_dt = d
                 except Exception:
                     continue
-            tours_list.append({'tour': k, 'matches': matches, 'start_at': (min_dt.isoformat() if min_dt else '')})
+            # Если k — число, используем его как номер тура; иначе заголовок/ключ оставляем как есть
+            try:
+                tour_num = int(k) if isinstance(k, int) or (isinstance(k, str) and k.isdigit()) else k
+            except Exception:
+                tour_num = k
+            tours_list.append({'tour': tour_num, 'matches': matches, 'start_at': (min_dt.isoformat() if min_dt else '')})
 
         # sort by start_at
         try:
@@ -2236,79 +2241,37 @@ def api_admin_matches_upcoming():
     match id: sha1(home|away|date) первые 12 hex.
     """
     try:
-        # auth уже прошёл через @require_admin; дополнительно верифицируем initData для единообразия
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
-        if not parsed or not parsed.get('user'):
-            return jsonify({'error': 'unauthorized'}), 401
+        # auth уже прошёл через @require_admin; доп. проверка initData не требуется (разрешаем вход по cookie)
         # грузим туры из снапшота (без Sheets)
         tours = []
         if SessionLocal is not None:
             try:
-                dbs = get_db()
-                try:
-                    snap = _snapshot_get(dbs, Snapshot, 'schedule', app.logger)
-                    payload = snap and snap.get('payload')
-                    tours = payload and payload.get('tours') or []
-                finally:
-                    dbs.close()
+                db = SessionLocal()
+                snap = db.query(Snapshot).filter(Snapshot.key == 'schedule').first()
+                if snap:
+                    import orjson
+                    tours = orjson.loads(snap.payload)
+                db.close()
             except Exception as e:
-                app.logger.error(f"admin_upcoming: schedule snapshot error {e}")
-                return jsonify({'error': 'schedule_unavailable'}), 500
+                app.logger.error(f"admin matches upcoming: failed to load snapshot: {e}")
         now = datetime.now()
         out = []
-        import hashlib
         for t in tours or []:
             for m in t.get('matches', []) or []:
-                # Берём будущие или начинающиеся через <= 1 день
-                dt = None
+                # фильтруем только будущие или сегодняшние матчи
+                match_date = m.get('date')
                 try:
-                    if m.get('datetime'):
-                        dt = datetime.fromisoformat(str(m['datetime']))
-                    elif m.get('date'):
-                        dt = datetime.fromisoformat(str(m['date']))
+                    match_dt = datetime.strptime(match_date, '%Y-%m-%d') if match_date else None
                 except Exception:
-                    dt = None
-                if not dt or dt < (now - timedelta(hours=1)):
-                    continue
-                home = (m.get('home') or '').strip()
-                away = (m.get('away') or '').strip()
-                if not home or not away:
-                    continue
-                date_key = (dt.isoformat())
-                h = hashlib.sha1(f"{home}|{away}|{date_key[:10]}".encode('utf-8')).hexdigest()[:12]
-                # Попробуем достать уже сохранённые составы из БД (если доступна)
-                lineups = None
-                if SessionLocal is not None:
-                    db: Session = get_db()
-                    try:
-                        rows, db = _db_retry_read(
-                            db,
-                            lambda s: s.query(MatchLineupPlayer).filter(
-                                MatchLineupPlayer.home==home, MatchLineupPlayer.away==away
-                            ).all(),
-                            attempts=2, backoff_base=0.1, label='lineups:admin:upcoming'
-                        )
-                        if rows:
-                            def pack(team, pos):
-                                return [
-                                    { 'name': r.player, 'number': r.jersey_number, 'position': r.position if r.position!='starting_eleven' else None }
-                                    for r in rows if r.team==team and (pos=='main' and r.position=='starting_eleven' or pos=='sub' and r.position=='substitute')
-                                ]
-                            lineups = {
-                                'home': { 'main': pack('home','main'), 'sub': pack('home','sub') },
-                                'away': { 'main': pack('away','main'), 'sub': pack('away','sub') },
-                            }
-                    except Exception:
-                        lineups = None
-                    finally:
-                        db.close()
-                out.append({
-                    'id': h,
-                    'home_team': home,
-                    'away_team': away,
-                    'match_date': dt.isoformat() if dt else None,
-                    'lineups': lineups
-                })
+                    match_dt = None
+                if match_dt is not None and (match_dt >= now.date() or (match_dt == now.date())):
+                    out.append({
+                        'id': m.get('id'),
+                        'home_team': m.get('home'),
+                        'away_team': m.get('away'),
+                        'match_date': match_date,
+                        'lineups': m.get('lineups')
+                    })
         # отсортируем по дате
         out.sort(key=lambda x: x.get('match_date') or '')
         return _json_response({'matches': out})
@@ -2644,6 +2607,7 @@ def api_admin_matches_import():
     candidates = []
     tours = schedule_payload.get('tours') or []
     for t in tours:
+        tour_num = t.get('tour') if isinstance(t.get('tour'), int) else None
         for rm in t.get('matches', []) or []:
             home_name = (rm.get('home') or '').strip()
             away_name = (rm.get('away') or '').strip()
@@ -2673,6 +2637,7 @@ def api_admin_matches_import():
                 'home_team_id': team_name_map.get(home_name.lower()),
                 'away_team_id': team_name_map.get(away_name.lower()),
                 'match_date': dt_utc,
+                'tour': (int(tour_num) if tour_num is not None else None),
                 'venue': None,
                 'notes': None
             })
@@ -2700,6 +2665,7 @@ def api_admin_matches_import():
                 'home_team_id': c['home_team_id'],
                 'away_team_id': c['away_team_id'],
                 'match_date': c['match_date'].isoformat(),
+                'tour': c.get('tour'),
                 'venue': None,
                 'notes': None
             })
@@ -2726,7 +2692,9 @@ def api_admin_matches_import():
                     'id': existing.id,
                     'before': existing.match_date.isoformat() if existing.match_date else None,
                     'after': c['match_date'].isoformat(),
-                    'shift_min': delta_min
+                    'shift_min': delta_min,
+                    'tour_before': getattr(existing, 'tour', None),
+                    'tour_after': c.get('tour')
                 })
     # deletions: ключи, которые есть в existing_map, но отсутствуют среди candidate_keys
     for key, m in existing_map.items():
@@ -2847,6 +2815,11 @@ def api_admin_matches_import():
                 mm = db.get(Match, u['id'])
                 if mm:
                     mm.match_date = datetime.fromisoformat(u['after'])
+                    try:
+                        if 'tour_after' in u and u['tour_after'] is not None:
+                            mm.tour = int(u['tour_after'])
+                    except Exception:
+                        pass
                     db.add(mm)
             # inserts
             for it in inserts:
@@ -2854,6 +2827,7 @@ def api_admin_matches_import():
                     home_team_id=it['home_team_id'],
                     away_team_id=it['away_team_id'],
                     match_date=datetime.fromisoformat(it['match_date']) if it.get('match_date') else None,
+                    tour=(int(it['tour']) if it.get('tour') is not None else None),
                     venue=it.get('venue'),
                     notes=it.get('notes'),
                     status='scheduled'
@@ -10551,6 +10525,7 @@ def api_admin_google_import_schedule():
                     try:
                         home_name = (m.get('home') or '').strip()
                         away_name = (m.get('away') or '').strip()
+                        tour_num = t.get('tour') if isinstance(t.get('tour'), int) else None
                         date_s = m.get('datetime') or m.get('date') or ''
                         if not home_name or not away_name or not date_s:
                             continue
@@ -10580,11 +10555,16 @@ def api_admin_google_import_schedule():
                             existing.match_date = dt
                             existing.home_team_id = home_id
                             existing.away_team_id = away_id
+                            if tour_num is not None:
+                                try:
+                                    existing.tour = int(tour_num)
+                                except Exception:
+                                    pass
                             existing.status = existing.status or 'scheduled'
                             db.add(existing)
                         else:
                             # insert new match
-                            nm = Match(home_team_id=home_id, away_team_id=away_id, match_date=dt, status='scheduled')
+                            nm = Match(home_team_id=home_id, away_team_id=away_id, match_date=dt, status='scheduled', tour=(int(tour_num) if tour_num is not None else None))
                             db.add(nm)
                     except Exception:
                         app.logger.debug('failed to persist match row from sheet', exc_info=True)

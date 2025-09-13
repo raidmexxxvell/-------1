@@ -59,6 +59,7 @@ CREATE TABLE matches (
     home_team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL,
     away_team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL,
     match_date TIMESTAMP NOT NULL,
+    tour INTEGER,
     venue VARCHAR(255),
     home_score INTEGER DEFAULT 0,
     away_score INTEGER DEFAULT 0,
