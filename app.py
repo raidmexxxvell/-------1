@@ -10478,29 +10478,18 @@ def api_results_refresh():
 
 # -------- Google Sheets Admin Sync (import/export) --------
 @app.route('/api/admin/google/import-schedule', methods=['POST'])
+@require_admin()
 @log_data_sync("Импорт расписания из Google Sheets")
 def api_admin_google_import_schedule():
     """Импорт расписания из Google Sheets (только админ): обновляет snapshot schedule. DB-only чтение для клиентов сохраняется."""
     try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            manual_log(
-                action="google_import_schedule",
-                description="Импорт расписания - неверные данные авторизации",
-                result_status='error',
-                affected_data={'error': 'Invalid auth data'}
-            )
-            return jsonify({'error': 'Недействительные данные'}), 401
-        user_id = str(parsed['user'].get('id'))
-        admin_id = os.environ.get('ADMIN_USER_ID', '')
-        if not admin_id or user_id != admin_id:
-            manual_log(
-                action="google_import_schedule",
-                description=f"Импорт расписания - доступ запрещен для пользователя {user_id}",
-                result_status='error',
-                affected_data={'user_id': user_id, 'admin_required': True}
-            )
-            return jsonify({'error': 'forbidden'}), 403
+        # Авторизация выполнена декоратором require_admin; возьмём идентификатор администратора из g.user
+        try:
+            user_id = str(getattr(g, 'user', {}).get('id', 'admin'))
+        except Exception:
+            user_id = 'admin'
+        # Авторизация уже пройдена через @require_admin (по cookie admin_auth или Telegram initData)
+        # g.user доступен (содержит id администратора)
         if SessionLocal is None:
             manual_log(
                 action="google_import_schedule",
@@ -10637,29 +10626,16 @@ def api_admin_google_import_schedule():
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/admin/google/export-all', methods=['POST'])
+@require_admin()
 @log_data_sync("Экспорт всех данных в Google Sheets")
 def api_admin_google_export_all():
     """Выгрузка актуальных данных из БД в Google Sheets (только админ)."""
     try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            manual_log(
-                action="google_export_all",
-                description="Экспорт в Google Sheets - неверные данные авторизации",
-                result_status='error',
-                affected_data={'error': 'Invalid auth data'}
-            )
-            return jsonify({'error': 'Недействительные данные'}), 401
-        user_id = str(parsed['user'].get('id'))
-        admin_id = os.environ.get('ADMIN_USER_ID', '')
-        if not admin_id or user_id != admin_id:
-            manual_log(
-                action="google_export_all",
-                description=f"Экспорт в Google Sheets - доступ запрещен для пользователя {user_id}",
-                result_status='error',
-                affected_data={'user_id': user_id, 'admin_required': True}
-            )
-            return jsonify({'error': 'forbidden'}), 403
+        # Авторизация выполнена декоратором require_admin; используем g.user
+        try:
+            user_id = str(getattr(g, 'user', {}).get('id', 'admin'))
+        except Exception:
+            user_id = 'admin'
         # Требуются env: GOOGLE_CREDENTIALS_B64 или GOOGLE_SHEETS_CREDENTIALS; SHEET_ID или SPREADSHEET_ID
         creds_b64 = os.environ.get('GOOGLE_CREDENTIALS_B64', '')
         if not creds_b64:
