@@ -5607,6 +5607,55 @@ def _build_schedule_payload_from_sheet():
     upcoming.sort(key=tour_sort_key)
     upcoming = upcoming[:3]
 
+    # Обогащаем матчи server-driven статусом (scheduled/soon/live/finished)
+    try:
+        # now_local уже рассчитан ранее по SCHEDULE_TZ_SHIFT_* (или их дефолтам)
+        for t in upcoming:
+            for m in t.get('matches', []):
+                try:
+                    status = 'scheduled'; soon = False; is_live = False
+                    dt = None
+                    if m.get('datetime'):
+                        try:
+                            dt = datetime.fromisoformat(m['datetime'])
+                        except Exception:
+                            dt = None
+                    # На основании времени старта
+                    if dt is not None:
+                        if (dt - timedelta(minutes=10)) <= now_local < dt:
+                            status = 'scheduled'; soon = True
+                        elif dt <= now_local < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                            status = 'live'; is_live = True
+                        elif now_local >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                            status = 'finished'
+                    else:
+                        # Без точного времени: ориентир по дате
+                        if m.get('date'):
+                            try:
+                                d = datetime.fromisoformat(m['date']).date()
+                                if d < now_local.date():
+                                    status = 'finished'
+                                elif d == now_local.date():
+                                    status = 'scheduled'
+                                else:
+                                    status = 'scheduled'
+                            except Exception:
+                                pass
+                    # Если счёт известен из результатов — принудительно finished
+                    try:
+                        sc = results_score_map.get((m.get('home') or '', m.get('away') or ''))
+                        if sc and (sc[0] not in (None, '', '-') and sc[1] not in (None, '', '-')):
+                            status = 'finished'; is_live = False; soon = False
+                    except Exception:
+                        pass
+                    m['status'] = status
+                    m['is_live'] = bool(is_live)
+                    m['soon'] = bool(soon)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
     payload = { 'updated_at': datetime.now(timezone.utc).isoformat(), 'tours': upcoming }
     return payload
 
