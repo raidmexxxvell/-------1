@@ -748,8 +748,19 @@
               const segD = wrap.querySelector('.seg-d');
               const segA = wrap.querySelector('.seg-a');
               if (!segH) return;
-              const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
-              const sum = Math.max(1, h+d+a);
+              // Серверные значения
+              let h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
+              let sum = Math.max(0, h+d+a);
+              // Текущее локальное состояние (могло увеличиться оптимистично после клика)
+              const st = MatchState.get(key);
+              const sv = st && st.votes ? st.votes : null;
+              const ssum = Math.max(0, (sv?.h||0)+(sv?.d||0)+(sv?.a||0));
+              if (ssum > sum) {
+                h = Number(sv?.h||0); d = Number(sv?.d||0); a = Number(sv?.a||0);
+                sum = Math.max(1, h+d+a);
+              } else {
+                sum = Math.max(1, sum);
+              }
               const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
               if (segH.style.width !== ph+'%') segH.style.width = ph+'%';
               if (segD.style.width !== pd+'%') segD.style.width = pd+'%';

@@ -215,10 +215,12 @@
           return store;
         });
 
-      // Fallback-пуллинг коэффициентов при отключённых WebSocket: обновляем кнопки П1/Х/П2 по ETag каждые ~5-6.5с
+      // Fallback-пуллинг коэффициентов при отключённых/неподключённых WebSocket: обновляем кнопки П1/Х/П2 по ETag каждые ~3.5-4.7с
       const startOddsPolling = (initialVersion) => {
         try { if (wrap.__oddsPollCancel) wrap.__oddsPollCancel(); } catch(_){}
-        if (window.__WEBSOCKETS_ENABLED__) return; // используем только без WS
+        // используем при выключенном WS или при отсутствии активного соединения
+        const wsActive = !!window.__WEBSOCKETS_ENABLED__ && !!(window.realtimeUpdater && window.realtimeUpdater.getConnectionStatus && window.realtimeUpdater.getConnectionStatus().connected);
+        if (wsActive) return;
         let cancelled = false, busy = false, timer = null;
         let lastVersion = initialVersion || (cached && cached.version) || null;
         wrap.__oddsPollCancel = () => { cancelled = true; try { if (timer) clearTimeout(timer); } catch(_){} };
@@ -471,15 +473,18 @@
     // --- НОВЫЙ КОД: Обработчик обновлений коэффициентов от WebSocket ---
     document.addEventListener('bettingOddsUpdate', (e) => {
       const { detail } = e;
-      if (!detail || !detail.home || !detail.away) return;
+      if (!detail) return;
+      const homeTeam = detail.homeTeam || detail.home;
+      const awayTeam = detail.awayTeam || detail.away;
+      const date = detail.date || '';
+      if (!homeTeam || !awayTeam) return;
 
-      const matchId = `${detail.home}_${detail.away}_${detail.date || ''}`;
+      const matchId = `${homeTeam}_${awayTeam}_${date}`;
       const card = document.querySelector(`.match-card[data-match-id="${matchId}"]`);
       if (!card) return;
 
-      const odds = detail; // home, draw, away keys
+      const odds = detail.odds || detail; // числовые кэфы
       const buttons = card.querySelectorAll('.bet-btn[data-bet-key]');
-      
       buttons.forEach(btn => {
         const key = btn.dataset.betKey;
         const label = { home: 'П1', draw: 'Х', away: 'П2' }[key];
@@ -487,12 +492,27 @@
           const newText = `${label} (${Number(odds[key]).toFixed(2)})`;
           if (btn.textContent !== newText) {
             btn.textContent = newText;
-            // Анимация обновления
             btn.classList.add('updated');
             setTimeout(() => btn.classList.remove('updated'), 500);
           }
         }
       });
+      // Синхронизируем локальный кэш betting:tours
+      try {
+        const CACHE_KEY = 'betting:tours';
+        const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+        if (cached && cached.data && Array.isArray(cached.data.tours)) {
+          const d = String(date || '').slice(0,10);
+          cached.data.tours.forEach(t => (t.matches||[]).forEach(m => {
+            const md = (m.date || m.datetime || '').slice(0,10);
+            if (m.home === homeTeam && m.away === awayTeam && md === d) {
+              m.odds = { ...(m.odds||{}), ...odds };
+              if (detail.odds_version != null) { cached.version = String(detail.odds_version); }
+            }
+          }));
+          localStorage.setItem(CACHE_KEY, JSON.stringify(cached));
+        }
+      } catch(_) {}
     });
     // --- КОНЕЦ НОВОГО КОДА ---
 

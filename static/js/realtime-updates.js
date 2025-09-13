@@ -14,6 +14,9 @@ class RealtimeUpdater {
         this.debug = localStorage.getItem('websocket_debug') === 'true';
     // Версионность коэффициентов по матчу: key = "home|away" → int
     this.oddsVersions = new Map();
+    // Очередь тем для подписки до момента connect
+    this.pendingTopics = new Set();
+    this.subscribedTopics = new Set();
     // Feature flag for topic-based subscriptions (from template meta)
     this.topicEnabled = !!window.__WS_TOPIC_SUBS__;
         
@@ -63,6 +66,23 @@ class RealtimeUpdater {
             if (initData) {
                 this.socket.emit('user_connected', { initData });
             }
+            // Восстановим отложенные topic-подписки (если включены)
+            try {
+                if (this.topicEnabled) {
+                    // Соберём отложенные темы из глобального буфера (если предустановлен до инициализации)
+                    const glob = window.__PENDING_WS_TOPICS__;
+                    if (glob && typeof glob.forEach === 'function') {
+                        glob.forEach(t => { try { this.pendingTopics.add(String(t)); } catch(_){} });
+                        try { glob.clear?.(); } catch(_) {}
+                    }
+                    this.pendingTopics.forEach(topic => {
+                        if (!this.subscribedTopics.has(topic)) {
+                            this.socket.emit('subscribe', { topic });
+                            this.subscribedTopics.add(topic);
+                        }
+                    });
+                }
+            } catch(_) {}
         });
         
     this.socket.on('disconnect', (reason) => {
@@ -232,7 +252,9 @@ class RealtimeUpdater {
                     if (incomingV > cur) { this._setOddsVersion(home, away, incomingV); }
                 }
                 // Пробрасываем событие вниз по UI
-                this.refreshBettingOdds({ ...(fields || {}), home, away, date, odds_version: incomingV });
+                // Чтобы не конфликтовали ключи 'home' (команда) и 'home' (кэф), помещаем кэфы в под-объект odds,
+                // а названия команд передаём как homeTeam/awayTeam.
+                this.refreshBettingOdds({ homeTeam: home, awayTeam: away, date, odds_version: incomingV, odds: { ...(fields || {}) } });
                 return;
             }
             // по умолчанию — общий refresh
@@ -464,16 +486,28 @@ class RealtimeUpdater {
     // Новые topic-based подписки (за фиче-флагом)
     subscribeTopic(topic){
         try {
-            if(!this.socket || !this.isConnected || !this.topicEnabled) return;
             if(!topic || typeof topic!== 'string') return;
-            this.socket.emit('subscribe', { topic });
+            // Кладём в очередь всегда (на случай вызова до готовности socket)
+            this.pendingTopics.add(topic);
+            try {
+                window.__PENDING_WS_TOPICS__ = window.__PENDING_WS_TOPICS__ || new Set();
+                window.__PENDING_WS_TOPICS__.add(topic);
+            } catch(_) {}
+            if(!this.topicEnabled) return;
+            if(this.socket && this.isConnected && !this.subscribedTopics.has(topic)){
+                this.socket.emit('subscribe', { topic });
+                this.subscribedTopics.add(topic);
+            }
         } catch(_) {}
     }
     unsubscribeTopic(topic){
         try {
-            if(!this.socket || !this.isConnected || !this.topicEnabled) return;
             if(!topic || typeof topic!== 'string') return;
-            this.socket.emit('unsubscribe', { topic });
+            try { this.pendingTopics.delete(topic); } catch(_) {}
+            try { this.subscribedTopics.delete(topic); } catch(_) {}
+            try { window.__PENDING_WS_TOPICS__?.delete?.(topic); } catch(_) {}
+            if(!this.topicEnabled) return;
+            if(this.socket && this.isConnected){ this.socket.emit('unsubscribe', { topic }); }
         } catch(_) {}
     }
 

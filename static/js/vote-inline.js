@@ -37,8 +37,20 @@
     wrap.dataset.date = (date || datetime || '').toString().slice(0,10);
     const applyAgg = (agg) => {
       try {
-        const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
-        const sum = Math.max(1, h+d+a);
+        // Значения с сервера
+        let h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
+        let sum = Math.max(0, h+d+a);
+        // Текущее локальное (оптимистичное) состояние — не даём регрессировать к нулю
+        const st = MatchState?.get(voteKey);
+        const sv = st && st.votes ? st.votes : null;
+        const ssum = Math.max(0, (sv?.h||0)+(sv?.d||0)+(sv?.a||0));
+        if (ssum > sum) {
+          // Если локальная сумма больше, используем локальные значения (сервер ещё не догнал)
+          h = Number(sv?.h||0); d = Number(sv?.d||0); a = Number(sv?.a||0);
+          sum = Math.max(1, h+d+a);
+        } else {
+          sum = Math.max(1, sum);
+        }
         const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
         if (segH.style.width !== ph+'%') segH.style.width = ph+'%';
         if (segD.style.width !== pd+'%') segD.style.width = pd+'%';
@@ -72,7 +84,8 @@
           if (!r.ok) throw 0;
           btns.querySelectorAll('button').forEach(x=>x.disabled=true);
           confirm.textContent='Ваш голос учтён'; btns.style.display='none';
-          setTimeout(()=>{ VoteAgg?.fetchAgg(home, away, date || datetime).then(applyAgg); }, 250);
+          // Небольшая задержка, чтобы БД точно отдала обновлённые агрегаты
+          setTimeout(()=>{ VoteAgg?.fetchAgg(home, away, date || datetime).then(applyAgg); }, 800);
           try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
         } catch(_) {}
       }, { once:true });
