@@ -637,12 +637,22 @@
       if (__toursFetchPromise) return __toursFetchPromise;
       const headers = { 'Cache-Control': 'no-cache' };
       if (cached?.version) headers['If-None-Match'] = cached.version;
-      __toursFetchPromise = fetch('/api/betting/tours', { headers })
+      __toursFetchPromise = fetch('/api/betting/tours', { headers, cache: 'no-store' })
         .then(async r => {
-          if (r.status === 304 && cached) {
-            // Не изменилось — просто продлим TTL и вернём кэш
-            writeToursCache({ data: cached.data, version: cached.version, ts: Date.now() });
-            return { data: cached.data, version: cached.version };
+          if (r.status === 304) {
+            if (cached) {
+              // Не изменилось — просто продлим TTL и вернём кэш
+              writeToursCache({ data: cached.data, version: cached.version, ts: Date.now() });
+              return { data: cached.data, version: cached.version };
+            }
+            // Нет локального кэша, но сервер вернул 304 (браузерное условное кеширование)
+            // Делаем повторный запрос с cache-bust, чтобы принудительно получить тело
+            const bustUrl = `/api/betting/tours?ts=${Date.now()}`;
+            const r2 = await fetch(bustUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+            const data2 = await r2.json();
+            const version2 = r2.headers.get('ETag') || null;
+            writeToursCache({ data: data2, version: version2, ts: Date.now() });
+            return { data: data2, version: version2 };
           }
           const data = await r.json();
           const version = r.headers.get('ETag') || null;
