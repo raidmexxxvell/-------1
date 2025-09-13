@@ -736,6 +736,21 @@ if DATABASE_URL:
             
         SessionLocal = sessionmaker(bind=engine)
         print("[INFO] PostgreSQL database connected successfully")
+        # Безопасная миграция для столбца tour в таблице matches (если включено INIT_DATABASE_TABLES)
+        try:
+            if os.environ.get('INIT_DATABASE_TABLES', '0') in ('1', 'true', 'True', 'yes'):
+                with engine.connect() as conn:
+                    # Проверяем наличие столбца tour
+                    col_exists = conn.execute(text("""
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='matches' AND column_name='tour'
+                    """)).fetchone()
+                    if not col_exists:
+                        conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS tour INTEGER"))
+                        conn.commit()
+                        print('[INFO] Added column matches.tour')
+        except Exception as mig_err:
+            print(f"[WARN] Tour column migration skipped/failed: {mig_err}")
         
     except Exception as e:
         print(f"[ERROR] Failed to connect to PostgreSQL: {e}")
@@ -2248,25 +2263,47 @@ def api_admin_matches_upcoming():
             try:
                 db = SessionLocal()
                 snap = db.query(Snapshot).filter(Snapshot.key == 'schedule').first()
-                if snap:
+                if snap and snap.payload:
                     import orjson
-                    tours = orjson.loads(snap.payload)
+                    parsed = orjson.loads(snap.payload)
+                    # payload может быть как {tours:[...]}, так и сразу массивом туров
+                    if isinstance(parsed, dict):
+                        tours = parsed.get('tours') or parsed.get('payload', {}).get('tours') or []
+                    elif isinstance(parsed, list):
+                        tours = parsed
+                    else:
+                        tours = []
                 db.close()
             except Exception as e:
                 app.logger.error(f"admin matches upcoming: failed to load snapshot: {e}")
         now = datetime.now()
         out = []
         for t in tours or []:
-            for m in t.get('matches', []) or []:
+            # Поддержка разных форматов тура: t может быть словарём с ключом matches или сам быть матчем
+            tour_matches = []
+            if isinstance(t, dict):
+                tour_matches = t.get('matches') or t.get('items') or []
+                # если t выглядит как матч, оборачиваем его в список
+                if not tour_matches and {'home','away','date'} <= set(t.keys()):
+                    tour_matches = [t]
+            elif isinstance(t, list):
+                tour_matches = t
+            for m in tour_matches or []:
                 # фильтруем только будущие или сегодняшние матчи
                 match_date = m.get('date')
                 try:
-                    match_dt = datetime.strptime(match_date, '%Y-%m-%d') if match_date else None
+                    match_dt = datetime.strptime(match_date, '%Y-%m-%d').date() if match_date else None
                 except Exception:
                     match_dt = None
-                if match_dt is not None and (match_dt >= now.date() or (match_dt == now.date())):
+                if match_dt is not None and match_dt >= now.date():
+                    # fallback для id, если не задан
+                    mid = m.get('id')
+                    if not mid:
+                        import hashlib
+                        key = f"{m.get('home','')}|{m.get('away','')}|{match_date}"
+                        mid = hashlib.sha1(key.encode('utf-8')).hexdigest()[:12]
                     out.append({
-                        'id': m.get('id'),
+                        'id': mid,
                         'home_team': m.get('home'),
                         'away_team': m.get('away'),
                         'match_date': match_date,
