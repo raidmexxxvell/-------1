@@ -3,6 +3,7 @@
   function setup(match, refs){
     const scoreEl = refs.scoreEl; const dtEl = refs.dtEl; const mdPane=refs.mdPane; if(!scoreEl||!dtEl||!mdPane) return {};
     let scorePoll=null; let adminScoreCtrlsAdded=false;
+    const isAdmin = (()=>{ try { const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):''; return !!(adminId && currentId && String(adminId)===currentId); } catch(_) { return false; } })();
     const applyScore=(sh,sa)=>{ try { if(sh==null || sa==null) return; scoreEl.textContent=`${Number(sh)} : ${Number(sa)}`; } catch(_){} };
     const fetchScore=async()=>{ try { const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`); const d=await r.json(); if(typeof d?.score_home==='number' && typeof d?.score_away==='number') applyScore(d.score_home,d.score_away); } catch(_){} };
     const ensureAdminCtrls=()=>{ try { if(adminScoreCtrlsAdded) return; const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):''; const isAdmin=!!(adminId && currentId && String(adminId)===currentId); if(!isAdmin) return; if(mdPane.querySelector('.admin-score-ctrls')){ adminScoreCtrlsAdded=true; return; }
@@ -25,12 +26,35 @@
         aPlus.addEventListener('click',()=>{ const [h,a]=parseScore(); postScore(h,a+1); });
         adminScoreCtrlsAdded=true;
       } catch(_){} };
-    // Live status fetch
+    // Live status fetch (server) + admin fallback на локальный live
     fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`)
-      .then(r=>r.json()).then(async s=>{ if(s?.status==='live'){ const live=document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); dtEl.appendChild(live); if(scoreEl.textContent.trim()==='— : —') scoreEl.textContent='0 : 0';
-          try { const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):''; const isAdmin=!!(adminId && currentId && String(adminId)===currentId); if(isAdmin){ const r0=await fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`); const d0=await r0.json().catch(()=>({})); if(d0?.score_home==null && d0?.score_away==null){ const tg=window.Telegram?.WebApp||null; const fd0=new FormData(); fd0.append('initData', tg?.initData||''); fd0.append('home', match.home||''); fd0.append('away', match.away||''); await fetch('/api/match/status/set-live',{ method:'POST', body:fd0 }).catch(()=>{}); } } } catch(_){}
-          fetchScore(); scorePoll=setInterval(fetchScore,15000); ensureAdminCtrls(); }
-        }).catch(()=>{});
+      .then(r=>r.json())
+      .then(async s=>{
+        const localLive = (()=>{ try { return window.MatchUtils?.isLiveNow ? window.MatchUtils.isLiveNow(match) : false; } catch(_) { return false; } })();
+        const serverLive = (s?.status==='live');
+        const finished = (s?.status==='finished');
+        if (serverLive || (isAdmin && localLive && !finished)) {
+          // Вставим бейдж live в UI
+          try { const exists = dtEl.querySelector('.live-badge'); if(!exists){ const live=document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); dtEl.appendChild(live); } } catch(_){}
+          // Если счёта нет — показываем 0:0
+          try { if(scoreEl.textContent.trim()==='— : —') scoreEl.textContent='0 : 0'; } catch(_){}
+          // Админ: если сервер не live, но локально live — мягко выставим live (инициализируем счёт)
+          if (isAdmin && !serverLive && localLive) {
+            try {
+              const r0 = await fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`);
+              const d0 = await r0.json().catch(()=>({}));
+              if (d0?.score_home==null && d0?.score_away==null) {
+                const tg=window.Telegram?.WebApp||null; const fd0=new FormData();
+                fd0.append('initData', tg?.initData||''); fd0.append('home', match.home||''); fd0.append('away', match.away||'');
+                await fetch('/api/match/status/set-live',{ method:'POST', body:fd0 }).catch(()=>{});
+              }
+            } catch(_){}
+          }
+          // Запускаем опрос счёта и показываем контролы
+          fetchScore(); if(!scorePoll) scorePoll=setInterval(fetchScore,15000);
+          ensureAdminCtrls();
+        }
+      }).catch(()=>{});
     return { cleanup(){ try { if(scorePoll) clearInterval(scorePoll); } catch(_){} try { mdPane.querySelectorAll('.admin-score-ctrls').forEach(n=>n.remove()); } catch(_){} } };
   }
   window.MatchLiveScore = { setup };
