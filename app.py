@@ -2706,7 +2706,21 @@ def api_admin_matches_import():
         else:
             # возможные обновления: пока только дата (если смещение больше tolerance)
             tolerance = getattr(Config, 'MATCH_TIME_SHIFT_TOLERANCE_MIN', 15)
-            delta_min = abs(int((existing.match_date - c['match_date']).total_seconds() / 60)) if existing.match_date and c['match_date'] else 0
+            # Нормализуем в aware UTC, чтобы избежать TypeError (naive vs aware)
+            try:
+                ex_dt = existing.match_date
+                new_dt = c['match_date']
+                if ex_dt and ex_dt.tzinfo is None:
+                    ex_dt = ex_dt.replace(tzinfo=timezone.utc)
+                elif ex_dt:
+                    ex_dt = ex_dt.astimezone(timezone.utc)
+                if new_dt and new_dt.tzinfo is None:
+                    new_dt = new_dt.replace(tzinfo=timezone.utc)
+                elif new_dt:
+                    new_dt = new_dt.astimezone(timezone.utc)
+                delta_min = abs(int(((ex_dt or new_dt) and (ex_dt - new_dt)).total_seconds() / 60)) if ex_dt and new_dt else 0
+            except Exception:
+                delta_min = 0
             if delta_min > tolerance:
                 updates.append({
                     'id': existing.id,
@@ -2867,7 +2881,14 @@ def api_admin_matches_import():
             except Exception:
                 pass
             db.close()
-            resp = {'applied': True, 'summary': summary}
+            resp = {
+                'applied': True,
+                'summary': summary,
+                # фронтенд-совместимые числовые поля
+                'inserted': summary.get('insert', 0),
+                'updated': summary.get('update', 0),
+                'cancelled': summary.get('delete', 0)
+            }
             if backup_id:
                 resp['backup_id'] = backup_id
             return jsonify(resp)
@@ -2887,7 +2908,11 @@ def api_admin_matches_import():
         'insert': inserts,
         'update': updates,
         'delete': deletes,
-        'validation_errors': validation_errors
+        'validation_errors': validation_errors,
+        # фронтенд-совместимые алиасы
+        'inserted': inserts,
+        'updated': updates,
+        'deleted': deletes
     })
 
 def _resolve_match_by_id(match_id: str, tours=None):
