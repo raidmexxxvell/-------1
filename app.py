@@ -2395,20 +2395,16 @@ def api_admin_match_create():
         db.commit()
         # rebuild schedule snapshot
         try:
-            try:
-                _update_schedule_snapshot_from_matches(db, app.logger)
-            except Exception:
-                pass
+            _update_schedule_snapshot_from_matches(db, app.logger)
         except Exception:
             pass
         db.refresh(m)
-        # Инвалидация schedule snapshot / кэша
-        if cache_manager:
-            try: cache_manager.invalidate('schedule')
-            except Exception: pass
-        if websocket_manager:
-            try: websocket_manager.notify_data_change('schedule', {'changed': 'match_created', 'id': m.id})
-            except Exception: pass
+        # Централизованная инвалидация schedule через SmartInvalidator
+        try:
+            if invalidator:
+                invalidator.invalidate_for_change('schedule_update', {})
+        except Exception:
+            pass
         return jsonify({'match': {
             'id': m.id,
             'home_team_id': m.home_team_id,
@@ -2541,13 +2537,12 @@ def api_admin_match_update(match_id: int):
             m.notes = new_notes
         db.commit()
         db.refresh(m)
-        # Инвалидация schedule
-        if cache_manager:
-            try: cache_manager.invalidate('schedule')
-            except Exception: pass
-        if websocket_manager:
-            try: websocket_manager.notify_data_change('schedule', {'changed': 'match_updated', 'id': m.id})
-            except Exception: pass
+        # Централизованная инвалидация schedule через SmartInvalidator
+        try:
+            if invalidator:
+                invalidator.invalidate_for_change('schedule_update', {})
+        except Exception:
+            pass
         return jsonify({'match': {
             'id': m.id,
             'home_team_id': m.home_team_id,
@@ -2867,8 +2862,8 @@ def api_admin_matches_import():
             except Exception:
                 pass
             try:
-                if cache_manager: cache_manager.invalidate('schedule')
-                if websocket_manager: websocket_manager.notify_data_change('schedule', {'changed': 'bulk_apply'})
+                if invalidator:
+                    invalidator.invalidate_for_change('schedule_update', {})
             except Exception:
                 pass
             db.close()
@@ -5836,6 +5831,11 @@ def _build_results_payload_from_sheet():
 _BG_THREAD = None
 _LB_PRECOMP_THREAD = None
 
+# Forward declaration for static analyzers; real implementation is defined below
+def _sync_leaderboards():
+    """Forward stub; actual implementation defined later in file."""
+    return None
+
 def _should_start_bg() -> bool:
     # Avoid double-start under reloader; start in main runtime only in debug
     debug = os.environ.get('FLASK_DEBUG', '') in ('1','true','True')
@@ -5986,10 +5986,8 @@ def _sync_schedule():
         _metrics_set('last_sync', 'schedule', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'schedule', 'ok')
         _metrics_set('last_sync_duration_ms', 'schedule', int((time.time()-t0)*1000))
-        if cache_manager:
-            cache_manager.invalidate('schedule')
-        if websocket_manager:
-            websocket_manager.notify_data_change('schedule', schedule_payload)
+        if invalidator:
+            invalidator.invalidate_for_change('schedule_update', {})
     except Exception as e:
         app.logger.warning(f"Schedule sync failed: {e}")
         _metrics_set('last_sync_status', 'schedule', 'error')
@@ -6012,12 +6010,9 @@ def _sync_results():
         _metrics_set('last_sync', 'results', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'results', 'ok')
         _metrics_set('last_sync_duration_ms', 'results', int((time.time()-t0)*1000))
-        # Инвалидируем соответствующий кэш
-        if cache_manager:
-            cache_manager.invalidate('results')
-        # Отправляем WebSocket уведомление
-        if websocket_manager:
-            websocket_manager.notify_data_change('results', results_payload)
+        # Централизованная инвалидация results через SmartInvalidator
+        if invalidator:
+            invalidator.invalidate_for_change('results_update', {})
     except Exception as e:
         app.logger.warning(f"Results sync failed: {e}")
         _metrics_set('last_sync_status', 'results', 'error')
@@ -6038,61 +6033,74 @@ def _sync_betting_tours():
         _metrics_set('last_sync', 'betting-tours', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'betting-tours', 'ok')
         _metrics_set('last_sync_duration_ms', 'betting-tours', int((time.time()-t0)*1000))
-        # Инвалидируем соответствующий кэш
-        if cache_manager:
-            cache_manager.invalidate('betting_tours')
-        # Отправляем WebSocket уведомление и публикуем топик через invalidator
-        try:
-            if websocket_manager:
-                websocket_manager.notify_data_change('betting_tours', tours_payload)
-        except Exception:
-            pass
-        try:
-            inv = globals().get('invalidator')
-            if inv is not None and hasattr(inv, 'publish_topic'):
-                inv.publish_topic('betting_tours', 'betting_tours_update', {'updated_at': tours_payload.get('updated_at') if isinstance(tours_payload, dict) else None, 'summary': 'betting tours synced'})
-        except Exception:
-            pass
+        # Централизованная инвалидация betting_tours через SmartInvalidator
+        if invalidator:
+            invalidator.invalidate_for_change('betting_tours_update', {})
     except Exception as e:
         app.logger.warning(f"Betting tours sync failed: {e}")
         _metrics_set('last_sync_status', 'betting-tours', 'error')
+        _metrics_note_rate_limit(e)
+        try:
+            if invalidator:
+                invalidator.invalidate_for_change('schedule_update', {})
+                invalidator.invalidate_for_change('league_table_update', {})
+                invalidator.invalidate_for_change('results_update', {})
+                invalidator.invalidate_for_change('stats_table_update', {})
+        except Exception:
+            pass
+            
+    except Exception as e:
+        app.logger.warning(f"Leaderboards sync failed: {e}")
+        _metrics_set('last_sync_status', 'leaderboards', 'error')
         _metrics_note_rate_limit(e)
     finally:
         db.close()
 
 def _sync_leaderboards():
-    """Синхронизация лидербордов"""
+    """Синхронизация/перестройка лидербордов и инвалидация кэшей/ETag.
+    Использует DB-first сборку и записывает результаты в multilevel cache.
+    """
     if SessionLocal is None:
         return
     db = get_db()
     try:
         _metrics_inc('bg_runs_total', 1)
         t0 = time.time()
-        lb_payloads = _build_leaderboards_payloads(db)
-        _snapshot_set(db, Snapshot, 'leader-top-predictors', lb_payloads['top_predictors'], app.logger)
-        _snapshot_set(db, Snapshot, 'leader-top-rich', lb_payloads['top_rich'], app.logger)
-        _snapshot_set(db, Snapshot, 'leader-server-leaders', lb_payloads['server_leaders'], app.logger)
-        _snapshot_set(db, Snapshot, 'leader-prizes', lb_payloads['prizes'], app.logger)
-        
+        payloads = _build_leaderboards_payloads(db)
+        # Записываем в многоуровневый кэш
+        try:
+            cache_manager and cache_manager.set('leaderboards', payloads.get('top_predictors') or {'items': []}, 'top-predictors')
+            cache_manager and cache_manager.set('leaderboards', payloads.get('top_rich') or {'items': []}, 'top-rich')
+            cache_manager and cache_manager.set('leaderboards', payloads.get('server_leaders') or {'items': []}, 'server-leaders')
+            cache_manager and cache_manager.set('leaderboards', payloads.get('prizes') or {'data': {}}, 'prizes')
+        except Exception as e:
+            app.logger.warning(f"Leaderboards cache set failed: {e}")
         now_iso = datetime.now(timezone.utc).isoformat()
         _metrics_set('last_sync', 'leaderboards', now_iso)
         _metrics_set('last_sync_status', 'leaderboards', 'ok')
         _metrics_set('last_sync_duration_ms', 'leaderboards', int((time.time()-t0)*1000))
-        
-        # Инвалидируем соответствующий кэш
-        if cache_manager:
-            cache_manager.invalidate('leaderboards')
+        # Инвалидация ключей ETag по лидербордам (локально)
         try:
-            # Инвалидируем in-memory ETag helper cache для соответствующих ключей
             for k in ('leader-top-predictors','leader-top-rich','leader-server-leaders','leader-prizes'):
-                _ETAG_HELPER_CACHE.pop(k, None)
+                try:
+                    _ETAG_HELPER_CACHE.pop(k, None)
+                except Exception:
+                    pass
         except Exception:
             pass
-            
-        # Отправляем WebSocket уведомление
-        if websocket_manager:
-            websocket_manager.notify_data_change('leaderboards', lb_payloads)
-            
+        # Инвалидация кэша и нотификация через SmartInvalidator (topic-based)
+        try:
+            if cache_manager:
+                cache_manager.invalidate('leaderboards')
+        except Exception:
+            pass
+        try:
+            inv = globals().get('invalidator')
+            if inv is not None:
+                # широковещательная нотификация для клиентов
+                inv.publish_topic('leaderboards', 'data_changed', {'reason': 'refresh', 'updated_at': now_iso}, priority=1)
+        except Exception:
+            pass
     except Exception as e:
         app.logger.warning(f"Leaderboards sync failed: {e}")
         _metrics_set('last_sync_status', 'leaderboards', 'error')
@@ -13070,12 +13078,32 @@ def api_admin_full_reset():
         except Exception:
             pass
 
+        # Централизованная инвалидация через SmartInvalidator для основных сущностей после сброса
+        try:
+            invalidator = globals().get('invalidator')
+            if invalidator is not None:
+                try:
+                    # Сброс расписания, таблицы и туров прогнозов (задействует память, Redis, WS и pub/sub)
+                    invalidator.invalidate_for_change('schedule_update', {})
+                except Exception:
+                    pass
+                try:
+                    invalidator.invalidate_for_change('league_table_update', {})
+                except Exception:
+                    pass
+                try:
+                    invalidator.invalidate_for_change('betting_tours_update', {})
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         # После полного сброса: повторная очистка снапшотов ключей (защита от гонок фоновых задач)
         try:
             if SessionLocal is not None:
                 dbc: Session = get_db()
                 try:
-                    for k in ('schedule', 'results', 'league-table', 'stats-table', 'feature-match'):
+                    for k in ('schedule', 'results', 'league-table', 'stats-table', 'betting-tours', 'feature-match'):
                         try:
                             _snapshot_set(dbc, Snapshot, k, None, app.logger)
                         except Exception:
@@ -13103,9 +13131,15 @@ def api_admin_full_reset():
                         finally:
                             try: dbi.close()
                             except Exception: pass
+                    # Централизованная инвалидация после авто-импорта расписания
                     try:
-                        if cache_manager:
-                            cache_manager.invalidate('schedule')
+                        invalidator = globals().get('invalidator')
+                        if invalidator is not None:
+                            invalidator.invalidate_for_change('schedule_update', {})
+                        else:
+                            # Fallback на прямой сброс, если invalidator недоступен
+                            if cache_manager:
+                                cache_manager.invalidate('schedule')
                     except Exception:
                         pass
                 except Exception:
