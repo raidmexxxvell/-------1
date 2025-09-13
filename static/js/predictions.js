@@ -117,7 +117,9 @@
                 const rowEl = document.createElement('div'); rowEl.className = 'totals-row';
                 const lbl = document.createElement('div'); lbl.className = 'totals-line'; lbl.textContent = `Тотал ${row.line.toFixed(1)}`;
                 const btnOver = document.createElement('button'); btnOver.className='bet-btn'; btnOver.textContent = `Больше (${Number(row.odds.over).toFixed(2)})`;
+                btnOver.dataset.market = 'totals'; btnOver.dataset.side = 'over'; btnOver.dataset.line = String(row.line);
                 const btnUnder = document.createElement('button'); btnUnder.className='bet-btn'; btnUnder.textContent = `Меньше (${Number(row.odds.under).toFixed(2)})`;
+                btnUnder.dataset.market = 'totals'; btnUnder.dataset.side = 'under'; btnUnder.dataset.line = String(row.line);
                 btnOver.disabled = !!m.lock; btnUnder.disabled = !!m.lock;
                 btnOver.setAttribute('data-throttle','1200');
                 btnUnder.setAttribute('data-throttle','1200');
@@ -144,7 +146,9 @@
               const rowEl = document.createElement('div'); rowEl.className = 'totals-row';
               const lbl = document.createElement('div'); lbl.className = 'totals-line'; lbl.textContent = title;
               const yesBtn = document.createElement('button'); yesBtn.className='bet-btn'; yesBtn.textContent = `Да (${Number(odds.yes).toFixed(2)})`;
+              yesBtn.dataset.market = marketKey; yesBtn.dataset.side = 'yes';
               const noBtn = document.createElement('button'); noBtn.className='bet-btn'; noBtn.textContent = `Нет (${Number(odds.no).toFixed(2)})`;
+              noBtn.dataset.market = marketKey; noBtn.dataset.side = 'no';
               yesBtn.disabled = !!m.lock; noBtn.disabled = !!m.lock;
               yesBtn.setAttribute('data-throttle','1200');
               noBtn.setAttribute('data-throttle','1200');
@@ -241,13 +245,16 @@
             tours.forEach(t => (t.matches||[]).forEach(m => {
               const matchDate = (m.date || m.datetime || '').slice(0,10);
               const id = `${m.home}_${m.away}_${matchDate}`;
-              map.set(id, m.odds || {});
+              map.set(id, { odds: (m.odds||{}), markets: (m.markets||{}) });
             }));
             const cards = toursEl.querySelectorAll('.pred-tours-container .match-card[data-match-id]');
             cards.forEach(card => {
               const id = card.getAttribute('data-match-id');
-              const odds = map.get(id);
-              if (!odds) return;
+              const entry = map.get(id);
+              if (!entry) return;
+              const odds = entry.odds || {};
+              const markets = entry.markets || {};
+              // 1) П1/Х/П2
               const buttons = card.querySelectorAll('.bet-btn[data-bet-key]');
               buttons.forEach(btn => {
                 const key = btn.dataset.betKey;
@@ -261,6 +268,46 @@
                   }
                 }
               });
+              // 2) Тоталы
+              if (markets.totals && Array.isArray(markets.totals)) {
+                markets.totals.forEach(row => {
+                  try {
+                    const line = String(row.line);
+                    const over = Number(row.odds?.over);
+                    const under = Number(row.odds?.under);
+                    const overBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="over"][data-line="${line}"]`);
+                    const underBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="under"][data-line="${line}"]`);
+                    if (overBtn && !Number.isNaN(over)) {
+                      const txt = `Больше (${over.toFixed(2)})`;
+                      if (overBtn.textContent !== txt) { overBtn.textContent = txt; overBtn.classList.add('updated'); setTimeout(()=>overBtn.classList.remove('updated'), 500); }
+                    }
+                    if (underBtn && !Number.isNaN(under)) {
+                      const txt = `Меньше (${under.toFixed(2)})`;
+                      if (underBtn.textContent !== txt) { underBtn.textContent = txt; underBtn.classList.add('updated'); setTimeout(()=>underBtn.classList.remove('updated'), 500); }
+                    }
+                  } catch(_){}
+                });
+              }
+              // 3) Спецрынки
+              if (markets.specials) {
+                const sp = markets.specials;
+                const updYN = (mk) => {
+                  const o = sp[mk]?.odds || null;
+                  if (!o) return;
+                  const yesBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="yes"]`);
+                  const noBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="no"]`);
+                  if (yesBtn && o.yes != null) {
+                    const txt = `Да (${Number(o.yes).toFixed(2)})`;
+                    if (yesBtn.textContent !== txt) { yesBtn.textContent = txt; yesBtn.classList.add('updated'); setTimeout(()=>yesBtn.classList.remove('updated'), 500); }
+                  }
+                  if (noBtn && o.no != null) {
+                    const txt = `Нет (${Number(o.no).toFixed(2)})`;
+                    if (noBtn.textContent !== txt) { noBtn.textContent = txt; noBtn.classList.add('updated'); setTimeout(()=>noBtn.classList.remove('updated'), 500); }
+                  }
+                };
+                updYN('penalty');
+                updYN('redcard');
+              }
             });
           } catch(_) {}
         };
@@ -496,9 +543,12 @@
       }
       if (!card) return;
 
-      const odds = detail.odds || detail; // числовые кэфы
-      const buttons = card.querySelectorAll('.bet-btn[data-bet-key]');
-      buttons.forEach(btn => {
+      const fields = detail.odds ? detail : { odds: { ...detail } };
+      const odds = fields.odds || {};
+      const markets = fields.markets || {};
+      // 1) Основной рынок 1x2
+      const buttons12 = card.querySelectorAll('.bet-btn[data-bet-key]');
+      buttons12.forEach(btn => {
         const key = btn.dataset.betKey;
         const label = { home: 'П1', draw: 'Х', away: 'П2' }[key];
         if (label && odds[key] != null) {
@@ -510,6 +560,46 @@
           }
         }
       });
+      // 2) Тоталы
+      if (markets.totals && Array.isArray(markets.totals)) {
+        markets.totals.forEach(row => {
+          try {
+            const line = String(row.line);
+            const over = Number(row.odds?.over);
+            const under = Number(row.odds?.under);
+            const overBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="over"][data-line="${line}"]`);
+            const underBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="under"][data-line="${line}"]`);
+            if (overBtn && !Number.isNaN(over)) {
+              const txt = `Больше (${over.toFixed(2)})`;
+              if (overBtn.textContent !== txt) { overBtn.textContent = txt; overBtn.classList.add('updated'); setTimeout(()=>overBtn.classList.remove('updated'), 500); }
+            }
+            if (underBtn && !Number.isNaN(under)) {
+              const txt = `Меньше (${under.toFixed(2)})`;
+              if (underBtn.textContent !== txt) { underBtn.textContent = txt; underBtn.classList.add('updated'); setTimeout(()=>underBtn.classList.remove('updated'), 500); }
+            }
+          } catch(_){}
+        });
+      }
+      // 3) Спецрынки
+      if (markets.specials) {
+        const sp = markets.specials;
+        const updYN = (mk, titleRu) => {
+          const odds = sp[mk]?.odds || null;
+          if (!odds) return;
+          const yesBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="yes"]`);
+          const noBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="no"]`);
+          if (yesBtn && odds.yes != null) {
+            const txt = `Да (${Number(odds.yes).toFixed(2)})`;
+            if (yesBtn.textContent !== txt) { yesBtn.textContent = txt; yesBtn.classList.add('updated'); setTimeout(()=>yesBtn.classList.remove('updated'), 500); }
+          }
+          if (noBtn && odds.no != null) {
+            const txt = `Нет (${Number(odds.no).toFixed(2)})`;
+            if (noBtn.textContent !== txt) { noBtn.textContent = txt; noBtn.classList.add('updated'); setTimeout(()=>noBtn.classList.remove('updated'), 500); }
+          }
+        };
+        updYN('penalty', 'Пенальти');
+        updYN('redcard', 'Красная карточка');
+      }
       // Синхронизируем локальный кэш betting:tours
       try {
         const CACHE_KEY = 'betting:tours';
@@ -519,7 +609,9 @@
           cached.data.tours.forEach(t => (t.matches||[]).forEach(m => {
             const md = (m.date || m.datetime || '').slice(0,10);
             if (m.home === homeTeam && m.away === awayTeam && md === d) {
-              m.odds = { ...(m.odds||{}), ...odds };
+              // Сохраняем 1x2, totals и specials
+              if (odds && Object.keys(odds).length) { m.odds = { ...(m.odds||{}), ...odds }; }
+              if (markets && Object.keys(markets).length) { m.markets = { ...(m.markets||{}), ...markets }; }
               if (detail.odds_version != null) { cached.version = String(detail.odds_version); }
             }
           }));

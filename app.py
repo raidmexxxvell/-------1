@@ -1269,18 +1269,19 @@ def api_betting_place():
         try:
             ws_manager = current_app.config.get('websocket_manager')
             if ws_manager:
-                # Пересчитываем коэффициенты после ставки
+                # Пересчитываем коэффициенты/рынки после ставки (полный снэпшот)
                 date_key = bet.match_datetime.date().isoformat() if bet.match_datetime else None
-                recalculated_odds = _compute_match_odds(home, away, date_key)
+                odds_fields = _build_odds_fields(home, away) or {}
                 # Текущая версия коэффициентов; при ставке можем не повышать версию, но отправим её в payload
                 try:
                     cur_ver = _get_odds_version(home, away)
                 except Exception:
                     cur_ver = 0
+                odds_fields['odds_version'] = cur_ver
                 payload = {
                     'entity': 'odds',
                     'id': { 'home': home, 'away': away, 'date': (date_key or '') },
-                    'fields': { **recalculated_odds, 'odds_version': cur_ver }
+                    'fields': odds_fields
                 }
 
                 # Отправляем в комнату конкретного матча и в общую комнату прогнозов
@@ -8674,11 +8675,13 @@ def api_vote_match():
                     if ws_manager:
                         # bump версии коэффициентов (голос влияет на odds)
                         new_ver = _bump_odds_version(home, away)
-                        recalculated_odds = _compute_match_odds(home, away, date_key)
+                        # Полный снэпшот рынков (1x2, totals, specials)
+                        odds_fields = _build_odds_fields(home, away) or {}
+                        odds_fields['odds_version'] = new_ver
                         payload = {
                             'entity': 'odds',
                             'id': { 'home': home, 'away': away, 'date': (date_key or '') },
-                            'fields': { **recalculated_odds, 'odds_version': new_ver }
+                            'fields': odds_fields
                         }
                         match_id_str = f"{home}_{away}_{date_key or ''}"
                         ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=3500)
