@@ -5767,8 +5767,9 @@ def _build_match_meta(home: str, away: str) -> dict:
         
         db = get_db()
         try:
-            from services.snapshots import get_snapshot
-            snap = get_snapshot(db, 'schedule')
+            # Используем уже инициализированный сервисный алиас со строгой сигнатурой
+            # snapshot_get(db, SnapshotModel, key, logger)
+            snap = _snapshot_get(db, Snapshot, 'schedule', app.logger)
             if not snap or not snap.get('payload'):
                 return {'tour': None, 'date': '', 'time': '', 'datetime': ''}
             
@@ -6800,9 +6801,8 @@ def api_admin_fix_results_tours():
     
     db = get_db()
     try:
-        # Получаем текущий снапшот результатов
-        from services.snapshots import get_snapshot, set_snapshot
-        snap = get_snapshot(db, 'results')
+        # Получаем текущий снапшот результатов (через сервисный алиас)
+        snap = _snapshot_get(db, Snapshot, 'results', app.logger)
         if not snap:
             return jsonify({'error': 'Results snapshot not found'}), 404
         
@@ -6832,12 +6832,12 @@ def api_admin_fix_results_tours():
         if fixed_count > 0:
             # Сохраняем обновлённый снапшот
             payload['updated_at'] = datetime.now(timezone.utc).isoformat()
-            set_snapshot(db, 'results', payload)
+            _snapshot_set(db, Snapshot, 'results', payload, app.logger)
             
             # Принудительно обновляем также снапшот расписания для синхронизации
             try:
                 schedule_payload = _build_schedule_payload_from_sheet()
-                set_snapshot(db, 'schedule', schedule_payload)
+                _snapshot_set(db, Snapshot, 'schedule', schedule_payload, app.logger)
             except Exception as e:
                 app.logger.warning(f"Failed to update schedule snapshot: {e}")
             

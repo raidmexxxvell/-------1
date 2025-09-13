@@ -277,7 +277,7 @@ def finalize_match_core(
                 'updated_at': datetime.now(timezone.utc).isoformat(),
             }
             try:
-                snapshot_set(db, 'stats-table', stats_payload)
+                snapshot_set(db, SnapshotModel, 'stats-table', stats_payload, logger)
             except Exception:
                 pass
             try:
@@ -349,7 +349,10 @@ def finalize_match_core(
 
                 # Агрегация по строкам lineup_rows / event_rows (они используют player как строковое поле)
                 from collections import defaultdict as _dd
-                per_team_player = _dd(lambda: _dd(int))  # team_name -> player_name -> counters
+                # team_name -> player_name -> stat_key -> int
+                def _zero_dict():
+                    return {'matches_played': 0, 'goals': 0, 'assists': 0, 'yellow_cards': 0, 'red_cards': 0}
+                per_team_player = _dd(lambda: _dd(_zero_dict))
                 # matches_played: учитываем уникальный игрок в составе
                 seen_match_presence = set()
                 for lr in lineup_rows:
@@ -359,7 +362,7 @@ def finalize_match_core(
                     team_name = home if (lr.team or 'home') == 'home' else away
                     key = (team_name, pname)
                     if key not in seen_match_presence:
-                        per_team_player[team_name][pname]['matches_played'] += 1
+                        per_team_player[team_name][pname]['matches_played'] = per_team_player[team_name][pname].get('matches_played', 0) + 1
                         seen_match_presence.add(key)
                 for ev in event_rows:
                     pname = (ev.player or '').strip()
@@ -367,13 +370,13 @@ def finalize_match_core(
                         continue
                     team_name = home if (ev.team or 'home') == 'home' else away
                     if ev.type == 'goal':
-                        per_team_player[team_name][pname]['goals'] += 1
+                        per_team_player[team_name][pname]['goals'] = per_team_player[team_name][pname].get('goals', 0) + 1
                     elif ev.type == 'assist':
-                        per_team_player[team_name][pname]['assists'] += 1
+                        per_team_player[team_name][pname]['assists'] = per_team_player[team_name][pname].get('assists', 0) + 1
                     elif ev.type == 'yellow':
-                        per_team_player[team_name][pname]['yellow_cards'] += 1
+                        per_team_player[team_name][pname]['yellow_cards'] = per_team_player[team_name][pname].get('yellow_cards', 0) + 1
                     elif ev.type == 'red':
-                        per_team_player[team_name][pname]['red_cards'] += 1
+                        per_team_player[team_name][pname]['red_cards'] = per_team_player[team_name][pname].get('red_cards', 0) + 1
 
                 # Обновление по двум командам
                 for team_name, players_map in per_team_player.items():
@@ -417,11 +420,11 @@ def finalize_match_core(
                             'pid': player_id,
                             'fn': first_name,
                             'ln': last_name,
-                            'mp': stats_map.get('matches_played', 0),
-                            'g': stats_map.get('goals', 0),
-                            'a': stats_map.get('assists', 0),
-                            'yc': stats_map.get('yellow_cards', 0),
-                            'rc': stats_map.get('red_cards', 0),
+                            'mp': (stats_map or {}).get('matches_played', 0),
+                            'g': (stats_map or {}).get('goals', 0),
+                            'a': (stats_map or {}).get('assists', 0),
+                            'yc': (stats_map or {}).get('yellow_cards', 0),
+                            'rc': (stats_map or {}).get('red_cards', 0),
                         })
                 # Фиксируем применение, чтобы избежать повторного инкремента
                 db.execute(_sql_text(
@@ -453,14 +456,14 @@ def finalize_match_core(
     # 6. Schedule snapshot
     try:
         schedule_payload = build_schedule_payload()
-        snapshot_set(db, 'schedule', schedule_payload)
+        snapshot_set(db, SnapshotModel, 'schedule', schedule_payload, logger)
     except Exception:
         pass
 
     # 7. League table snapshot
     try:
         league_payload = build_league_payload()
-        snapshot_set(db, 'league-table', league_payload)
+        snapshot_set(db, SnapshotModel, 'league-table', league_payload, logger)
         try:
             if cache_manager:
                 cache_manager.invalidate('league_table')

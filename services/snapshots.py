@@ -44,3 +44,7 @@ def snapshot_set(db, SnapshotModel, key: str, payload: dict, logger):
                 except Exception: pass
             time.sleep(0.1*attempts)
     return False
+
+# Backward-compatible aliases (old import style)
+get_snapshot = snapshot_get
+set_snapshot = snapshot_set
