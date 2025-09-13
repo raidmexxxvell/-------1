@@ -54,6 +54,62 @@
       const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
       const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
 
+      // --- DRY helpers ---
+      function setTextAnimated(btn, newText) {
+        if (!btn || btn.textContent === newText) return;
+        btn.textContent = newText;
+        btn.classList.add('updated');
+        setTimeout(() => btn.classList.remove('updated'), 500);
+      }
+
+      function updateCardOddsUI(card, odds, markets) {
+        // 1) Основной рынок 1x2
+        const buttons12 = card.querySelectorAll('.bet-btn[data-bet-key]');
+        buttons12.forEach(btn => {
+          const key = btn.dataset.betKey;
+          const label = { home: 'П1', draw: 'Х', away: 'П2' }[key];
+          if (label && odds && odds[key] != null) {
+            setTextAnimated(btn, `${label} (${Number(odds[key]).toFixed(2)})`);
+          }
+        });
+        // 2) Тоталы
+        if (markets && Array.isArray(markets.totals)) {
+          markets.totals.forEach(row => {
+            try {
+              const line = String(row.line);
+              const over = Number(row.odds?.over);
+              const under = Number(row.odds?.under);
+              const overBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="over"][data-line="${line}"]`);
+              const underBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="under"][data-line="${line}"]`);
+              if (overBtn && !Number.isNaN(over)) {
+                setTextAnimated(overBtn, `Больше (${over.toFixed(2)})`);
+              }
+              if (underBtn && !Number.isNaN(under)) {
+                setTextAnimated(underBtn, `Меньше (${under.toFixed(2)})`);
+              }
+            } catch(_){}
+          });
+        }
+        // 3) Спецрынки
+        if (markets && markets.specials) {
+          const sp = markets.specials;
+          const updYN = (mk) => {
+            const o = sp[mk]?.odds || null;
+            if (!o) return;
+            const yesBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="yes"]`);
+            const noBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="no"]`);
+            if (yesBtn && o.yes != null) {
+              setTextAnimated(yesBtn, `Да (${Number(o.yes).toFixed(2)})`);
+            }
+            if (noBtn && o.no != null) {
+              setTextAnimated(noBtn, `Нет (${Number(o.no).toFixed(2)})`);
+            }
+          };
+          updYN('penalty');
+          updYN('redcard');
+        }
+      }
+
       const renderTours = (data) => {
         const ds = data?.tours ? data : (data?.data || {});
         const tours = ds.tours || [];
@@ -342,7 +398,7 @@
   // Экспортируем для вызова извне при входе во вкладку
   try { window.loadBetTours = () => { try { loadTours(); } catch(_) {} }; } catch(_) {}
 
-    function mkTeam(name) {
+  function mkTeam(name) {
   const d = document.createElement('div'); d.className = 'team';
       const img = document.createElement('img'); img.className = 'logo'; img.alt = name || '';
   (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(img, name||'');
@@ -546,60 +602,7 @@
       const fields = detail.odds ? detail : { odds: { ...detail } };
       const odds = fields.odds || {};
       const markets = fields.markets || {};
-      // 1) Основной рынок 1x2
-      const buttons12 = card.querySelectorAll('.bet-btn[data-bet-key]');
-      buttons12.forEach(btn => {
-        const key = btn.dataset.betKey;
-        const label = { home: 'П1', draw: 'Х', away: 'П2' }[key];
-        if (label && odds[key] != null) {
-          const newText = `${label} (${Number(odds[key]).toFixed(2)})`;
-          if (btn.textContent !== newText) {
-            btn.textContent = newText;
-            btn.classList.add('updated');
-            setTimeout(() => btn.classList.remove('updated'), 500);
-          }
-        }
-      });
-      // 2) Тоталы
-      if (markets.totals && Array.isArray(markets.totals)) {
-        markets.totals.forEach(row => {
-          try {
-            const line = String(row.line);
-            const over = Number(row.odds?.over);
-            const under = Number(row.odds?.under);
-            const overBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="over"][data-line="${line}"]`);
-            const underBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="under"][data-line="${line}"]`);
-            if (overBtn && !Number.isNaN(over)) {
-              const txt = `Больше (${over.toFixed(2)})`;
-              if (overBtn.textContent !== txt) { overBtn.textContent = txt; overBtn.classList.add('updated'); setTimeout(()=>overBtn.classList.remove('updated'), 500); }
-            }
-            if (underBtn && !Number.isNaN(under)) {
-              const txt = `Меньше (${under.toFixed(2)})`;
-              if (underBtn.textContent !== txt) { underBtn.textContent = txt; underBtn.classList.add('updated'); setTimeout(()=>underBtn.classList.remove('updated'), 500); }
-            }
-          } catch(_){}
-        });
-      }
-      // 3) Спецрынки
-      if (markets.specials) {
-        const sp = markets.specials;
-        const updYN = (mk, titleRu) => {
-          const odds = sp[mk]?.odds || null;
-          if (!odds) return;
-          const yesBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="yes"]`);
-          const noBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="no"]`);
-          if (yesBtn && odds.yes != null) {
-            const txt = `Да (${Number(odds.yes).toFixed(2)})`;
-            if (yesBtn.textContent !== txt) { yesBtn.textContent = txt; yesBtn.classList.add('updated'); setTimeout(()=>yesBtn.classList.remove('updated'), 500); }
-          }
-          if (noBtn && odds.no != null) {
-            const txt = `Нет (${Number(odds.no).toFixed(2)})`;
-            if (noBtn.textContent !== txt) { noBtn.textContent = txt; noBtn.classList.add('updated'); setTimeout(()=>noBtn.classList.remove('updated'), 500); }
-          }
-        };
-        updYN('penalty', 'Пенальти');
-        updYN('redcard', 'Красная карточка');
-      }
+      updateCardOddsUI(card, odds, markets);
       // Синхронизируем локальный кэш betting:tours
       try {
         const CACHE_KEY = 'betting:tours';
@@ -620,6 +623,7 @@
       } catch(_) {}
     });
     // --- КОНЕЦ НОВОГО КОДА ---
+
 
   });
 })();
