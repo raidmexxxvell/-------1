@@ -28,8 +28,9 @@
   // Унифицированный ключ матча: home__away__YYYY-MM-DD
   function matchKey(obj) {
     try {
-      const h = (obj?.home||'').toLowerCase().replace(/ё/g,'е').trim();
-      const a = (obj?.away||'').toLowerCase().replace(/ё/g,'е').trim();
+      const norm = (s)=> (s||'').toLowerCase().replace(/ё/g,'е').replace(/[^a-z0-9а-я]+/gi,'').trim();
+      const h = norm(obj?.home);
+      const a = norm(obj?.away);
       const d = normalizeDateStr(obj?.date || obj?.datetime || '');
       return `${h}__${a}__${d}`;
     } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; }
@@ -253,7 +254,9 @@
       const timeStr = m.time || '';
   let isLive = false;
   try { if (window.MatchUtils) { isLive = window.MatchUtils.isLiveNow(m); } } catch(_) {}
-      const headerText = document.createElement('span'); headerText.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`; header.appendChild(headerText);
+  const headerText = document.createElement('span'); headerText.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`; header.appendChild(headerText);
+  try { card.setAttribute('data-date', normalizeDateStr(m.date || m.datetime) || ''); } catch(_) {}
+  try { if (m.time) card.setAttribute('data-time', String(m.time)); } catch(_) {}
   const finStore=(window.__FINISHED_MATCHES=window.__FINISHED_MATCHES||{});
   const mkKey = (mm) => matchKey(mm);
   if (isLive && !finStore[mkKey(m)]) { const live = document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); header.appendChild(live); }
@@ -632,10 +635,21 @@
       const fresh = cached && Number.isFinite(cached.ts) && (Date.now() - cached.ts < TOURS_FRESH_TTL) && (Array.isArray(cached?.data?.tours) ? cached.data.tours.length>0 : Array.isArray(cached?.tours) && cached.tours.length>0);
       if (fresh) return Promise.resolve(cached);
       if (__toursFetchPromise) return __toursFetchPromise;
-      __toursFetchPromise = fetch('/api/betting/tours', { headers: { 'Cache-Control': 'no-cache' } })
-        .then(r => r.json().then(data => ({ data, version: r.headers.get('ETag') || null })))
-        .then(store => { writeToursCache({ data: store.data, version: store.version, ts: Date.now() }); return store; })
-        .catch(() => null)
+      const headers = { 'Cache-Control': 'no-cache' };
+      if (cached?.version) headers['If-None-Match'] = cached.version;
+      __toursFetchPromise = fetch('/api/betting/tours', { headers })
+        .then(async r => {
+          if (r.status === 304 && cached) {
+            // Не изменилось — просто продлим TTL и вернём кэш
+            writeToursCache({ data: cached.data, version: cached.version, ts: Date.now() });
+            return { data: cached.data, version: cached.version };
+          }
+          const data = await r.json();
+          const version = r.headers.get('ETag') || null;
+          writeToursCache({ data, version, ts: Date.now() });
+          return { data, version };
+        })
+        .catch(() => { return cached || null; })
         .finally(() => { setTimeout(() => { __toursFetchPromise = null; }, 1000); });
       return __toursFetchPromise;
     } catch(_) { return Promise.resolve(null); }
@@ -661,17 +675,20 @@
     pane.querySelectorAll('.match-card').forEach(card => {
       try {
         if (card.querySelector('.vote-inline')) return; // уже есть
-        const home = card.querySelector('.team.home .team-name')?.textContent?.trim() || '';
-        const away = card.querySelector('.team.away .team-name')?.textContent?.trim() || '';
-        // ищем дату в заголовке (может быть в формате DD.MM.YYYY HH:MM)
-        const headerSpan = card.querySelector('.match-header span') || card.querySelector('.match-header');
-        let dateKey = '';
-        try {
-          const txt = (headerSpan?.textContent||'').trim();
-            // Ищем паттерн dd.mm.yyyy
-          const m = txt.match(/(\d{2}\.\d{2}\.\d{4})/);
-          if (m) { const parts = m[1].split('.'); dateKey = `${parts[2]}-${parts[1]}-${parts[0]}`; }
-        } catch(_) {}
+        const nameHomeEl = card.querySelector('.team.home .team-name');
+        const nameAwayEl = card.querySelector('.team.away .team-name');
+        const home = (nameHomeEl?.getAttribute('data-team-name') || nameHomeEl?.textContent || '').trim();
+        const away = (nameAwayEl?.getAttribute('data-team-name') || nameAwayEl?.textContent || '').trim();
+        // Сначала пробуем data-атрибуты, затем парсим заголовок
+        let dateKey = card.getAttribute('data-date') || '';
+        if (!dateKey) {
+          const headerSpan = card.querySelector('.match-header span') || card.querySelector('.match-header');
+          try {
+            const txt = (headerSpan?.textContent||'').trim();
+            const m = txt.match(/(\d{2}\.\d{2}\.\d{4})/);
+            if (m) { const parts = m[1].split('.'); dateKey = `${parts[2]}-${parts[1]}-${parts[0]}`; }
+          } catch(_) {}
+        }
         if (!dateKey) return;
         const key = matchKey({ home, away, date: dateKey });
         if (!tourMatches.has(key)) return;
