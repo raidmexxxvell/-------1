@@ -186,12 +186,26 @@
   }
 
   function renderSchedule(pane, data) {
+
     if (!pane) return;
     const ds = data?.tours ? data : (data?.data || {});
-  let tours = ds?.tours || [];
-  // Убираем туры без матчей (чтобы не показывать пустые заголовки после переноса в Результаты)
-  tours = (Array.isArray(tours) ? tours.filter(t => Array.isArray(t.matches) && t.matches.length > 0) : []);
-  if (!tours.length) { pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>'; return; }
+    let tours = ds?.tours || [];
+    // Синхронизируем расписание и betting:tours для актуального голосования (динамический импорт)
+    (async () => {
+      try {
+        const bettingTours = JSON.parse(localStorage.getItem('betting:tours') || 'null');
+        if (bettingTours) {
+          const helpers = await import('./helpers.js');
+          if (helpers && typeof helpers.syncScheduleAndBettingTours === 'function') {
+            helpers.syncScheduleAndBettingTours(ds, bettingTours);
+            localStorage.setItem('betting:tours', JSON.stringify(bettingTours));
+          }
+        }
+      } catch(_) {}
+    })();
+    // Убираем туры без матчей (чтобы не показывать пустые заголовки после переноса в Результаты)
+    tours = (Array.isArray(tours) ? tours.filter(t => Array.isArray(t.matches) && t.matches.length > 0) : []);
+    if (!tours.length) { pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>'; return; }
     pane.innerHTML = '';
     const nodes = [];
 
@@ -680,3 +694,45 @@
   }
   if (!window.__VOTE_POLLING_STARTED__) { window.__VOTE_POLLING_STARTED__ = true; startVotePolling(); }
 })();
+
+// ========== WebSocket handler (subscribe to betting_tours updates) ==========
+try {
+  if (window.io && typeof window.io === 'function') {
+    const socket = window.io();
+    let socketConnected = false;
+    let pollToursTimer = null;
+
+    function startToursPolling() {
+      try {
+        if (pollToursTimer) return;
+        pollToursTimer = setInterval(() => {
+          try { ensureBettingToursFresh(); } catch(_) {}
+        }, 4000);
+      } catch(_) {}
+    }
+    function stopToursPolling() {
+      try {
+        if (pollToursTimer) { clearInterval(pollToursTimer); pollToursTimer = null; }
+      } catch(_) {}
+    }
+
+    // If socket fails to connect within a short timeout, start polling as fallback
+    const wsFallbackTimeout = setTimeout(() => {
+      if (!socketConnected) startToursPolling();
+    }, 1500);
+
+    socket.on('connect', () => {
+      try { socketConnected = true; clearTimeout(wsFallbackTimeout); stopToursPolling(); console.info('WS connected for live updates'); } catch(_) {}
+    });
+    socket.on('disconnect', () => { try { socketConnected = false; startToursPolling(); } catch(_) {} });
+    socket.on('data_changed', msg => {
+      try {
+        if (!msg || msg.data_type !== 'betting_tours') return;
+        // Сбрасываем локальный кэш и обновляем туры/расписание
+        try { localStorage.removeItem('betting:tours'); } catch(_) {}
+        try { window.League && window.League.refreshSchedule && window.League.refreshSchedule(); } catch(_) {}
+        try { ensureBettingToursFresh(); } catch(_) {}
+      } catch(_) {}
+    });
+  }
+} catch(_) {}

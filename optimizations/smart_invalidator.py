@@ -30,6 +30,11 @@ class SmartCacheInvalidator:
 
         # Правила инвалидации для разных типов изменений
         self.invalidation_rules = {
+            'betting_tours_update': InvalidationRule(
+                trigger_type='betting_tours_update',
+                affected_caches=['betting_tours'],
+                broadcast_update=True
+            ),
             'match_score_update': InvalidationRule(
                 trigger_type='match_score_update',
                 affected_caches=['match_details', 'betting_odds', 'results', 'league_table'],
@@ -56,6 +61,11 @@ class SmartCacheInvalidator:
                 trigger_type='vote_aggregates_update',
                 affected_caches=['match_details', 'betting_odds', 'match_votes'],
                 identifier_pattern='{home}_{away}',
+                broadcast_update=True
+            ),
+            'betting_tours_update': InvalidationRule(
+                trigger_type='betting_tours_update',
+                affected_caches=['betting_tours'],
                 broadcast_update=True
             ),
             'user_credits_change': InvalidationRule(

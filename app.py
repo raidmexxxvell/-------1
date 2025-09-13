@@ -5846,9 +5846,18 @@ def _sync_betting_tours():
         # Инвалидируем соответствующий кэш
         if cache_manager:
             cache_manager.invalidate('betting_tours')
-        # Отправляем WebSocket уведомление
-        if websocket_manager:
-            websocket_manager.notify_data_change('betting_tours', tours_payload)
+        # Отправляем WebSocket уведомление и публикуем топик через invalidator
+        try:
+            if websocket_manager:
+                websocket_manager.notify_data_change('betting_tours', tours_payload)
+        except Exception:
+            pass
+        try:
+            inv = globals().get('invalidator')
+            if inv is not None and hasattr(inv, 'publish_topic'):
+                inv.publish_topic('betting_tours', 'betting_tours_update', {'updated_at': tours_payload.get('updated_at') if isinstance(tours_payload, dict) else None, 'summary': 'betting tours synced'})
+        except Exception:
+            pass
     except Exception as e:
         app.logger.warning(f"Betting tours sync failed: {e}")
         _metrics_set('last_sync_status', 'betting-tours', 'error')
@@ -10772,6 +10781,13 @@ def api_betting_tours_refresh():
             return jsonify({'error': 'forbidden'}), 403
         try:
             _sync_betting_tours()
+            # После принудительной синхронизации — опубликуем топик через invalidator
+            try:
+                inv = globals().get('invalidator')
+                if inv is not None and hasattr(inv, 'publish_topic'):
+                    inv.publish_topic('betting_tours', 'betting_tours_update', {'updated_at': datetime.now(timezone.utc).isoformat()})
+            except Exception:
+                pass
         except Exception as _e:
             app.logger.warning(f"betting-tours forced sync failed: {_e}")
         updated_at = None
