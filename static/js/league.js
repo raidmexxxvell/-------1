@@ -6,7 +6,8 @@
   const raf = (cb) => (window.requestAnimationFrame || window.setTimeout)(cb, 0);
   const rIC = window.requestIdleCallback || function (cb) { return setTimeout(() => cb({ timeRemaining: () => 0 }), 0); };
 
-  // Нормализация даты к формату YYYY-MM-DD
+  // Нормализация даты к формату YYYY-MM-DD без преобразования часового пояса
+  // Важно: не используем new Date(...), чтобы избежать смещения дня при разных TZ
   function normalizeDateStr(raw) {
     try {
       if (!raw) return '';
@@ -14,15 +15,27 @@
       // dd.mm.yyyy -> yyyy-mm-dd
       const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
       if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-      // отрезаем время, если есть
-      if (s.length > 10) s = s.slice(0, 10);
-      // если это уже yyyy-mm-dd
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-      // иначе пробуем распарсить
-      const d = new Date(raw);
-      if (!isNaN(d.getTime())) return d.toISOString().slice(0,10);
-      return s;
+      // Если ISO-подобное — берём первые 10 символов (yyyy-mm-dd)
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      // Если внутри есть 'T' (datetime), тоже берём yyyy-mm-dd до 'T'
+      const tIdx = s.indexOf('T');
+      if (tIdx > 0 && /^\d{4}-\d{2}-\d{2}$/.test(s.slice(0,10))) return s.slice(0,10);
+      // Фолбэк: попытка выделить yyyy-mm-dd из произвольной строки
+      const m2 = s.match(/(\d{4}-\d{2}-\d{2})/);
+      if (m2) return m2[1];
+      // Иначе вернём обрезанную под YYYY-MM-DD строку — лучше, чем уходить в TZ-конвертацию
+      return s.slice(0, 10);
     } catch(_) { return String(raw||'').slice(0,10); }
+  }
+
+  // Форматирование yyyy-mm-dd -> dd.mm.yyyy (стабильно, без TZ)
+  function formatDateRu(isoDate) {
+    try {
+      const s = String(isoDate||'').slice(0,10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const [y,m,d] = s.split('-');
+      return `${d}.${m}.${y}`;
+    } catch(_) { return String(isoDate||''); }
   }
 
   // Унифицированный ключ матча: home__away__YYYY-MM-DD
@@ -256,7 +269,7 @@
       const card = document.createElement('div');
       card.className = 'match-card';
       const header = document.createElement('div'); header.className = 'match-header';
-  const dateStr = (() => { try { const ds = normalizeDateStr(m.date || m.datetime); if (ds) { const d = new Date(ds); return isNaN(d.getTime()) ? '' : d.toLocaleDateString(); } } catch(_) {} return ''; })();
+  const dateStr = (() => { try { const ds = normalizeDateStr(m.date || m.datetime); return ds ? formatDateRu(ds) : ''; } catch(_) { return ''; } })();
       const timeStr = m.time || '';
   let isLive = false;
   try { if (window.MatchUtils) { isLive = window.MatchUtils.isLiveNow(m); } } catch(_) {}
@@ -563,7 +576,7 @@
       matches.forEach(m => {
         const card = document.createElement('div'); card.className='match-card result';
         const header = document.createElement('div'); header.className='match-header';
-        const dateStr = (() => { try { if (m.date) { const d = new Date(m.date); return d.toLocaleDateString(); } } catch(_) {} return ''; })();
+  const dateStr = (() => { try { const ds = normalizeDateStr(m.date || m.datetime); return ds ? formatDateRu(ds) : ''; } catch(_) { return ''; } })();
         header.textContent = `${dateStr}${m.time ? ' ' + m.time : ''}`; card.appendChild(header);
         const center = document.createElement('div'); center.className='match-center';
         const home = document.createElement('div'); home.className='team home';

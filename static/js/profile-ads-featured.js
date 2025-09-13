@@ -133,7 +133,15 @@
       const card = document.createElement('div'); card.className='match-card home-feature';
       const head = document.createElement('div'); head.className='match-header'; head.textContent='Игра недели'; card.appendChild(head);
       const sub = document.createElement('div'); sub.className='match-subheader';
-      const dtText = (()=>{ try { if(m.datetime){ const dt=new Date(m.datetime); return dt.toLocaleString(undefined,{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});} if(m.date){ return m.time?`${m.date} ${m.time}`:String(m.date);} } catch(_){} return ''; })();
+      const dtText = (()=>{ try {
+        // Единообразный вывод: дата как dd.mm.yyyy (по МСК), время как есть
+        const norm = (raw)=>{ try { const s=String(raw||'').trim(); const m=s.match(/^(\d{2})\.(\d{2})\.(\d{4})/); if(m) return `${m[3]}-${m[2]}-${m[1]}`; if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10); const t=s.indexOf('T'); if(t>0) return s.slice(0,10); const m2=s.match(/(\d{4}-\d{2}-\d{2})/); return m2?m2[1]:s.slice(0,10);} catch(_) { return String(raw||'').slice(0,10); } };
+        const fmt = (iso)=>{ try { const s=String(iso||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; const [y,m,d]=s.split('-'); return `${d}.${m}.${y}`; } catch(_) { return String(iso||''); } };
+        const ds = norm(m.date || m.datetime);
+        const dateText = ds ? fmt(ds) : '';
+        const timeText = (m.time || '').toString().slice(0,5);
+        return `${dateText}${timeText? ' '+timeText: ''}`;
+      } catch(_){} return ''; })();
       if (dtText) { sub.textContent=dtText; card.appendChild(sub); }
       const center = document.createElement('div'); center.className='match-center';
   const loadLogo = (imgEl, teamName) => { try { (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(imgEl, teamName||''); } catch(_) {} };
