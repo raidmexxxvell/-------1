@@ -11431,14 +11431,35 @@ def api_streams_upcoming():
             for m in (t.get('matches') or []):
                 try:
                     dt = None
+                    # 1) Поле datetime (возможны варианты: naive, с суффиксом Z, с явным смещением +hh:mm)
                     if m.get('datetime'):
-                        dt = datetime.fromisoformat(str(m['datetime']))
+                        raw = str(m['datetime']).strip()
+                        # поддержка ISO c 'Z'
+                        if raw.endswith('Z'):
+                            raw = raw[:-1] + '+00:00'
+                        try:
+                            parsed = datetime.fromisoformat(raw)
+                        except Exception:
+                            parsed = None
+                        if parsed is not None:
+                            # если aware — приводим к локальному наивному времени (UTC + tz_min)
+                            if getattr(parsed, 'tzinfo', None) is not None:
+                                parsed_utc_naive = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                                dt = parsed_utc_naive + timedelta(minutes=tz_min)
+                            else:
+                                # считаем локальным уже
+                                dt = parsed
+                    # 2) Пара date + time (наивные локальные)
                     elif m.get('date'):
                         d = datetime.fromisoformat(str(m['date'])).date()
+                        tm = None
                         try:
                             tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
                         except Exception:
-                            tm = datetime.min.time()
+                            try:
+                                tm = datetime.strptime((m.get('time') or '00:00:00'), "%H:%M:%S").time()
+                            except Exception:
+                                tm = datetime.min.time()
                         dt = datetime.combine(d, tm)
                     if not dt:
                         continue
