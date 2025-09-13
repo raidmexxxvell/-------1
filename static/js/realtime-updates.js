@@ -21,6 +21,13 @@ class RealtimeUpdater {
     this.topicEnabled = !!window.__WS_TOPIC_SUBS__;
         
         this.initSocket();
+
+        // Автоподписка на глобальные обновления (full_reset и т.п.), даже до установления соединения
+        try {
+            if (this.topicEnabled && typeof this.subscribeTopic === 'function') {
+                this.subscribeTopic('global');
+            }
+        } catch(_) {}
     }
     
     initSocket() {
@@ -109,6 +116,11 @@ class RealtimeUpdater {
         // Компактные патчи данных
         this.socket.on('data_patch', (patch) => {
             this.handleDataPatch(patch);
+        });
+
+        // Топиковые уведомления (например, глобальный full_reset)
+        this.socket.on('topic_update', (payload) => {
+            this.handleTopicUpdate(payload);
         });
 
         // Событие завершения матча (содержит optional results_block для мгновенного UX)
@@ -202,6 +214,50 @@ class RealtimeUpdater {
 
     // Если включены topic-подписки, экспонируем subscribe/unsubscribe
     this.topicEnabled = !!window.__WS_TOPIC_SUBS__;
+    }
+    
+    handleTopicUpdate(payload){
+        try {
+            if (!payload || typeof payload !== 'object') return;
+            const reason = payload.reason || payload.change_type || '';
+            // Полный сброс: чистим локальные отметки голосований и восстанавливаем UI
+            if (reason === 'full_reset') {
+                // 1) Удаляем локальные ключи голосования
+                try {
+                    const toDel = [];
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const k = localStorage.key(i);
+                        if (!k) continue;
+                        if (k.startsWith('voted:') || k.startsWith('voteAgg:')) toDel.push(k);
+                    }
+                    toDel.forEach(k => { try { localStorage.removeItem(k); } catch(_){} });
+                } catch(_) {}
+
+                // 2) Восстанавливаем кнопки и сбрасываем подтверждение на всех видимых виджетах голосования
+                try {
+                    document.querySelectorAll('.vote-inline').forEach(wrap => {
+                        try {
+                            const btns = wrap.querySelector('.vote-inline-btns');
+                            const confirm = wrap.querySelector('.vote-confirm');
+                            if (confirm) confirm.textContent = '';
+                            if (btns) {
+                                btns.style.display = '';
+                                btns.querySelectorAll('button').forEach(b => b.disabled = false);
+                            }
+                            // Перезапрашиваем агрегаты, чтобы полоса отразила актуальные значения (обычно нули)
+                            const home = wrap.dataset.home || '';
+                            const away = wrap.dataset.away || '';
+                            const date = wrap.dataset.date || '';
+                            if (window.__VoteAgg && typeof window.__VoteAgg.fetchAgg === 'function') {
+                                window.__VoteAgg.fetchAgg(home, away, date)
+                                    .then(agg => { try { if (typeof wrap.__applyAgg === 'function') wrap.__applyAgg(agg); } catch(_){} })
+                                    .catch(()=>{});
+                            }
+                        } catch(_) {}
+                    });
+                } catch(_) {}
+            }
+        } catch(_) {}
     }
     
     handleDataPatch(patch) {

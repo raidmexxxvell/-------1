@@ -99,7 +99,11 @@
       const job = q.shift();
       if (!job) return;
       running++;
-      const url = `/api/vote/match-aggregates?home=${encodeURIComponent(job.h)}&away=${encodeURIComponent(job.a)}&date=${encodeURIComponent(job.d)}`;
+      let url = `/api/vote/match-aggregates?home=${encodeURIComponent(job.h)}&away=${encodeURIComponent(job.a)}&date=${encodeURIComponent(job.d)}`;
+      try {
+        const init = window.Telegram?.WebApp?.initData || '';
+        if (init) url += `&initData=${encodeURIComponent(init)}`;
+      } catch(_) {}
       fetch(url, { cache: 'no-store' })
         .then(r => r.json())
         .then(data => { writeCache(job.key, data || {}); job.res(data || {}); })

@@ -162,7 +162,26 @@
       if (tourMatches.has(mkKey(m))) { card.appendChild(wrap); }
       try { card.style.cursor='pointer'; card.addEventListener('click', (e)=>{ try { if(e?.target?.closest('button')) return; } catch(_){} try { document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); const navUfo=document.querySelector('.nav-item[data-tab="ufo"]'); if(navUfo) navUfo.classList.add('active'); const elHome=document.getElementById('tab-home'); const elUfo=document.getElementById('tab-ufo'); const elUfoContent=document.getElementById('ufo-content'); const elPreds=document.getElementById('tab-predictions'); const elLead=document.getElementById('tab-leaderboard'); const elShop=document.getElementById('tab-shop'); const elAdmin=document.getElementById('tab-admin'); [elHome,elUfo,elPreds,elLead,elShop,elAdmin].forEach(x=>{ if(x) x.style.display='none'; }); if(elUfo) elUfo.style.display=''; if(elUfoContent) elUfoContent.style.display=''; } catch(_){} const params=new URLSearchParams({home:m.home||'', away:m.away||''}); const cacheKey=`md:${(m.home||'').toLowerCase()}::${(m.away||'').toLowerCase()}`; const cached=(()=>{ try { return JSON.parse(localStorage.getItem(cacheKey)||'null'); } catch(_) { return null; } })(); const fetchWithETag=(etag)=> fetch(`/api/match-details?${params.toString()}`, { headers: etag?{'If-None-Match':etag}:{}}).then(async r=>{ if(r.status===304 && cached) return cached; const data=await r.json(); const version=data.version || r.headers.get('ETag') || null; const toStore={ data, version, ts: Date.now() }; try { localStorage.setItem(cacheKey, JSON.stringify(toStore)); } catch(_){} return toStore; }); const go=(store)=>{ try { window.openMatchScreen?.({ home:m.home, away:m.away, date:m.date, time:m.time }, store?.data || store); } catch(_){} }; const FRESH_TTL=10*60*1000; const isEmptyRosters=(()=>{ try { const d=cached?.data; const h=Array.isArray(d?.rosters?.home)?d.rosters.home:[]; const a=Array.isArray(d?.rosters?.away)?d.rosters.away:[]; return h.length===0 && a.length===0; } catch(_) { return false; } })(); if(cached && !isEmptyRosters && (Date.now()-(cached.ts||0) < FRESH_TTL)) { go(cached); } else if(cached && cached.version) { fetchWithETag(cached.version).then(go).catch(()=>{ go(cached); }); } else if(cached) { go(cached); } else { fetchWithETag(null).then(go).catch(()=>{}); } }); } catch(_){}
       const footer=document.createElement('div'); footer.className='match-footer'; const goPred=document.createElement('button'); goPred.className='details-btn'; goPred.textContent='Сделать прогноз'; goPred.addEventListener('click', (e)=>{ try { e.stopPropagation(); } catch(_){} try { document.querySelector('.nav-item[data-tab="predictions"]').click(); } catch(_){} }); footer.appendChild(goPred); card.appendChild(footer); host.appendChild(card);
-      async function loadAgg(withInit){ try { const dkey=(m.date?String(m.date):(m.datetime?String(m.datetime):'')).slice(0,10); const params=new URLSearchParams({ home:m.home||'', away:m.away||'', date:dkey }); if(withInit) params.append('initData', (window.Telegram?.WebApp?.initData || '')); const agg=await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json()); const h=Number(agg?.home||0), d=Number(agg?.draw||0), a=Number(agg?.away||0); const sum=Math.max(1,h+d+a); segH.style.width=Math.round(h*100/sum)+'%'; segD.style.width=Math.round(d*100/sum)+'%'; segA.style.width=Math.round(a*100/sum)+'%'; if(agg && agg.my_choice){ btns.querySelectorAll('button').forEach(x=>x.disabled=true); btns.style.display='none'; confirm.textContent='Ваш голос учтён'; try { localStorage.setItem('voted:'+voteKey,'1'); } catch(_){} } } catch(_) { segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; } }
+      async function loadAgg(withInit){
+        try {
+          const dkey=(m.date?String(m.date):(m.datetime?String(m.datetime):'')).slice(0,10);
+          const params=new URLSearchParams({ home:m.home||'', away:m.away||'', date:dkey });
+          if(withInit) params.append('initData', (window.Telegram?.WebApp?.initData || ''));
+          const agg=await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json());
+          const h=Number(agg?.home||0), d=Number(agg?.draw||0), a=Number(agg?.away||0);
+          const sum=Math.max(1,h+d+a); segH.style.width=Math.round(h*100/sum)+'%'; segD.style.width=Math.round(d*100/sum)+'%'; segA.style.width=Math.round(a*100/sum)+'%';
+          // Синхронизируем UI с my_choice
+          if(agg && Object.prototype.hasOwnProperty.call(agg,'my_choice') && !agg.my_choice){
+            try { localStorage.removeItem('voted:'+voteKey); } catch(_){}
+            btns.style.display=''; confirm.textContent='';
+            btns.querySelectorAll('button').forEach(b=>b.disabled=false);
+          } else if(agg && agg.my_choice){
+            btns.querySelectorAll('button').forEach(x=>x.disabled=true);
+            btns.style.display='none'; confirm.textContent='Ваш голос учтён';
+            try { localStorage.setItem('voted:'+voteKey,'1'); } catch(_){}
+          }
+        } catch(_) { segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
+      }
       try { if(localStorage.getItem('voted:'+voteKey) === '1'){ btns.style.display='none'; confirm.textContent='Ваш голос учтён'; } } catch(_){}
       loadAgg(true);
   try { window.dispatchEvent(new CustomEvent('preload:topmatch-ready')); } catch(_) {}

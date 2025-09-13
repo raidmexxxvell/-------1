@@ -56,6 +56,23 @@
         if (segD.style.width !== pd+'%') segD.style.width = pd+'%';
         if (segA.style.width !== pa+'%') segA.style.width = pa+'%';
         MatchState?.set(voteKey, { votes:{ h,d,a,total:h+d+a }, lastAggTs: Date.now() });
+
+        // Обновим UI «проголосовано/кнопки» по факту наличия моего голоса
+        try {
+          if (agg && Object.prototype.hasOwnProperty.call(agg, 'my_choice') && !agg.my_choice) {
+            // Сервер сообщил отсутствие моего голоса → сбрасываем локальную отметку и показываем кнопки
+            try { localStorage.removeItem('voted:'+voteKey); } catch(_) {}
+            btns.style.display = '';
+            confirm.textContent = '';
+            btns.querySelectorAll('button').forEach(b => b.disabled = false);
+          } else if (agg && agg.my_choice) {
+            // Есть зафиксированный голос → скрываем кнопки и подтверждаем
+            btns.querySelectorAll('button').forEach(x=>x.disabled=true);
+            btns.style.display='none';
+            confirm.textContent='Ваш голос учтён';
+            try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
+          }
+        } catch(_) {}
       } catch(_) { segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
     };
     const optimistic = (code) => {
