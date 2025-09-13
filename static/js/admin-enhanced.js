@@ -1053,12 +1053,14 @@
     // wire buttons
     const dryBtn = document.getElementById('import-run-dry');
     const applyBtn = document.getElementById('import-run-apply');
+    const googleBtn = document.getElementById('import-google-into-matches');
     if(dryBtn) dryBtn.onclick = runImportDryRun;
     if(applyBtn) {
       applyBtn.onclick = runImportApply;
       // disable apply until a successful dry-run with valid auth
       applyBtn.disabled = true;
     }
+    if(googleBtn) googleBtn.onclick = runGoogleImportFromModal;
   }
 
   function closeImportModal(){
@@ -1134,8 +1136,43 @@
     openImportModal,
     closeImportModal,
     runImportDryRun,
-    runImportApply
+    runImportApply,
+    runGoogleImportFromModal
   });
+
+  async function runGoogleImportFromModal(){
+    const btn = document.getElementById('import-google-into-matches');
+    const status = document.getElementById('import-status');
+    const summary = document.getElementById('import-summary');
+    if(!btn) return;
+    const originalText = btn.textContent;
+    try{
+      btn.disabled = true; btn.textContent = 'Импортирую...';
+      if(status) status.textContent = 'Импорт из Google в matches...';
+      const fd = new FormData();
+      const initData = window.Telegram?.WebApp?.initData;
+      if(initData) fd.append('initData', initData);
+      const res = await fetch('/api/admin/google/import-schedule', { method: 'POST', body: fd });
+      const data = await res.json();
+      if(!res.ok || data.error){
+        const msg = data.error || res.statusText;
+        if(status) status.textContent = 'Ошибка импорта: ' + msg;
+        showToast('Ошибка импорта из Google: '+msg, 'error', 6000);
+        return;
+      }
+      // Success
+      if(status) status.textContent = 'Импорт завершён. Снапшет обновлён.';
+      if(summary) summary.innerHTML = '<div style="color:#8f8;">Импорт выполнен: расписание записано в БД и снапшет пересобран. Теперь можно запустить dry-run или сразу применять изменения при необходимости.</div>';
+      showToast('Импортировано из Google и обновлено расписание', 'success');
+      // Перезагрузим список матчей (панель «Матчи»)
+      try{ if(typeof loadMatches === 'function') loadMatches(); }catch(_){ }
+    }catch(e){
+      if(status) status.textContent = 'Ошибка импорта';
+      showToast('Ошибка импорта из Google: '+String(e), 'error', 6000);
+    }finally{
+      btn.disabled = false; btn.textContent = originalText;
+    }
+  }
 
   function createNewsElement(news) {
     const newsEl = document.createElement('div');
