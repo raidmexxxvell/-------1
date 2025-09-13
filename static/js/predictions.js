@@ -489,7 +489,11 @@
       if (!homeTeam || !awayTeam) return;
 
       const matchId = `${homeTeam}_${awayTeam}_${date}`;
-      const card = document.querySelector(`.match-card[data-match-id="${matchId}"]`);
+      let card = document.querySelector(`.match-card[data-match-id="${matchId}"]`);
+      // Запасной путь: если дата не совпала/пустая — ищем по data-home/data-away
+      if (!card) {
+        card = document.querySelector(`.match-card[data-home="${homeTeam}"][data-away="${awayTeam}"]`);
+      }
       if (!card) return;
 
       const odds = detail.odds || detail; // числовые кэфы

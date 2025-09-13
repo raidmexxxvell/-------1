@@ -8875,7 +8875,34 @@ def api_betting_tours():
                 try:
                     snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
                     if snap and snap.get('payload'):
-                        return snap['payload']
+                        # Перед отдачей поверх снепшота освежаем коэффициенты и odds_version,
+                        # чтобы клиентский ETag‑fallback всегда видел актуальные значения.
+                        try:
+                            payload = snap['payload']
+                            tours = payload.get('tours') or []
+                            for t in tours:
+                                matches = t.get('matches') or []
+                                for m in matches:
+                                    try:
+                                        home = (m.get('home') or '').strip()
+                                        away = (m.get('away') or '').strip()
+                                        # Дата матча: используем ISO YYYY-MM-DD если доступна
+                                        draw = m.get('date') or m.get('datetime') or ''
+                                        date_key = str(draw)[:10] if draw else ''
+                                        # Пересчёт коэффициентов и обновление версии
+                                        new_odds = _compute_match_odds(home, away, date_key)
+                                        m['odds'] = new_odds
+                                        try:
+                                            m['odds_version'] = _get_odds_version(home, away)
+                                        except Exception:
+                                            pass
+                                    except Exception:
+                                        # Не ломаем выдачу тура при точечных ошибках матча
+                                        continue
+                            return payload
+                        except Exception:
+                            # Если что-то пошло не так — вернём исходный снепшот как есть
+                            return snap['payload']
                 finally:
                     db.close()
             # 2) On-demand сборка и запись снапшота
