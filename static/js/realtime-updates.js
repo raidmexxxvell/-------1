@@ -205,7 +205,8 @@ class RealtimeUpdater {
     }
     
     handleDataPatch(patch) {
-        if (!patch || patch.type !== 'data_patch') return;
+        // Патчи могут приходить без поля type (тип уже задан именем события 'data_patch')
+        if (!patch) return;
         const { entity, id, fields } = patch;
         try {
             if (entity === 'match') {

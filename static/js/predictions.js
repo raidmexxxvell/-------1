@@ -34,14 +34,19 @@
       if (!toursEl || _toursLoading) return;
       _toursLoading = true;
 
-      // --- НОВЫЙ КОД: Подписка на WebSocket ---
-      try {
-        if (window.realtimeUpdater && typeof window.realtimeUpdater.subscribeTopic === 'function') {
-          window.realtimeUpdater.subscribeTopic('predictions_page');
-        }
-      } catch (e) {
-        console.error('WS subscription failed', e);
-      }
+      // --- НОВЫЙ КОД: Подписка на WebSocket (с очередью тем, если realtimeUpdater ещё не готов) ---
+      const enqueueTopic = (topic) => {
+        try {
+          if (!topic) return;
+          if (window.realtimeUpdater && typeof window.realtimeUpdater.subscribeTopic === 'function') {
+            window.realtimeUpdater.subscribeTopic(topic);
+          } else {
+            window.__PENDING_WS_TOPICS__ = window.__PENDING_WS_TOPICS__ || new Set();
+            try { window.__PENDING_WS_TOPICS__.add(topic); } catch(_) {}
+          }
+        } catch(_) {}
+      };
+      try { enqueueTopic('predictions_page'); } catch(_) {}
       // --- КОНЕЦ НОВОГО КОДА ---
 
       const CACHE_KEY = 'betting:tours';
@@ -72,13 +77,7 @@
             const matchDate = (m.date || m.datetime || '').slice(0, 10);
             const matchId = `${m.home}_${m.away}_${matchDate}`;
             card.dataset.matchId = matchId;
-            try {
-              if (window.realtimeUpdater && typeof window.realtimeUpdater.subscribeTopic === 'function') {
-                window.realtimeUpdater.subscribeTopic(`match_odds_${matchId}`);
-              }
-            } catch (e) {
-              console.error(`WS match subscription failed for ${matchId}`, e);
-            }
+            try { enqueueTopic(`match_odds_${matchId}`); } catch(_) {}
             // --- КОНЕЦ НОВОГО КОДА ---
 
             try { card.dataset.home = m.home || ''; card.dataset.away = m.away || ''; } catch(_) {}
