@@ -1239,9 +1239,23 @@ def api_betting_place():
                 try:
                     if m.get('datetime'):
                         match_dt = datetime.fromisoformat(m['datetime'])
-                    elif m.get('date'):
-                        d = datetime.fromisoformat(m['date']).date()
-                        match_dt = datetime.combine(d, datetime.min.time())
+                    else:
+                        d = None; tm = None
+                        if m.get('date'):
+                            try:
+                                d = datetime.fromisoformat(str(m['date'])[:10]).date()
+                            except Exception:
+                                d = None
+                        if m.get('time'):
+                            ts = str(m['time']).strip()
+                            # поддержка HH:MM и HH:MM:SS
+                            for fmt in ("%H:%M:%S", "%H:%M"):
+                                try:
+                                    tm = datetime.strptime(ts, fmt).time(); break
+                                except Exception:
+                                    tm = None
+                        if d is not None:
+                            match_dt = datetime.combine(d, tm or datetime.min.time())
                 except Exception:
                     match_dt = None
                 break

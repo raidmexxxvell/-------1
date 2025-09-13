@@ -64,10 +64,37 @@ def finalize_match_core(
     if not home or not away:
         return
 
-    # 1. Результат -> snapshot 'results'
+    # 1. Результат -> snapshot 'results' (с безопасным fallback от событий)
     try:
         ms = db.query(MatchScore).filter(MatchScore.home == home, MatchScore.away == away).first()
-        if ms and ms.score_home is not None and ms.score_away is not None:
+        score_h = (ms and ms.score_home)
+        score_a = (ms and ms.score_away)
+        if score_h is None or score_a is None:
+            # Fallback: посчитать голы из событий матча
+            try:
+                from sqlalchemy import and_ as _and
+                goals = db.query(MatchPlayerEvent).filter(
+                    MatchPlayerEvent.home == home,
+                    MatchPlayerEvent.away == away,
+                    MatchPlayerEvent.type == 'goal'
+                ).all()
+                gh = sum(1 for e in goals if (e.team or 'home') == 'home')
+                ga = sum(1 for e in goals if (e.team or 'home') != 'home')
+                # Если есть хоть один гол/или явно 0:0 (в случае отсутствия событий — не трогаем)
+                if goals or (gh == 0 and ga == 0):
+                    score_h = gh
+                    score_a = ga
+                    # Зафиксируем в MatchScore для консистентности
+                    if not ms:
+                        ms = MatchScore(home=home, away=away)
+                        db.add(ms)
+                    ms.score_home = int(score_h)
+                    ms.score_away = int(score_a)
+                    ms.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+            except Exception:
+                pass
+        if score_h is not None and score_a is not None:
             snap = snapshot_get(db, SnapshotModel, 'results', logger)
             payload = (snap and snap.get('payload')) or {
                 'results': [],
@@ -83,8 +110,8 @@ def finalize_match_core(
             entry = {
                 'home': home,
                 'away': away,
-                'score_home': int(ms.score_home),
-                'score_away': int(ms.score_away),
+                'score_home': int(score_h),
+                'score_away': int(score_a),
                 'tour': extra.get('tour'),
                 'date': extra.get('date') or '',
                 'time': extra.get('time') or '',
@@ -118,7 +145,7 @@ def finalize_match_core(
                     pass
             # Зеркало в Google Sheets (best-effort)
             try:
-                mirror_score(home, away, int(ms.score_home), int(ms.score_away))
+                mirror_score(home, away, int(score_h), int(score_a))
             except Exception:
                 pass
     except Exception as e:
