@@ -148,7 +148,7 @@
     let serverLive = false;
     const refreshServerStatus = async () => {
       try {
-        const url = `/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`;
+        const url = `/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(((match?.datetime||match?.date||'').toString().slice(0,10))||'')}`;
         const r = await fetch(url, { cache: 'no-store' });
         const d = await r.json().catch(()=>({}));
         if (d && (d.status === 'live')) serverLive = true; else if (d && (d.status === 'finished')) serverLive = false;

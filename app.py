@@ -7145,7 +7145,8 @@ def api_match_status_get():
     """
     home = (request.args.get('home') or '').strip()
     away = (request.args.get('away') or '').strip()
-    dt = _get_match_datetime(home, away)
+    date_key = (request.args.get('date') or '').strip()
+    dt = _get_match_datetime(home, away, date_key)
     # Определяем локальное смещение расписания (минуты).
     # Если переменные окружения не заданы, используем безопасный дефолт +180 (МСК),
     # чтобы избежать системных UTC-серверов без смещения.
@@ -7177,27 +7178,58 @@ def api_match_status_get():
             pass
         return resp
     if not dt:
-        # Fallback на ручной флаг, если расписания нет
+        # Fallback на ручной флаг, если расписания нет, но только если флаг относится к актуальному матчу (по времени)
         if SessionLocal is not None:
             try:
                 db = get_db()
                 try:
                     mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
                     if mf and mf.status in ('live','finished'):
-                        return _nostore({'status': mf.status, 'soon': False, 'live_started_at': (mf.live_started_at or datetime.now(timezone.utc)).isoformat() if mf.status=='live' else ''})
+                        try:
+                            anchor = (mf.live_started_at or mf.updated_at)
+                            if anchor is not None:
+                                # Приводим к локальному времени тем же смещением tz_m (если aware — учитываем смещение)
+                                local_anchor = anchor + timedelta(minutes=tz_m) if getattr(anchor, 'tzinfo', None) is not None else anchor
+                                # Используем целевую дату: из параметра date (если задан) иначе сегодня по локальному смещению
+                                try:
+                                    target_date_local = datetime.fromisoformat(date_key).date() if date_key else (datetime.now() + timedelta(minutes=tz_m)).date()
+                                except Exception:
+                                    target_date_local = (datetime.now() + timedelta(minutes=tz_m)).date()
+                                # Считаем релевантным, если совпадает локальная дата или якорь вблизи текущего времени (±130 мин)
+                                if (local_anchor.date() == target_date_local) or (abs(((datetime.now() + timedelta(minutes=tz_m)) - local_anchor).total_seconds()) <= 130*60):
+                                    return _nostore({'status': mf.status, 'soon': False, 'live_started_at': (mf.live_started_at or datetime.now(timezone.utc)).isoformat() if mf.status=='live' else ''})
+                        except Exception:
+                            pass
                 finally:
                     db.close()
             except Exception:
                 pass
         return _nostore({'status':'scheduled', 'soon': False, 'live_started_at': ''})
-    # Приоритет ручного флага 'finished' над расчётом по времени (если матч вручную закрыт раньше окна окончания)
+    # Приоритет ручного флага 'finished' только если он относится к ЭТОМУ матчу (по дате)
     if SessionLocal is not None:
         try:
             db = get_db()
             try:
                 mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
                 if mf and mf.status == 'finished':
-                    return _nostore({'status':'finished', 'soon': False, 'live_started_at': ''})
+                    try:
+                        # Сопоставляем дату обновления/старта live с датой матча в локальном времени (МСК)
+                        anchor = (mf.live_started_at or mf.updated_at)
+                        if anchor is not None:
+                            # Приводим к локальному времени тем же смещением tz_m
+                            local_anchor = anchor + timedelta(minutes=tz_m) if getattr(anchor, 'tzinfo', None) is not None else anchor
+                            same_match_day = (local_anchor.date() == dt.date())
+                            # Дополнительно сверяемся с параметром date, если он задан
+                            if not same_match_day and request.args.get('date'):
+                                try:
+                                    same_match_day = (local_anchor.date() == datetime.fromisoformat(request.args.get('date')).date())
+                                except Exception:
+                                    same_match_day = False
+                            if same_match_day:
+                                return _nostore({'status':'finished', 'soon': False, 'live_started_at': ''})
+                    except Exception:
+                        # Если не удалось сопоставить — игнорируем старые флаги
+                        pass
             finally:
                 db.close()
         except Exception:
@@ -7216,14 +7248,29 @@ def api_match_status_get():
         live_started_at = dt.isoformat()
     if status is not None:
         return _nostore({'status': status, 'soon': bool(soon), 'live_started_at': live_started_at})
-    # Если dt есть, но мы не попали в окна — проверим ручной флаг на live
+    # Если dt есть, но мы не попали в окна — проверим ручной флаг на live, относящийся к ЭТОМУ матчу
     if SessionLocal is not None:
         try:
             db = get_db()
             try:
                 mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
                 if mf and mf.status == 'live':
-                    return _nostore({'status':'live', 'soon': False, 'live_started_at': (mf.live_started_at or datetime.now(timezone.utc)).isoformat()})
+                    ok = False
+                    try:
+                        la = mf.live_started_at
+                        if la is not None:
+                            local_la = la + timedelta(minutes=tz_m) if getattr(la, 'tzinfo', None) is not None else la
+                            # Допускаем совпадение даты или попадание в разумное окно вокруг матча
+                            if local_la.date() == dt.date():
+                                ok = True
+                            else:
+                                # Fallback: если сейчас вблизи dt (±2ч10м), то тоже принимаем live
+                                if abs((now - dt).total_seconds()) <= (130*60):
+                                    ok = True
+                    except Exception:
+                        ok = False
+                    if ok:
+                        return _nostore({'status':'live', 'soon': False, 'live_started_at': (mf.live_started_at or datetime.now(timezone.utc)).isoformat()})
             finally:
                 db.close()
         except Exception:
@@ -9682,24 +9729,64 @@ def _get_special_result(home: str, away: str, market: str):
     finally:
         db.close()
 
-def _get_match_datetime(home: str, away: str):
-    """Вернуть datetime матча из снапшота туров (ISO в naive datetime)."""
-    # 1) betting-tours snapshot
+def _get_match_datetime(home: str, away: str, date_key: str = None):
+    """Вернуть datetime матча из снапшота (ISO -> naive datetime).
+    - Приоритет: 'schedule' (держит матчи до конца live-окна), затем 'betting-tours'.
+    - Нормализуем названия команд (нижний регистр, trim, ё->е) и учитываем дату, если передана (YYYY-MM-DD).
+    """
+    def _norm(s: str) -> str:
+        try:
+            return (s or '').strip().lower().replace('ё', 'е')
+        except Exception:
+            return (s or '')
+    hn = _norm(home); an = _norm(away); dk = (date_key or '').strip()[:10]
     if SessionLocal is not None:
         db = get_db()
         try:
-            snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
-            payload = snap and snap.get('payload')
-            tours = payload and payload.get('tours') or []
-            for t in tours:
-                for m in (t.get('matches') or []):
-                    if m.get('home') == home and m.get('away') == away:
-                        dt_str = m.get('datetime')
-                        if dt_str:
-                            try:
-                                return datetime.fromisoformat(dt_str)
-                            except Exception:
-                                pass
+            def _try_from_tours(tours):
+                for t in (tours or []):
+                    for m in (t.get('matches') or []):
+                        try:
+                            if _norm(m.get('home')) == hn and _norm(m.get('away')) == an:
+                                # date check (optional)
+                                m_date = ''
+                                try:
+                                    if m.get('datetime'):
+                                        m_date = datetime.fromisoformat(m['datetime']).date().isoformat()
+                                    elif m.get('date'):
+                                        m_date = datetime.fromisoformat(m['date']).date().isoformat()
+                                except Exception:
+                                    m_date = (m.get('date') or '')[:10]
+                                if dk and m_date and m_date != dk:
+                                    continue
+                                dt_str = m.get('datetime')
+                                if dt_str:
+                                    try:
+                                        return datetime.fromisoformat(dt_str)
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            continue
+                return None
+
+            # 1) schedule snapshot — содержит матчи и в live-окне
+            try:
+                snap_s = _snapshot_get(db, Snapshot, 'schedule', app.logger)
+                payload_s = snap_s and snap_s.get('payload')
+                tours_s = payload_s and payload_s.get('tours') or []
+                dt = _try_from_tours(tours_s)
+                if dt: return dt
+            except Exception:
+                pass
+            # 2) betting-tours snapshot — может скрывать уже стартовавшие матчи
+            try:
+                snap_b = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
+                payload_b = snap_b and snap_b.get('payload')
+                tours_b = payload_b and payload_b.get('tours') or []
+                dt = _try_from_tours(tours_b)
+                if dt: return dt
+            except Exception:
+                pass
         finally:
             db.close()
     return None

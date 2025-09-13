@@ -27,13 +27,15 @@
         adminScoreCtrlsAdded=true;
       } catch(_){} };
     // Live status fetch (server) + admin fallback на локальный live
-    fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`)
+  { const raw=(match?.datetime||match?.date||''); const dateStr = raw ? String(raw).slice(0,10) : ''; }
+  fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent((match?.datetime||match?.date||'').toString().slice(0,10))}`)
       .then(r=>r.json())
       .then(async s=>{
         const localLive = (()=>{ try { return window.MatchUtils?.isLiveNow ? window.MatchUtils.isLiveNow(match) : false; } catch(_) { return false; } })();
-        const serverLive = (s?.status==='live');
-        const finished = (s?.status==='finished');
-        if (serverLive || (isAdmin && localLive && !finished)) {
+  const serverLive = (s?.status==='live');
+  const finished = (s?.status==='finished');
+  // Админу позволяем работать, если локально матч идёт, даже если сервер ошибочно вернул finished
+  if (serverLive || (isAdmin && localLive)) {
           // Вставим бейдж live в UI
           try { const exists = dtEl.querySelector('.live-badge'); if(!exists){ const live=document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); dtEl.appendChild(live); } } catch(_){}
           // Если счёта нет — показываем 0:0
