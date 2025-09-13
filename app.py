@@ -209,6 +209,69 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 
 """Phase 3 security / monitoring initialization"""
 if SECURITY_SYSTEM_AVAILABLE:
+    # --- Админ: список заказов ---
+    @app.route('/api/admin/orders', methods=['POST'])
+    def api_admin_orders():
+        try:
+            parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+            if not parsed or not parsed.get('user'):
+                return jsonify({'error': 'Unauthorized'}), 401
+            user_id = str(parsed['user'].get('id'))
+            admin_id = os.environ.get('ADMIN_USER_ID', '')
+            if not admin_id or user_id != admin_id:
+                return jsonify({'error': 'forbidden'}), 403
+            if SessionLocal is None:
+                return jsonify({'orders': []})
+            db: Session = get_db()
+            try:
+                rows = db.query(ShopOrder).order_by(ShopOrder.created_at.desc()).limit(500).all()
+                order_ids = [int(r.id) for r in rows]
+                user_ids = list({int(r.user_id) for r in rows}) if rows else []
+                usernames = {}
+                if user_ids:
+                    for u in db.query(User.user_id, User.tg_username).filter(User.user_id.in_(user_ids)).all():
+                        try:
+                            usernames[int(u[0])] = (u[1] or '').lstrip('@')
+                        except Exception:
+                            pass
+                items_by_order = {}
+                if order_ids:
+                    for it in db.query(ShopOrderItem).filter(ShopOrderItem.order_id.in_(order_ids)).all():
+                        oid = int(it.order_id)
+                        arr = items_by_order.setdefault(oid, [])
+                        arr.append({'name': it.product_name, 'qty': int(it.qty or 0)})
+                core = []
+                for r in rows:
+                    oid = int(r.id)
+                    arr = items_by_order.get(oid, [])
+                    items_preview = ', '.join([f"{x['name']}×{x['qty']}" for x in arr]) if arr else ''
+                    items_qty = sum([int(x['qty'] or 0) for x in arr]) if arr else 0
+                    core.append({
+                        'id': oid,
+                        'user_id': int(r.user_id),
+                        'username': usernames.get(int(r.user_id), ''),
+                        'total': int(r.total or 0),
+                        'status': r.status or 'new',
+                        'created_at': (r.created_at or datetime.now(timezone.utc)).isoformat(),
+                        'items_preview': items_preview,
+                        'items_qty': items_qty
+                    })
+                etag = _etag_for_payload({'orders': core})
+                inm = request.headers.get('If-None-Match')
+                if inm and inm == etag:
+                    resp = app.response_class(status=304)
+                    resp.headers['ETag'] = etag
+                    resp.headers['Cache-Control'] = 'private, max-age=60'
+                    return resp
+                resp = _json_response({'orders': core, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag})
+                resp.headers['ETag'] = etag
+                resp.headers['Cache-Control'] = 'private, max-age=60'
+                return resp
+            finally:
+                db.close()
+        except Exception as e:
+            app.logger.error(f"Admin orders error: {e}")
+            return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
     try:
         app.config.from_object(Config)
         # Пробрасываем env-флаги (на случай если приложение переинициализирует config)
@@ -1680,21 +1743,30 @@ class ShopOrderItem(Base):
     subtotal = Column(Integer, nullable=False)
 
 # ---------------------- SHOP: HELPERS & API ----------------------
-def _shop_catalog() -> dict:
-    """Серверный каталог товаров: { code: {name, price} }.
-    Цены могут быть переопределены через переменные окружения SHOP_PRICE_*.
-    """
-    def p(env_key: str, default: int) -> int:
-        try:
-            return int(os.environ.get(env_key, str(default)))
-        except Exception:
-            return default
-    return {
-        'boots': { 'name': 'Бутсы', 'price': p('SHOP_PRICE_BOOTS', 500) },
-        'ball': { 'name': 'Мяч', 'price': p('SHOP_PRICE_BALL', 500) },
-        'tshirt': { 'name': 'Футболка', 'price': p('SHOP_PRICE_TSHIRT', 500) },
-        'cap': { 'name': 'Кепка', 'price': p('SHOP_PRICE_CAP', 500) },
+import logging
+
+def log_shop_order_event(user_id, items, total, status, error=None, extra=None):
+    """Логирование событий создания/обработки заказа для отладки и аудита.
+    msg: dict с полями user_id, items (raw), total, status ('start'|'success'|'fail'), error, extra, ts
+    Записывается в логгер 'shop_order'."""
+    msg = {
+        'user_id': user_id,
+        'items': items,
+        'total': total,
+        'status': status,
+        'error': error,
+        'extra': extra,
+        'ts': datetime.now(timezone.utc).isoformat()
     }
+    try:
+        logging.getLogger('shop_order').info(msg)
+    except Exception as e:
+        try:
+            app.logger.warning(f"log_shop_order_event failed: {e}")
+        except Exception:
+            pass
+
+from services.shop_helpers import _shop_catalog, _normalize_order_items, log_shop_order_event
 
 def _normalize_order_items(raw_items) -> list[dict]:
     """Приводит массив позиций к [{code, qty}] с валидными qty>=1. Игнорирует неизвестные коды."""
@@ -1727,10 +1799,32 @@ def api_shop_checkout():
     Ответ: { order_id, total, balance }.
     """
     try:
+        # Логируем попытку создания заказа (до валидации)
+        log_shop_order_event(
+            user_id=None,
+            items=request.form.get('items'),
+            total=None,
+            status='start',
+            error=None
+        )
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
+            log_shop_order_event(
+                user_id=None,
+                items=request.form.get('items'),
+                total=None,
+                status='fail',
+                error='invalid_initData'
+            )
             return jsonify({'error': 'Недействительные данные'}), 401
         if SessionLocal is None:
+            log_shop_order_event(
+                user_id=parsed['user'].get('id'),
+                items=request.form.get('items'),
+                total=None,
+                status='fail',
+                error='db_unavailable'
+            )
             return jsonify({'error': 'БД недоступна'}), 500
         user_id = int(parsed['user'].get('id'))
 
@@ -1746,6 +1840,13 @@ def api_shop_checkout():
             items = []
         items = _normalize_order_items(items)
         if not items:
+            log_shop_order_event(
+                user_id=user_id,
+                items=request.form.get('items'),
+                total=None,
+                status='fail',
+                error='empty_cart'
+            )
             return jsonify({'error': 'Пустая корзина'}), 400
 
         catalog = _shop_catalog()
@@ -1768,8 +1869,22 @@ def api_shop_checkout():
                 'subtotal': subtotal
             })
         if not norm_items:
+            log_shop_order_event(
+                user_id=user_id,
+                items=request.form.get('items'),
+                total=None,
+                status='fail',
+                error='no_valid_items'
+            )
             return jsonify({'error': 'Нет валидных товаров'}), 400
         if total <= 0:
+            log_shop_order_event(
+                user_id=user_id,
+                items=request.form.get('items'),
+                total=0,
+                status='fail',
+                error='zero_total'
+            )
             return jsonify({'error': 'Нулевая сумма заказа'}), 400
 
         # Идемпотентность: если за последние 2 минуты уже есть заказ с теми же позициями и суммой — вернём его
@@ -1806,8 +1921,22 @@ def api_shop_checkout():
 
             u = db.get(User, user_id)
             if not u:
+                log_shop_order_event(
+                    user_id=user_id,
+                    items=request.form.get('items'),
+                    total=total,
+                    status='fail',
+                    error='user_not_found'
+                )
                 return jsonify({'error': 'Пользователь не найден'}), 404
             if int(u.credits or 0) < total:
+                log_shop_order_event(
+                    user_id=user_id,
+                    items=request.form.get('items'),
+                    total=total,
+                    status='fail',
+                    error='not_enough_credits'
+                )
                 return jsonify({'error': 'Недостаточно кредитов'}), 400
             # Списание и создание заказа
             u.credits = int(u.credits or 0) - total
@@ -1826,6 +1955,15 @@ def api_shop_checkout():
                 ))
             db.commit()
             db.refresh(u)
+            # Логируем успешное создание заказа
+            log_shop_order_event(
+                user_id=user_id,
+                items=request.form.get('items'),
+                total=total,
+                status='success',
+                error=None,
+                extra={'order_id': order.id}
+            )
             # Зеркалирование пользователя в Sheets best-effort
             try:
                 mirror_user_to_sheets(u)
@@ -1858,6 +1996,13 @@ def api_shop_checkout():
         finally:
             db.close()
     except Exception as e:
+        log_shop_order_event(
+            user_id=parsed['user'].get('id') if 'parsed' in locals() and parsed and parsed.get('user') else None,
+            items=request.form.get('items'),
+            total=None,
+            status='fail',
+            error=str(e)
+        )
         app.logger.error(f"Shop checkout error: {e}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 

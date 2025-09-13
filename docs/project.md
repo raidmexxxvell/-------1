@@ -399,6 +399,21 @@ class Tournament(Base):
 - Splash: скрытие экрана теперь оркестрируется реальными событиями предзагрузки. `static/js/profile-ads-featured.js` диспатчит `preload:ads-ready` после инициализации карусели и `preload:topmatch-ready` после построения карточки «матча недели». `static/js/splash.js` слушает `preload:news-ready`, `preload:ads-ready`, `preload:topmatch-ready` и завершает показ, когда готовы новости И (реклама ИЛИ матч недели).
 - Логирование: снижен шум от предупреждений «No match found» при расчёте тоталов — в `_get_match_total_goals` сообщение переведено в INFO и логируется один раз на пару команд (dedup); предупреждения по некорректному формату счёта сохранены как WARNING.
 
+### 2025-09-13 (Fix: admin orders + refactor shop helpers)
+
+- Исправлен баг: API для получения списка заказов админом был реализован в теле функции, но не зарегистрирован как маршрут — добавлен корректный декоратор `@app.route('/api/admin/orders', methods=['POST'])`, теперь админ‑панель получает список заказов корректно.
+- Вынос: логика магазина (каталог, нормализация позиций, хелпер логирования) вынесена из `app.py` в новый модуль `services/shop_helpers.py`. В `app.py` оставлены вызовы; поведение API не изменилось.
+- Добавлен структурированный логгер `shop_order` (через `log_shop_order_event`) — логирует попытки оформления, ошибки и успешные заказы (best‑effort fallback на `current_app.logger`).
+
+Полезность:
+- Снижение размера монолитного `app.py` — проще читать и вносить изменения.
+- Упрощена модульная тестируемость: теперь можно покрыть `services/shop_helpers.py` unit‑тестами.
+
+Рекомендуемые следующие шаги:
+- Настроить обработчик (Handler) для логгера `shop_order` — ротация в файл и retention (например, `RotatingFileHandler`).
+- (Опционально) Создать таблицу аудита `shop_order_audit` для гарантированной трассировки событий заказов.
+- Добавить unit/integration тесты для `api_shop_checkout` и `services/shop_helpers.py`.
+
 ### 2025-09-04
 ### 2025-09-11 (Hotfix betting settlement)
 - Исправлено: ошибка `can't compare offset-naive and offset-aware datetimes` при авторасчёте ставок. Теперь в `services/betting_settle.py` все сравнения времени матча приводят `now` к naive UTC (Bet.match_datetime хранится без tz). Это устраняет падение `psycopg.OperationalError` сценария фонового settle при запросе `/api/betting/tours`.
