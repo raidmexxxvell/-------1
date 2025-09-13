@@ -6359,6 +6359,20 @@ def init_admin_api(app):
     # All admin routes are already decorated with appropriate logging decorators
     return True
 
+
+# If admin API module was imported earlier and flagged for deferred init, initialize it now
+try:
+    if 'ADMIN_API_INIT_REQUIRED' in globals() and globals().get('ADMIN_API_INIT_REQUIRED'):
+        if 'init_admin_routes' in globals():
+            try:
+                init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_data,
+                                  MatchFlags, _snapshot_set, _build_betting_tours_payload, _settle_open_bets)
+                print('[INFO] Admin routes initialized at import time')
+            except Exception as _e:
+                print(f"[WARN] Failed to init admin routes at import time: {_e}")
+except Exception:
+    pass
+
 def start_background_sync():
     global _BG_THREAD
     global _LB_PRECOMP_THREAD
@@ -14634,6 +14648,19 @@ if __name__ == '__main__':
     
     # Initialize admin API with logging
     init_admin_api(app)
+
+    # Initialize and register admin blueprint routes (if available)
+    try:
+        if 'init_admin_routes' in globals():
+            # Pass required dependencies from this module to the admin routes initializer
+            try:
+                init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_data,
+                                  MatchFlags, _snapshot_set, _build_betting_tours_payload, _settle_open_bets)
+                print('[INFO] Admin routes initialized and blueprint registered')
+            except Exception as _iar_e:
+                print(f"[WARN] init_admin_routes call failed: {_iar_e}")
+    except Exception:
+        pass
     
     try:
         start_background_sync()
