@@ -8962,7 +8962,11 @@ def api_schedule():
             try:
                 snap = _snapshot_get(db, Snapshot, 'schedule', app.logger)
             finally:
-                db.close()
+                try:
+                    db.close()
+                except Exception:
+                    # transient SSL/rollback errors shouldn't bubble up from builder
+                    pass
             if snap and snap.get('payload'):
                 payload = snap['payload']
                 tours_in_snap = (payload.get('tours') or []) if isinstance(payload, dict) else []
@@ -8984,7 +8988,10 @@ def api_schedule():
                     fm = _snapshot_get(db2, Snapshot, 'feature-match', app.logger) or {}
                     manual = (fm.get('payload') or {}).get('match') or None
                 finally:
-                    db2.close()
+                    try:
+                        db2.close()
+                    except Exception:
+                        pass
             use_manual = False
             if manual and isinstance(manual, dict):
                 mh, ma = manual.get('home'), manual.get('away')
@@ -9013,7 +9020,10 @@ def api_schedule():
                         bt = _snapshot_get(db3, Snapshot, 'betting-tours', app.logger)
                         tours_src = (bt or {}).get('payload', {}).get('tours') or tours_src
                     finally:
-                        db3.close()
+                        try:
+                            db3.close()
+                        except Exception:
+                            pass
                 best = _pick_match_of_week(tours_src)
                 if best:
                     payload = dict(payload)
