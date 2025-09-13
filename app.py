@@ -6365,9 +6365,21 @@ try:
     if 'ADMIN_API_INIT_REQUIRED' in globals() and globals().get('ADMIN_API_INIT_REQUIRED'):
         if 'init_admin_routes' in globals():
             try:
-                init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_data,
-                                  MatchFlags, _snapshot_set, _build_betting_tours_payload, _settle_open_bets)
-                print('[INFO] Admin routes initialized at import time')
+                # Resolve dependencies safely from globals() to avoid NameError during static analysis
+                _init_fn = globals().get('init_admin_routes')
+                _parse_init = globals().get('parse_and_verify_telegram_init_data')
+                _match_flags = globals().get('MatchFlags')
+                _snapshot_set_fn = globals().get('_snapshot_set')
+                _build_betting_fn = globals().get('_build_betting_tours_payload')
+                _settle_open_bets_fn = globals().get('_settle_open_bets')
+
+                # Only attempt initialization if the essential functions are available
+                if callable(_init_fn) and get_db is not None and 'SessionLocal' in globals():
+                    _init_fn(app, get_db, SessionLocal, _parse_init,
+                             _match_flags, _snapshot_set_fn, _build_betting_fn, _settle_open_bets_fn)
+                    print('[INFO] Admin routes initialized at import time')
+                else:
+                    print('[INFO] Admin routes import-time init skipped: dependencies not available')
             except Exception as _e:
                 print(f"[WARN] Failed to init admin routes at import time: {_e}")
 except Exception:
@@ -14652,11 +14664,21 @@ if __name__ == '__main__':
     # Initialize and register admin blueprint routes (if available)
     try:
         if 'init_admin_routes' in globals():
-            # Pass required dependencies from this module to the admin routes initializer
+            # Resolve optional dependencies safely from globals()
             try:
-                init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_data,
-                                  MatchFlags, _snapshot_set, _build_betting_tours_payload, _settle_open_bets)
-                print('[INFO] Admin routes initialized and blueprint registered')
+                _init_fn = globals().get('init_admin_routes')
+                _parse_init = globals().get('parse_and_verify_telegram_init_data')
+                _match_flags = globals().get('MatchFlags')
+                _snapshot_set_fn = globals().get('_snapshot_set')
+                _build_betting_fn = globals().get('_build_betting_tours_payload')
+                _settle_open_bets_fn = globals().get('_settle_open_bets')
+
+                if callable(_init_fn) and get_db is not None and 'SessionLocal' in globals():
+                    _init_fn(app, get_db, SessionLocal, _parse_init,
+                             _match_flags, _snapshot_set_fn, _build_betting_fn, _settle_open_bets_fn)
+                    print('[INFO] Admin routes initialized and blueprint registered')
+                else:
+                    print('[INFO] Admin routes init skipped in __main__: dependencies missing')
             except Exception as _iar_e:
                 print(f"[WARN] init_admin_routes call failed: {_iar_e}")
     except Exception:
