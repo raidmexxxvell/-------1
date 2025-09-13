@@ -35,39 +35,42 @@ try:
     SECURITY_SYSTEM_AVAILABLE = True
     print("[INFO] Phase 3: Security and monitoring system initialized")
 except ImportError as e:
-    print(f"[WARN] Phase 3 security system not available: {e}")
+    print(f"[WARN] Security system not available: {e}")
     SECURITY_SYSTEM_AVAILABLE = False
-    # --- Fallback lightweight no-op decorators & stubs so app can still start ---
     def _noop_decorator_factory(*dargs, **dkwargs):
         def _inner(f):
             return f
-        # Allow usage both as @decorator and @decorator(...)
-        if dargs and callable(dargs[0]) and len(dargs) == 1 and not dkwargs:
-            return dargs[0]
         return _inner
-
     require_telegram_auth = _noop_decorator_factory  # type: ignore
     require_admin = _noop_decorator_factory          # type: ignore
-    rate_limit = lambda *a, **k: _noop_decorator_factory  # type: ignore
-    validate_input = lambda *a, **k: _noop_decorator_factory  # type: ignore
-
+    rate_limit = _noop_decorator_factory             # type: ignore
+    validate_input = _noop_decorator_factory         # type: ignore
     class InputValidator:  # minimal stub to avoid attribute errors later
         def __getattr__(self, item):
             def _f(*a, **k):
                 return True, ''
             return _f
-
     class TelegramSecurity:
         def __init__(self, *a, **k):
             pass
         def verify_init_data(self, init_data, bot_token, max_age_seconds):
             return False, None
-
     class RateLimiter:
         def is_allowed(self, key, max_requests, time_window):
             return True
-
     class SQLInjectionPrevention: ...
+    # Stubs for monitoring/middleware in dev
+    class PerformanceMetrics: ...
+    class DatabaseMonitor: ...
+    class CacheMonitor: ...
+    class HealthCheck: ...
+    class SecurityMiddleware: ...
+    class PerformanceMiddleware: ...
+    class DatabaseMiddleware: ...
+    class ErrorHandlingMiddleware: ...
+    monitoring_bp = None
+    security_test_bp = None
+    class Config: ...
 
 # Импорт системы логирования администратора
 try:
@@ -2296,18 +2299,79 @@ def api_admin_matches_upcoming():
                 except Exception:
                     match_dt = None
                 if match_dt is not None and match_dt >= now.date():
+                    home = m.get('home'); away = m.get('away')
+                    # Составы: пробуем подтянуть из БД (точное совпадение по строкам)
+                    lineups = None
+                    if SessionLocal is not None and home and away:
+                        _sess = None
+                        try:
+                            _sess = SessionLocal()
+                            rows = _sess.query(MatchLineupPlayer).filter(
+                                MatchLineupPlayer.home==home,
+                                MatchLineupPlayer.away==away
+                            ).all()
+                            if rows:
+                                def pack(team, pos):
+                                    return [
+                                        { 'name': r.player, 'number': r.jersey_number, 'position': (r.position if r.position!='starting_eleven' else None) }
+                                        for r in rows
+                                        if r.team==team and (
+                                            (pos=='main' and r.position=='starting_eleven') or
+                                            (pos=='sub' and r.position=='substitute')
+                                        )
+                                    ]
+                                lineups = {
+                                    'home': { 'main': pack('home','main'), 'sub': pack('home','sub') },
+                                    'away': { 'main': pack('away','main'), 'sub': pack('away','sub') },
+                                }
+                        except Exception:
+                            lineups = None
+                        finally:
+                            try:
+                                _sess.close()
+                            except Exception:
+                                pass
+
+                    # Подготовка ISO-времени для UI: предпочитаем явное datetime; иначе date+time (+03:00)
+                    dt_iso = None
+                    raw_dt = m.get('datetime')
+                    if isinstance(raw_dt, str) and raw_dt:
+                        try:
+                            s = raw_dt.replace('Z', '+00:00')
+                            dtt = datetime.fromisoformat(s)
+                            if dtt.tzinfo is None:
+                                dtt = dtt.replace(tzinfo=timezone.utc)
+                            dtt = dtt.astimezone(timezone(timedelta(hours=3)))
+                            dt_iso = dtt.isoformat()
+                        except Exception:
+                            dt_iso = None
+                    if not dt_iso and match_date:
+                        time_str = None
+                        for key_name in ('time', 'start', 'kickoff', 'start_time', 'match_time'):
+                            v = m.get(key_name)
+                            if isinstance(v, str) and v.strip():
+                                time_str = v.strip()
+                                break
+                        if time_str and len(time_str) >= 4:
+                            parts = time_str.split(':')
+                            hh = parts[0].zfill(2)
+                            mm = parts[1].zfill(2) if len(parts) > 1 else '00'
+                            dt_iso = f"{match_date}T{hh}:{mm}:00+03:00"
+                        else:
+                            dt_iso = f"{match_date}T00:00:00+03:00"
+
                     # fallback для id, если не задан
                     mid = m.get('id')
                     if not mid:
                         import hashlib
-                        key = f"{m.get('home','')}|{m.get('away','')}|{match_date}"
+                        key = f"{home or ''}|{away or ''}|{match_date}"
                         mid = hashlib.sha1(key.encode('utf-8')).hexdigest()[:12]
                     out.append({
                         'id': mid,
-                        'home_team': m.get('home'),
-                        'away_team': m.get('away'),
-                        'match_date': match_date,
-                        'lineups': m.get('lineups')
+                        'home_team': home,
+                        'away_team': away,
+                        'match_date': dt_iso or match_date,
+                        'lineups': lineups
                     })
         # отсортируем по дате
         out.sort(key=lambda x: x.get('match_date') or '')
