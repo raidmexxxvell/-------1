@@ -12911,6 +12911,19 @@ def api_admin_full_reset():
                 summary['db_deleted']['match_stats_state'] = _safe_delete(db.query(MatchStatsAggregationState))
             except Exception:
                 pass
+            # Новое: очистка флагов статуса матчей и спецсобытий, а также агрегированных статов матча
+            try:
+                summary['db_deleted']['match_flags'] = _safe_delete(db.query(MatchFlags))
+            except Exception:
+                pass
+            try:
+                summary['db_deleted']['match_specials'] = _safe_delete(db.query(MatchSpecials))
+            except Exception:
+                pass
+            try:
+                summary['db_deleted']['match_stats'] = _safe_delete(db.query(MatchStats))
+            except Exception:
+                pass
             summary['db_deleted']['shop_order_items'] = _safe_delete(db.query(ShopOrderItem))
             summary['db_deleted']['shop_orders'] = _safe_delete(db.query(ShopOrder))
             summary['db_deleted']['bets'] = _safe_delete(db.query(Bet))
