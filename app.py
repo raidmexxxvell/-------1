@@ -7097,6 +7097,9 @@ def api_match_status_get():
     home = (request.args.get('home') or '').strip()
     away = (request.args.get('away') or '').strip()
     dt = _get_match_datetime(home, away)
+    # Определяем локальное смещение расписания (минуты).
+    # Если переменные окружения не заданы, используем безопасный дефолт +180 (МСК),
+    # чтобы избежать системных UTC-серверов без смещения.
     try:
         tz_m = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
     except Exception:
@@ -7107,7 +7110,23 @@ def api_match_status_get():
         except Exception:
             tz_hh = 0
         tz_m = tz_hh * 60
+    if tz_m == 0:
+        # Дополнительные fallback-переменные, если основные не заданы
+        try:
+            tz_m = int(os.environ.get('DEFAULT_TZ_MINUTES') or os.environ.get('DEFAULT_TZ_MIN') or '180')
+        except Exception:
+            tz_m = 180
     now = datetime.now() + timedelta(minutes=tz_m)
+
+    # Локальный хелпер, чтобы навесить no-store заголовки на ответы статуса
+    def _nostore(payload: dict, code: int = 200):
+        resp = _json_response(payload, status=code)
+        try:
+            resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+            resp.headers['Pragma'] = 'no-cache'
+        except Exception:
+            pass
+        return resp
     if not dt:
         # Fallback на ручной флаг, если расписания нет
         if SessionLocal is not None:
@@ -7116,12 +7135,12 @@ def api_match_status_get():
                 try:
                     mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
                     if mf and mf.status in ('live','finished'):
-                        return _json_response({'status': mf.status, 'soon': False, 'live_started_at': (mf.live_started_at or datetime.now(timezone.utc)).isoformat() if mf.status=='live' else ''})
+                        return _nostore({'status': mf.status, 'soon': False, 'live_started_at': (mf.live_started_at or datetime.now(timezone.utc)).isoformat() if mf.status=='live' else ''})
                 finally:
                     db.close()
             except Exception:
                 pass
-        return _json_response({'status':'scheduled', 'soon': False, 'live_started_at': ''})
+        return _nostore({'status':'scheduled', 'soon': False, 'live_started_at': ''})
     # Приоритет ручного флага 'finished' над расчётом по времени (если матч вручную закрыт раньше окна окончания)
     if SessionLocal is not None:
         try:
@@ -7129,17 +7148,25 @@ def api_match_status_get():
             try:
                 mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
                 if mf and mf.status == 'finished':
-                    return _json_response({'status':'finished', 'soon': False, 'live_started_at': ''})
+                    return _nostore({'status':'finished', 'soon': False, 'live_started_at': ''})
             finally:
                 db.close()
         except Exception:
             pass
+    status = None
+    soon = False
+    live_started_at = ''
     if (dt - timedelta(minutes=10)) <= now < dt:
-        return _json_response({'status':'scheduled', 'soon': True, 'live_started_at': ''})
-    if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-        return _json_response({'status':'live', 'soon': False, 'live_started_at': dt.isoformat()})
-    if now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-        return _json_response({'status':'finished', 'soon': False, 'live_started_at': dt.isoformat()})
+        status = 'scheduled'
+        soon = True
+    elif dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+        status = 'live'
+        live_started_at = dt.isoformat()
+    elif now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+        status = 'finished'
+        live_started_at = dt.isoformat()
+    if status is not None:
+        return _nostore({'status': status, 'soon': bool(soon), 'live_started_at': live_started_at})
     # Если dt есть, но мы не попали в окна — проверим ручной флаг на live
     if SessionLocal is not None:
         try:
@@ -7147,12 +7174,12 @@ def api_match_status_get():
             try:
                 mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
                 if mf and mf.status == 'live':
-                    return _json_response({'status':'live', 'soon': False, 'live_started_at': (mf.live_started_at or datetime.now(timezone.utc)).isoformat()})
+                    return _nostore({'status':'live', 'soon': False, 'live_started_at': (mf.live_started_at or datetime.now(timezone.utc)).isoformat()})
             finally:
                 db.close()
         except Exception:
             pass
-    return _json_response({'status':'scheduled', 'soon': False, 'live_started_at': ''})
+    return _nostore({'status':'scheduled', 'soon': False, 'live_started_at': ''})
 
 @app.route('/api/match/status/set-live', methods=['POST'])
 def api_match_status_set_live():
@@ -7213,7 +7240,23 @@ def api_match_status_set_live():
 def api_match_status_live():
     """Список live-матчей по расписанию (без ручных флагов)."""
     items = []
-    now = datetime.now()
+    # Используем то же локальное смещение, что и в /api/match/status/get
+    try:
+        tz_m = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+    except Exception:
+        tz_m = 0
+    if tz_m == 0:
+        try:
+            tz_hh = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
+        except Exception:
+            tz_hh = 0
+        tz_m = tz_hh * 60
+    if tz_m == 0:
+        try:
+            tz_m = int(os.environ.get('DEFAULT_TZ_MINUTES') or os.environ.get('DEFAULT_TZ_MIN') or '180')
+        except Exception:
+            tz_m = 180
+    now = datetime.now() + timedelta(minutes=tz_m)
     if SessionLocal is not None:
         db = get_db()
         try:
@@ -7250,7 +7293,13 @@ def api_match_status_live():
         finally:
             db.close()
     # Для обратной совместимости клиент может ожидать поле live_matches
-    return _json_response({'items': items, 'live_matches': items, 'updated_at': datetime.now(timezone.utc).isoformat()})
+    resp = _json_response({'items': items, 'live_matches': items, 'updated_at': datetime.now(timezone.utc).isoformat()})
+    try:
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+        resp.headers['Pragma'] = 'no-cache'
+    except Exception:
+        pass
+    return resp
 
 @app.route('/api/leaderboard/top-predictors')
 def api_leader_top_predictors():

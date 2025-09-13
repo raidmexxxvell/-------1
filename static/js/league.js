@@ -477,13 +477,14 @@
               const key = mkKey(matchObj);
               const header = card.querySelector('.match-header'); if(!header) return;
               let badge = header.querySelector('.live-badge');
-              // Фолбэк: если локально не live, но старт в пределах +-10 минут от now — спросим бекенд статус (1 запрос на матч в TTL)
+              // Фолбэк: если локально не live, но старт в пределах ~±130 минут от now — спросим бекенд статус (1 запрос на матч в TTL)
               if(!live && !finStore[key]){
                 try {
                   const dt = window.MatchUtils.parseDateTime(matchObj);
                   if (dt) {
                     const diffMin = Math.abs((Date.now() - dt.getTime())/60000);
-                    if (diffMin <= 10) {
+                    // 130 минут ~ 2ч 10м — покрывает предматчевое окно и стандартную длительность
+                    if (diffMin <= 130) {
                       const cached = LiveStatusCache.get(key);
                       if (cached === 'live') { live = true; }
                       else if (cached === null) {
