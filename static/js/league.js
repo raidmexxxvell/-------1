@@ -6,6 +6,35 @@
   const raf = (cb) => (window.requestAnimationFrame || window.setTimeout)(cb, 0);
   const rIC = window.requestIdleCallback || function (cb) { return setTimeout(() => cb({ timeRemaining: () => 0 }), 0); };
 
+  // Нормализация даты к формату YYYY-MM-DD
+  function normalizeDateStr(raw) {
+    try {
+      if (!raw) return '';
+      let s = String(raw).trim();
+      // dd.mm.yyyy -> yyyy-mm-dd
+      const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+      if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+      // отрезаем время, если есть
+      if (s.length > 10) s = s.slice(0, 10);
+      // если это уже yyyy-mm-dd
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      // иначе пробуем распарсить
+      const d = new Date(raw);
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+      return s;
+    } catch(_) { return String(raw||'').slice(0,10); }
+  }
+
+  // Унифицированный ключ матча: home__away__YYYY-MM-DD
+  function matchKey(obj) {
+    try {
+      const h = (obj?.home||'').toLowerCase().replace(/ё/g,'е').trim();
+      const a = (obj?.away||'').toLowerCase().replace(/ё/g,'е').trim();
+      const d = normalizeDateStr(obj?.date || obj?.datetime || '');
+      return `${h}__${a}__${d}`;
+    } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; }
+  }
+
   // Локальный маппер цветов команд (используем глобальный, если есть)
   const getTeamColor = window.getTeamColor || function(name){
     try {
@@ -48,11 +77,11 @@
 
     const keyFrom = (home, away, dateStr) => {
       try {
-        const d = String(dateStr || '').slice(0, 10);
-        const h = (home || '').toLowerCase().trim();
-        const a = (away || '').toLowerCase().trim();
+        const d = normalizeDateStr(dateStr || '');
+        const h = (home || '').toLowerCase().replace(/ё/g,'е').trim();
+        const a = (away || '').toLowerCase().replace(/ё/g,'е').trim();
         return `${h}__${a}__${d}`;
-      } catch(_) { return `${home||''}__${away||''}__${String(dateStr||'').slice(0,10)}`; }
+      } catch(_) { return `${(home||'').toLowerCase()}__${(away||'').toLowerCase()}__${normalizeDateStr(dateStr||'')}`; }
     };
     const readCache = (key) => {
       try {
@@ -220,13 +249,13 @@
       const card = document.createElement('div');
       card.className = 'match-card';
       const header = document.createElement('div'); header.className = 'match-header';
-      const dateStr = (() => { try { if (m.date) { const d = new Date(m.date); return d.toLocaleDateString(); } } catch(_) {} return ''; })();
+  const dateStr = (() => { try { const ds = normalizeDateStr(m.date || m.datetime); if (ds) { const d = new Date(ds); return isNaN(d.getTime()) ? '' : d.toLocaleDateString(); } } catch(_) {} return ''; })();
       const timeStr = m.time || '';
   let isLive = false;
   try { if (window.MatchUtils) { isLive = window.MatchUtils.isLiveNow(m); } } catch(_) {}
       const headerText = document.createElement('span'); headerText.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`; header.appendChild(headerText);
   const finStore=(window.__FINISHED_MATCHES=window.__FINISHED_MATCHES||{});
-  const mkKey=(mm)=>{ try { return `${(mm.home||'').toLowerCase().trim()}__${(mm.away||'').toLowerCase().trim()}__${(mm.date||mm.datetime||'').toString().slice(0,10)}`; } catch(_) { return `${(mm.home||'')}__${(mm.away||'')}`; } };
+  const mkKey = (mm) => matchKey(mm);
   if (isLive && !finStore[mkKey(m)]) { const live = document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); header.appendChild(live); }
       card.appendChild(header);
 
@@ -244,7 +273,7 @@
       card.appendChild(center);
 
       // Если лайв — подгрузим текущий счёт
-      const stateKey = (()=>{ try { return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${String(m.date||m.datetime||'').slice(0,10)}`; } catch(_) { return `${m.home||''}__${m.away||''}`; } })();
+  const stateKey = matchKey(m);
       // Восстанавливаем предыдущий известный счёт сразу (исключаем визуальный скачок 'VS')
       try {
         const prev = MatchState.get(stateKey);
@@ -274,10 +303,9 @@
       // Голосование (П1/X/П2) — показываем только если матч входит в ставочные туры
       try {
         const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
-        const mkKey = (obj) => { try { const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=obj?.date?String(obj.date):(obj?.datetime?String(obj.datetime):''); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; } };
         const tourMatches = new Set();
-        try { const tours=toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(mkKey(x)))); } catch(_) {}
-        if (tourMatches.has(mkKey(m))) {
+        try { const tours=toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(matchKey(x)))); } catch(_) {}
+        if (tourMatches.has(matchKey(m))) {
           try {
             const voteEl = window.VoteInline?.create?.({ home: m.home, away: m.away, date: m.date || m.datetime, getTeamColor });
             if (voteEl) card.appendChild(voteEl);
@@ -614,7 +642,7 @@
   }
 
   // ================== B) Патч голосований после догрузки туров ==================
-  function buildTourMatchKey(obj){ try { const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=(obj?.date?String(obj.date):(obj?.datetime?String(obj.datetime):'')); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; } catch(_) { return ''; } }
+  function buildTourMatchKey(obj){ return matchKey(obj); }
   function computeTourMatchSet(cache){
     const s = new Set();
     try {
@@ -645,7 +673,7 @@
           if (m) { const parts = m[1].split('.'); dateKey = `${parts[2]}-${parts[1]}-${parts[0]}`; }
         } catch(_) {}
         if (!dateKey) return;
-        const key = `${home.toLowerCase()}__${away.toLowerCase()}__${dateKey}`;
+        const key = matchKey({ home, away, date: dateKey });
         if (!tourMatches.has(key)) return;
         // Создаём голосование
         if (window.VoteInline && typeof window.VoteInline.create === 'function') {
