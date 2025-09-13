@@ -11941,14 +11941,15 @@ def admin_login_page():
     # Выдать cookie (HMAC(admin_pass, admin_id))
     token = hmac.new(admin_pass.encode('utf-8'), admin_id.encode('utf-8'), hashlib.sha256).hexdigest()
     resp = flask.make_response(flask.redirect('/admin'))
-    resp.set_cookie('admin_auth', token, httponly=True, secure=False, samesite='Lax', max_age=3600*6)
+    # Важно: path='/' чтобы cookie отправлялась и на /api/* маршруты
+    resp.set_cookie('admin_auth', token, httponly=True, secure=False, samesite='Lax', max_age=3600*6, path='/')
     return resp
 
 @app.route('/admin/logout')
 def admin_logout():
     resp = flask.make_response(flask.redirect('/admin/login'))
-    # сбрасываем cookie
-    resp.delete_cookie('admin_auth')
+    # сбрасываем cookie (учитываем path='/')
+    resp.delete_cookie('admin_auth', path='/')
     return resp
 
 # ---- Админ: сезонный rollover (дублируем здесь, т.к. blueprint admin не зарегистрирован) ----
