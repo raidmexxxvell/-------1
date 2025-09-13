@@ -9005,7 +9005,7 @@ def api_schedule():
                 if SessionLocal is not None:
                     db3 = get_db()
                     try:
-                        bt = _snapshot_get(db3, 'betting-tours')
+                        bt = _snapshot_get(db3, Snapshot, 'betting-tours', app.logger)
                         tours_src = (bt or {}).get('payload', {}).get('tours') or tours_src
                     finally:
                         db3.close()
@@ -9955,7 +9955,7 @@ def _compute_table_agg_base():
         if SessionLocal is not None:
             dbs = get_db()
             try:
-                snap = _snapshot_get(dbs, 'results')
+                snap = _snapshot_get(dbs, Snapshot, 'results', app.logger)
                 payload = snap and snap.get('payload') or {}
                 for m in (payload.get('results') or []):
                     try:
@@ -9979,7 +9979,7 @@ def _compute_table_agg_base():
         if SessionLocal is not None:
             dbsched = get_db()
             try:
-                snap = _snapshot_get(dbsched, 'schedule')
+                snap = _snapshot_get(dbsched, Snapshot, 'schedule', app.logger)
                 payload = snap and snap.get('payload') or {}
                 for t in (payload.get('tours') or []):
                     for mt in (t.get('matches') or []):
@@ -11509,7 +11509,8 @@ def api_streams_upcoming():
         if SessionLocal is not None:
             dbx = get_db()
             try:
-                snap = _snapshot_get(dbx, 'schedule')
+                # Correct signature requires Snapshot model and logger
+                snap = _snapshot_get(dbx, Snapshot, 'schedule', app.logger)
                 payload = snap and snap.get('payload')
                 tours = payload and payload.get('tours') or []
             finally:
@@ -11783,7 +11784,7 @@ def api_streams_get():
     try:
         dbs = get_db()
         try:
-            snap = _snapshot_get(dbs, 'schedule')
+            snap = _snapshot_get(dbs, Snapshot, 'schedule', app.logger)
             payload = snap and snap.get('payload')
             tours = (payload and payload.get('tours')) or []
         finally:
