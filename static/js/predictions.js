@@ -217,9 +217,19 @@
       // Fallback-пуллинг коэффициентов при отключённых/неподключённых WebSocket: обновляем кнопки П1/Х/П2 по ETag каждые ~3.5-4.7с
       const startOddsPolling = (initialVersion) => {
         try { if (wrap.__oddsPollCancel) wrap.__oddsPollCancel(); } catch(_){}
-        // используем при выключенном WS или при отсутствии активного соединения
-        const wsActive = !!window.__WEBSOCKETS_ENABLED__ && !!(window.realtimeUpdater && window.realtimeUpdater.getConnectionStatus && window.realtimeUpdater.getConnectionStatus().connected);
-        if (wsActive) return;
+        // используем пуллинг, если:
+        // 1) WS выключен ИЛИ
+        // 2) нет активного подключения ИЛИ
+        // 3) topic-подписки выключены на клиенте ИЛИ
+        // 4) нет подписки на 'predictions_page' (подписка могла не установиться из-за порядка загрузки)
+        let wsConnected = false, topicsOn = false, hasPredTopic = false;
+        try {
+          wsConnected = !!(window.__WEBSOCKETS_ENABLED__ && window.realtimeUpdater && window.realtimeUpdater.getConnectionStatus && window.realtimeUpdater.getConnectionStatus().connected);
+          topicsOn = !!(window.realtimeUpdater && typeof window.realtimeUpdater.getTopicEnabled === 'function' && window.realtimeUpdater.getTopicEnabled());
+          hasPredTopic = !!(window.realtimeUpdater && typeof window.realtimeUpdater.hasTopic === 'function' && window.realtimeUpdater.hasTopic('predictions_page'));
+        } catch(_) {}
+        const needPolling = !window.__WEBSOCKETS_ENABLED__ || !wsConnected || !topicsOn || !hasPredTopic;
+        if (!needPolling) return;
         let cancelled = false, busy = false, timer = null;
         let lastVersion = initialVersion || (cached && cached.version) || null;
         wrap.__oddsPollCancel = () => { cancelled = true; try { if (timer) clearTimeout(timer); } catch(_){} };

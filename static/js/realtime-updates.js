@@ -512,6 +512,19 @@ class RealtimeUpdater {
         } catch(_) {}
     }
 
+    // Проверка состояния topic-подписок/фича-флага
+    getTopicEnabled(){
+        return !!this.topicEnabled;
+    }
+    hasTopic(topic){
+        try {
+            if(!topic) return false;
+            return (this.subscribedTopics && this.subscribedTopics.has(topic)) ||
+                   (this.pendingTopics && this.pendingTopics.has(topic)) ||
+                   (window.__PENDING_WS_TOPICS__ && typeof window.__PENDING_WS_TOPICS__.has === 'function' && window.__PENDING_WS_TOPICS__.has(topic));
+        } catch(_) { return false; }
+    }
+
     // Статус подключения
     getConnectionStatus() {
         return {
