@@ -6469,8 +6469,15 @@ def _build_betting_tours_payload():
                     if d < now_local.date():
                         started = True
                     elif d == now_local.date():
-                        # без точного времени — считаем что старт в полночь (уже начался)
-                        started = True
+                        # если есть точное время — сравниваем с текущим временем
+                        if m.get('time'):
+                            tm = datetime.strptime(m['time'], '%H:%M').time()
+                            match_dt = datetime.combine(d, tm)
+                            if match_dt <= now_local:
+                                started = True
+                        else:
+                            # без точного времени — считаем что старт в полночь (уже начался)
+                            started = True
             except Exception:
                 pass
             if started:
