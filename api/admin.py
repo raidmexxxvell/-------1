@@ -207,6 +207,26 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                         app.logger.error(f"Failed to update matches_played stats: {stats_err}")
                         affected_entities['stats_error'] = str(stats_err)
 
+                    # После успешной установки статуса finished — проверка завершения тура и очистка голосов
+                    try:
+                        # Подключаем легковесный сервис очистки голосов
+                        from services.vote_cleanup import cleanup_votes_if_tour_finished
+                        # Для корректной работы нужны ORM-модели Match и MatchVote из основной схемы
+                        try:
+                            from database.database_models import Match as AdvMatch
+                        except Exception:
+                            AdvMatch = None
+                        try:
+                            from app import MatchVote as LegacyMatchVote
+                        except Exception:
+                            LegacyMatchVote = None
+                        if match_obj is not None and AdvMatch is not None and LegacyMatchVote is not None:
+                            deleted_votes = cleanup_votes_if_tour_finished(db, AdvMatch, LegacyMatchVote, match_obj)
+                            if deleted_votes:
+                                affected_entities['votes_deleted'] = int(deleted_votes)
+                    except Exception as _vdel_err:
+                        app.logger.warning(f"vote cleanup skipped: {_vdel_err}")
+
                 # Логирование успешной операции
                 execution_time = int((time.time() - start_time) * 1000)
                 if admin_id and hasattr(g, 'admin_logger') and g.admin_logger:
