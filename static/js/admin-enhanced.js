@@ -85,155 +85,125 @@
     const modal = document.getElementById('team-modal');
     const title = document.getElementById('team-modal-title');
     const form = document.getElementById('team-form');
-    
+    const nameEl = document.getElementById('team-name');
+    const cityEl = document.getElementById('team-city');
+    const foundedEl = document.getElementById('team-founded-year');
+    const logoEl = document.getElementById('team-logo-url');
+    const descEl = document.getElementById('team-description');
+
     if (!modal || !title || !form) return;
-    
+
     currentTeamId = teamId;
-    
+
     if (teamId) {
-      // Edit mode
       title.textContent = 'Редактировать команду';
       const team = allTeams.find(t => t.id === teamId);
       if (team) {
-        document.getElementById('team-name').value = team.name;
-        document.getElementById('team-city').value = team.city || '';
-        document.getElementById('team-founded-year').value = team.founded_year || '';
-        document.getElementById('team-logo-url').value = team.logo_url || '';
-        document.getElementById('team-description').value = team.description || '';
+        if (nameEl) nameEl.value = team.name || '';
+        if (cityEl) cityEl.value = team.city || '';
+        if (foundedEl) foundedEl.value = team.founded_year || '';
+        if (logoEl) logoEl.value = team.logo_url || '';
+        if (descEl) descEl.value = team.description || '';
       }
     } else {
-      // Create mode
       title.textContent = 'Добавить команду';
-      form.reset();
+      if (form) form.reset();
     }
-    
-    modal.style.display = 'block';
+
+    modal.style.display = 'flex';
   }
 
   function closeTeamModal() {
     const modal = document.getElementById('team-modal');
-    if (modal) {
-      modal.style.display = 'none';
-    }
-    currentTeamId = null;
+    if (modal) modal.style.display = 'none';
   }
 
-  // ESC и клик по overlay для закрытия модалки
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') closeTeamModal();
-  });
-  document.addEventListener('click', function(e) {
-    const modal = document.getElementById('team-modal');
-    if (modal && modal.style.display === 'block' && e.target === modal) closeTeamModal();
-  });
+  async function saveTeam(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const name = document.getElementById('team-name')?.value.trim();
+    const city = document.getElementById('team-city')?.value.trim();
+    const founded_year = parseInt(document.getElementById('team-founded-year')?.value || '0', 10) || null;
+    const logo_url = document.getElementById('team-logo-url')?.value.trim();
+    const description = document.getElementById('team-description')?.value.trim();
 
-  async function saveTeam(event) {
-    event.preventDefault();
-    
-    const teamData = {
-      name: document.getElementById('team-name').value.trim(),
-      city: document.getElementById('team-city').value.trim(),
-      founded_year: parseInt(document.getElementById('team-founded-year').value) || null,
-      logo_url: document.getElementById('team-logo-url').value.trim(),
-      description: document.getElementById('team-description').value.trim()
-    };
-    
-    if (!teamData.name) {
-      showToast('Название команды обязательно', 'error');
-      return;
-    }
-    
-    try {
-      let response;
-      if (currentTeamId) {
-        // Update
-        response = await fetch(`/api/admin/teams/${currentTeamId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(teamData)
-        });
-      } else {
-        // Create
-        response = await fetch('/api/admin/teams', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(teamData)
-        });
-      }
-      
-      const result = await response.json();
-      
-      if (response.ok) {
-        closeTeamModal();
-        loadTeams();
-        showToast(
-          currentTeamId ? 'Команда обновлена' : 'Команда создана', 
-          'success'
-        );
-      } else {
-        showToast(`Ошибка: ${result.error}`, 'error');
-      }
-    } catch (error) {
-      console.error('Save team error:', error);
-      showToast('Ошибка соединения при сохранении команды', 'error');
-    }
-  }
+    if (!name) { showToast('Введите название команды','error'); return; }
 
-  async function deleteTeam(teamId, teamName) {
-    if (!confirm(`Удалить команду "${teamName}"?`)) {
-      return;
-    }
-    
+    const payload = { name, city, founded_year, logo_url, description };
+    const initData = window.Telegram?.WebApp?.initData || '';
+    const method = currentTeamId ? 'PUT' : 'POST';
+    const url = currentTeamId ? `/api/admin/teams/${currentTeamId}` : '/api/admin/teams';
+
     try {
-      const response = await fetch(`/api/admin/teams/${teamId}`, {
-        method: 'DELETE'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, ...payload })
       });
-      
-      const result = await response.json();
-      
-      if (response.ok) {
-        loadTeams();
-        showToast(`Команда "${teamName}" удалена`, 'success');
-      } else {
-        showToast(`Ошибка удаления: ${result.error}`, 'error');
-      }
-    } catch (error) {
-      console.error('Delete team error:', error);
-      showToast('Ошибка соединения при удалении команды', 'error');
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Ошибка сохранения');
+      showToast(currentTeamId ? 'Команда обновлена' : 'Команда добавлена', 'success');
+      closeTeamModal();
+      loadTeams();
+    } catch (err) {
+      console.error('saveTeam error', err);
+      showToast('Не удалось сохранить команду: ' + err.message, 'error');
     }
   }
 
-  function editTeam(teamId) {
-    openTeamModal(teamId);
+  function editTeam(teamId) { openTeamModal(teamId); }
+
+  async function deleteTeam(teamId, name) {
+    if (!confirm(`Удалить команду "${name}"?`)) return;
+    try {
+      const res = await fetch(`/api/admin/teams/${teamId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData: window.Telegram?.WebApp?.initData || '' })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Ошибка удаления');
+      showToast('Команда удалена', 'success');
+      loadTeams();
+    } catch (err) {
+      console.error('deleteTeam error', err);
+      showToast('Не удалось удалить команду: ' + err.message, 'error');
+    }
   }
 
-  // ------------ Team Roster (read-only) -------------
-  function openTeamRoster(teamId, teamName){
+  async function openTeamRoster(teamId, teamName){
     const modal = document.getElementById('team-roster-modal');
     const title = document.getElementById('team-roster-title');
-    const statusBox = document.getElementById('team-roster-status');
+    const status = document.getElementById('team-roster-status');
     const tbody = document.getElementById('team-roster-table');
-    if(!modal || !title || !tbody) return;
-    title.textContent = 'Состав: ' + teamName;
+    if (!modal || !tbody) return;
+    if (title) title.textContent = `Состав команды: ${teamName}`;
+    if (status){ status.style.display='block'; status.textContent='Загрузка состава...'; }
     tbody.innerHTML = '';
-    statusBox.style.display='block';
-    statusBox.textContent='Загрузка...';
-    modal.style.display='block';
-    fetch(`/api/admin/teams/${teamId}/roster`).then(r=>r.json()).then(data=>{
-      if(!data || data.error){ statusBox.textContent = 'Ошибка загрузки'; return; }
-      statusBox.style.display='none';
-      if(!data.players || !data.players.length){
-        statusBox.style.display='block';
-        statusBox.textContent='Нет игроков';
-        return;
-      }
-      data.players.forEach((p,i)=>{
-        const tr=document.createElement('tr');
-        tr.innerHTML=`<td>${i+1}</td><td>${p.first_name||''}</td><td>${p.last_name||''}</td><td>${p.goals}</td><td>${p.assists}</td><td>${p.yellow_cards}</td><td>${p.red_cards}</td>`;
+    try{
+      const res = await fetch(`/api/admin/teams/${teamId}/roster`);
+      const data = await res.json();
+      if(!res.ok || data.error) throw new Error(data.error||'Ошибка загрузки состава');
+      const list = data.roster || [];
+      list.forEach((p, idx)=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${idx+1}</td>
+          <td>${p.first_name||''}</td>
+          <td>${p.last_name||''}</td>
+          <td>${p.goals ?? 0}</td>
+          <td>${p.assists ?? 0}</td>
+          <td>${p.yellow ?? 0}</td>
+          <td>${p.red ?? 0}</td>`;
         tbody.appendChild(tr);
       });
-    }).catch(err=>{ statusBox.textContent='Ошибка'; console.error(err); });
+      if(status){ status.textContent = list.length? '' : 'Состав пуст'; if(!list.length) status.className='status-text'; }
+    }catch(e){
+      console.error('openTeamRoster error', e);
+      if(status){ status.textContent = 'Ошибка загрузки состава: '+e.message; status.className='status-text'; }
+    }
+    modal.style.display='flex';
   }
+
   function closeTeamRoster(){
     const modal = document.getElementById('team-roster-modal');
     if(modal) modal.style.display='none';
@@ -363,143 +333,6 @@
       refreshAllBtn.addEventListener('click', refreshAllData);
     }
 
-    const statsRefreshBtn = document.getElementById('admin-stats-refresh');
-    if (statsRefreshBtn) {
-      statsRefreshBtn.addEventListener('click', loadStats);
-    }
-
-    // Logs management buttons
-    const logsRefreshBtn = document.getElementById('admin-logs-refresh');
-    if (logsRefreshBtn) {
-      logsRefreshBtn.addEventListener('click', () => loadAdminLogs());
-    }
-
-    const logsClearFiltersBtn = document.getElementById('admin-logs-clear-filters');
-    if (logsClearFiltersBtn) {
-      logsClearFiltersBtn.addEventListener('click', () => {
-        document.getElementById('logs-action-filter').value = '';
-        document.getElementById('logs-status-filter').value = '';
-        loadAdminLogs();
-      });
-    }
-
-    const logsActionFilter = document.getElementById('logs-action-filter');
-    if (logsActionFilter) {
-      logsActionFilter.addEventListener('input', debounce(() => loadAdminLogs(), 500));
-    }
-
-    const logsStatusFilter = document.getElementById('logs-status-filter');
-    if (logsStatusFilter) {
-      logsStatusFilter.addEventListener('change', () => loadAdminLogs());
-    }
-
-    const logsPrevBtn = document.getElementById('logs-prev-page');
-    if (logsPrevBtn) {
-      logsPrevBtn.addEventListener('click', () => {
-        if (window.adminLogsCurrentPage > 1) {
-          window.adminLogsCurrentPage--;
-          loadAdminLogs();
-        }
-      });
-    }
-
-    const logsNextBtn = document.getElementById('logs-next-page');
-    if (logsNextBtn) {
-      logsNextBtn.addEventListener('click', () => {
-        if (window.adminLogsCurrentPage < window.adminLogsTotalPages) {
-          window.adminLogsCurrentPage++;
-          loadAdminLogs();
-        }
-      });
-    }
-
-  // Season rollover buttons
-  const btnDry = document.getElementById('admin-season-dry');
-  const btnSoft = document.getElementById('admin-season-soft');
-  const btnRoll = document.getElementById('admin-season-roll');
-  const btnRollback = document.getElementById('admin-season-rollback');
-  const btnSheetsSelftest = document.getElementById('admin-google-selftest');
-  const seasonPicker = document.getElementById('season-picker');
-  const applySeasonBtn = document.getElementById('apply-season-btn');
-  const activeSeasonLabel = document.getElementById('active-season-label');
-  // Season generation controls
-  const seasonGenDate = document.getElementById('season-generate-date');
-  const seasonGenLabel = document.getElementById('season-generate-label');
-  const btnSeasonGenSoft = document.getElementById('admin-season-generate-soft');
-  const btnSeasonGenFull = document.getElementById('admin-season-generate-full');
-  if (btnDry) btnDry.onclick = ()=> seasonRollover('dry');
-  if (btnSoft) btnSoft.onclick = ()=> seasonRollover('soft');
-    if (btnRoll) btnRoll.onclick = ()=> {
-      const first = confirm('Полный сброс сезона? Это удалит legacy статистику матчей. Продолжить?');
-      if(!first) return;
-      const phrase = prompt('Введите СБРОС для подтверждения:');
-      if(phrase !== 'СБРОС') { alert('Отменено'); return; }
-      seasonRollover('full');
-    };
-  if (btnRollback) btnRollback.onclick = ()=> seasonRollback();
-  if (btnSheetsSelftest) btnSheetsSelftest.onclick = ()=> sheetsSelfTest();
-  if (seasonPicker) loadSeasonsIntoPicker();
-  if (applySeasonBtn) applySeasonBtn.onclick = ()=> applySelectedSeason();
-  // Prefill date with today and wire season label updater
-  if (seasonGenDate) {
-    try {
-      const now = new Date();
-      const dd = String(now.getDate()).padStart(2,'0');
-      const mm = String(now.getMonth()+1).padStart(2,'0');
-      const yyyy = String(now.getFullYear());
-      if(!seasonGenDate.value){ seasonGenDate.value = `${dd}.${mm}.${yyyy}`; }
-    } catch(_){}
-    const updateLabel = ()=>{
-      const label = computeSeasonLabelFromDate(seasonGenDate.value);
-      if (seasonGenLabel) seasonGenLabel.textContent = 'Будет создан сезон: ' + label;
-    };
-    seasonGenDate.addEventListener('input', updateLabel);
-    updateLabel();
-  }
-  if (btnSeasonGenSoft) btnSeasonGenSoft.onclick = ()=> generateSeason('soft_start');
-  if (btnSeasonGenFull) btnSeasonGenFull.onclick = ()=> {
-    const ok = confirm('Полный сброс: текущее расписание сезона будет полностью перезаписано. Продолжить?');
-    if (!ok) return; generateSeason('full_reset');
-  };
-  }
-
-  // Match management functions
-  function loadMatches() {
-    console.log('[Admin] Loading matches...');
-    const container = document.getElementById('matches-list');
-    if (!container) return;
-    
-    container.innerHTML = '<div class="status-text">Загрузка матчей...</div>';
-    
-    const fd = new FormData();
-    fd.append('initData', window.Telegram?.WebApp?.initData || '');
-    
-    fetch('/api/admin/matches/upcoming', {
-      method: 'POST',
-      body: fd
-    })
-    .then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    })
-    .then(data => {
-      console.log('[Admin] Matches loaded:', data);
-      container.innerHTML = '';
-      
-      if (!data.matches || data.matches.length === 0) {
-        container.innerHTML = '<div class="status-text">Нет предстоящих матчей</div>';
-        return;
-      }
-      
-      data.matches.forEach(match => {
-        const matchEl = createMatchElement(match);
-        container.appendChild(matchEl);
-      });
-    })
-    .catch(err => {
-      console.error('[Admin] Error loading matches:', err);
-      container.innerHTML = '<div class="status-text">Ошибка загрузки матчей</div>';
-    });
   }
 
   function createMatchElement(match) {
@@ -722,44 +555,6 @@
   }
 
   // Player management functions
-  // --- Google Sheets repair handler ---
-  function repairUsersSheet(sheet) {
-    const btn = document.getElementById('admin-google-repair-users');
-    if (btn) { btn.disabled = true; btn.textContent = 'Repairing...'; }
-    if (!sheet) {
-      const sel = document.getElementById('repair-sheet-select');
-      sheet = (sel && sel.value) ? sel.value : 'users';
-    }
-    const fd = new FormData();
-    fd.append('initData', window.Telegram?.WebApp?.initData || '');
-    fd.append('sheet', sheet);
-    fetch('/api/admin/google/repair-users-sheet', { method: 'POST', body: fd })
-      .then(r => r.json())
-      .then(data => {
-        console.log('repair result', data);
-        if (data && data.status === 'ok') {
-          showToast('Repair completed: ' + (data.deduped_rows || 0) + ' rows kept', 'success', 5000);
-          if (data.removed_examples && data.removed_examples.length) {
-            console.info('Removed examples:', data.removed_examples.slice(0,5));
-          }
-        } else {
-          showToast('Repair failed: ' + (data.error || 'unknown'), 'error', 6000);
-        }
-      })
-      .catch(err => { console.error('repair error', err); showToast('Repair request failed','error'); })
-  .finally(()=>{ if (btn) { btn.disabled = false; btn.textContent = 'Почистить дубли'; } });
-  }
-
-  // Wire up the button after DOM ready
-  document.addEventListener('DOMContentLoaded', ()=>{
-    const repairBtn = document.getElementById('admin-google-repair-users');
-    if (repairBtn) repairBtn.addEventListener('click', ()=>{
-      const sel = document.getElementById('repair-sheet-select');
-      const target = (sel && sel.value) ? sel.value : 'users';
-      const ok = confirm(`Запустить чистку дублей в листе "${target}"? Операция перепишет лист.`);
-      if (!ok) return; repairUsersSheet(target);
-    });
-  });
   function loadPlayers() {
     console.log('[Admin] Loading players...');
     const tbody = document.getElementById('players-table');
@@ -847,56 +642,7 @@
       });
   }
 
-  // Google Sheets sync
-  function importScheduleFromGoogle(){
-    const btn = document.getElementById('admin-google-import-schedule');
-    if(!btn) return;
-    btn.disabled = true; const t=btn.textContent; btn.textContent='Импорт...';
-    const fd=new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
-    fetch('/api/admin/google/import-schedule', { method:'POST', body: fd })
-      .then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res=>{
-        if(!res.ok || res.d.error) throw new Error(res.d.error||'Ошибка');
-        showToast('Расписание импортировано из Google','success');
-      }).catch(e=>{ showToast('Ошибка импорта: '+e.message,'error',6000); })
-      .finally(()=>{ btn.disabled=false; btn.textContent=t; });
-  }
-
-  function sheetsSelfTest(){
-    const btn = document.getElementById('admin-google-selftest');
-    const log = document.getElementById('google-selftest-log');
-    if(!btn || !log) return;
-    btn.disabled = true; const t=btn.textContent; btn.textContent='Проверяю...';
-    log.style.display='block'; log.textContent='Запуск самотеста...';
-    const fd=new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
-    fetch('/api/admin/google/self-test', { method:'POST', body: fd })
-      .then(r=>r.json().then(d=>({ok:r.ok, d})))
-      .then(res=>{
-        if(!res.ok){ throw new Error(res.d?.error || 'Ошибка самотеста'); }
-        const list = res.d?.checks || [];
-        const lines = list.map(c=>{
-          if(c.ok) return `✔ ${c.name}: ${c.detail??'ok'}`;
-          const hint = c.hint?`\n   hint: ${c.hint}`:'';
-          return `✖ ${c.name}: ${c.error}${hint}`;
-        });
-        log.textContent = (res.d.ok? '[OK] Доступ к Sheets настроен' : '[FAIL] Найдены проблемы')+"\n\n"+lines.join('\n');
-        showToast(res.d.ok? 'Sheets OK' : 'Sheets: найдены проблемы','info');
-      })
-      .catch(e=>{ log.textContent='Ошибка самотеста: '+e.message; showToast('Ошибка самотеста: '+e.message,'error'); })
-      .finally(()=>{ btn.disabled=false; btn.textContent=t; });
-  }
-
-  function exportAllToGoogle(){
-    const btn = document.getElementById('admin-google-export-all');
-    if(!btn) return;
-    btn.disabled = true; const t=btn.textContent; btn.textContent='Выгружаю...';
-    const fd=new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData || '');
-    fetch('/api/admin/google/export-all', { method:'POST', body: fd })
-      .then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res=>{
-        if(!res.ok || res.d.error) throw new Error(res.d.error||'Ошибка');
-        showToast('Данные выгружены в Google','success');
-      }).catch(e=>{ showToast('Ошибка выгрузки: '+e.message,'error',6000); })
-      .finally(()=>{ btn.disabled=false; btn.textContent=t; });
-  }
+  // Google Sheets sync — удалено
 
   // ---- Season generation helpers ----
   function computeSeasonLabelFromDate(dmy){
@@ -1131,145 +877,7 @@
     });
   }
 
-  // Init handlers for new buttons
-  document.addEventListener('DOMContentLoaded', ()=>{
-    const ib=document.getElementById('admin-google-import-schedule'); if(ib) ib.addEventListener('click', ()=>{ openImportModal(); });
-    const eb=document.getElementById('admin-google-export-all'); if(eb) eb.addEventListener('click', exportAllToGoogle);
-  });
-
-  // Import modal functions
-  function openImportModal(){
-    const modal = document.getElementById('import-modal');
-    if(!modal) return;
-    // reset UI
-    document.getElementById('import-summary').innerHTML = '<em>Результат dry-run будет показан здесь. Нажмите «Запустить dry-run».</em>';
-    document.getElementById('import-diff').innerHTML = '';
-    document.getElementById('import-status').textContent = '';
-    const forceCb = document.getElementById('import-force-delete'); if(forceCb) forceCb.checked = false;
-    modal.style.display = 'flex';
-    // wire buttons
-    const dryBtn = document.getElementById('import-run-dry');
-    const applyBtn = document.getElementById('import-run-apply');
-    const googleBtn = document.getElementById('import-google-into-matches');
-    if(dryBtn) dryBtn.onclick = runImportDryRun;
-    if(applyBtn) {
-      applyBtn.onclick = runImportApply;
-      // disable apply until a successful dry-run with valid auth
-      applyBtn.disabled = true;
-    }
-    if(googleBtn) googleBtn.onclick = runGoogleImportFromModal;
-  }
-
-  function closeImportModal(){
-    const modal = document.getElementById('import-modal'); if(!modal) return; modal.style.display='none';
-  }
-
-  async function runImportDryRun(){
-    const status = document.getElementById('import-status'); const summary = document.getElementById('import-summary'); const diffBox = document.getElementById('import-diff');
-    const applyBtn = document.getElementById('import-run-apply');
-    const initData = window.Telegram?.WebApp?.initData;
-    if(status) status.textContent = 'Выполняю dry-run...';
-    try{
-      const fd = new FormData();
-      if(initData) fd.append('initData', initData);
-      const res = await fetch('/api/admin/matches/import?dry_run=1', { method: 'POST', body: fd });
-      const data = await res.json();
-      if(!res.ok || data.error){
-        if(status) status.textContent = 'Ошибка: ' + (data.error || res.statusText);
-        if(summary) summary.innerHTML = '<div style="color:#f55;">Dry-run failed: '+escapeHtml(data.error||res.statusText)+'</div>';
-        if(applyBtn) applyBtn.disabled = true;
-        return;
-      }
-      status.textContent = 'Dry-run завершён';
-      // Render summary and diff
-      const inserted = data.inserted || [];
-      const updated = data.updated || [];
-      const deleted = data.deleted || [];
-      const warnings = data.warnings || [];
-      summary.innerHTML = `<div>Insert: ${inserted.length}; Update: ${updated.length}; Delete: ${deleted.length}; Warnings: ${warnings.length}</div>`;
-      if(warnings.length){ summary.innerHTML += '<div style="color:#f5a; margin-top:6px;">'+warnings.map(w=>escapeHtml(w)).join('<br>')+'</div>'; }
-      // Build diff preview
-      let html = '';
-      if(inserted.length){ html += '<div style="color:#8f8;">-- Inserted --</div>'; inserted.slice(0,200).forEach(i=>{ html += `<div>+ ${escapeHtml(i.key||i.match_key||JSON.stringify(i))}</div>`; }); }
-      if(updated.length){ html += '<div style="color:#ffb347; margin-top:6px;">-- Updated --</div>'; updated.slice(0,200).forEach(u=>{ html += `<div>~ ${escapeHtml(u.key||u.match_key||JSON.stringify(u))}</div>`; }); }
-      if(deleted.length){ html += '<div style="color:#f88; margin-top:6px;">-- Deleted --</div>'; deleted.slice(0,200).forEach(d=>{ html += `<div>- ${escapeHtml(d.key||d.match_key||JSON.stringify(d))}</div>`; }); }
-      if(!html) html = '<div style="color:#999;">Нет изменений</div>';
-      diffBox.innerHTML = html;
-      if(applyBtn) applyBtn.disabled = false;
-    }catch(e){ console.error('dry-run error', e); if(status) status.textContent = 'Ошибка выполнения dry-run'; summary.innerHTML = '<div style="color:#f55;">'+escapeHtml(String(e))+'</div>'; }
-  }
-
-  async function runImportApply(){
-    const status = document.getElementById('import-status'); const diffBox = document.getElementById('import-diff');
-    const force = document.getElementById('import-force-delete')?.checked ? '1' : '0';
-    if(!confirm('Вы уверены, что хотите применить изменения к таблице matches? Операция транзакционная.')) return;
-    if(status) status.textContent = 'Применяю изменения...';
-    try{
-  const initData = window.Telegram?.WebApp?.initData;
-  const fd = new FormData();
-  if(initData) fd.append('initData', initData);
-      if(force==='1') fd.append('force','1');
-      const res = await fetch('/api/admin/matches/import?apply=1', { method: 'POST', body: fd });
-      const data = await res.json();
-      if(!res.ok || data.error){
-        status.textContent = 'Ошибка: ' + (data.error || res.statusText);
-        diffBox.innerHTML = '<div style="color:#f55;">Apply failed: '+escapeHtml(data.error||res.statusText)+'</div>';
-        return;
-      }
-      status.textContent = 'Apply успешно выполнен';
-      // Show result summary and refresh matches list
-      const inserted = data.inserted || 0; const updated = data.updated || 0; const cancelled = data.cancelled || 0;
-      diffBox.innerHTML = `<div style="color:#8f8;">Inserted: ${inserted}</div><div style="color:#ffb347;">Updated: ${updated}</div><div style="color:#f88;">Cancelled (deleted): ${cancelled}</div>`;
-      showToast('Импорт применён: inserts='+inserted+' updates='+updated+' cancels='+cancelled,'success');
-      // Close modal and reload matches
-      setTimeout(()=>{ closeImportModal(); loadMatches(); }, 900);
-    }catch(e){ console.error('apply error', e); if(status) status.textContent = 'Ошибка применения изменений'; diffBox.innerHTML = '<div style="color:#f55;">'+escapeHtml(String(e))+'</div>'; }
-  }
-
-  // Ensure global namespace object exists before exposing functions
-  window.AdminEnhanced = window.AdminEnhanced || {};
-  // expose to global (merge without overwriting existing handlers)
-  Object.assign(window.AdminEnhanced, {
-    openImportModal,
-    closeImportModal,
-    runImportDryRun,
-    runImportApply,
-    runGoogleImportFromModal
-  });
-
-  async function runGoogleImportFromModal(){
-    const btn = document.getElementById('import-google-into-matches');
-    const status = document.getElementById('import-status');
-    const summary = document.getElementById('import-summary');
-    if(!btn) return;
-    const originalText = btn.textContent;
-    try{
-      btn.disabled = true; btn.textContent = 'Импортирую...';
-      if(status) status.textContent = 'Импорт из Google в matches...';
-      const fd = new FormData();
-      const initData = window.Telegram?.WebApp?.initData;
-      if(initData) fd.append('initData', initData);
-      const res = await fetch('/api/admin/google/import-schedule', { method: 'POST', body: fd });
-      const data = await res.json();
-      if(!res.ok || data.error){
-        const msg = data.error || res.statusText;
-        if(status) status.textContent = 'Ошибка импорта: ' + msg;
-        showToast('Ошибка импорта из Google: '+msg, 'error', 6000);
-        return;
-      }
-      // Success
-      if(status) status.textContent = 'Импорт завершён. Снапшет обновлён.';
-      if(summary) summary.innerHTML = '<div style="color:#8f8;">Импорт выполнен: расписание записано в БД и снапшет пересобран. Теперь можно запустить dry-run или сразу применять изменения при необходимости.</div>';
-      showToast('Импортировано из Google и обновлено расписание', 'success');
-      // Перезагрузим список матчей (панель «Матчи»)
-      try{ if(typeof loadMatches === 'function') loadMatches(); }catch(_){ }
-    }catch(e){
-      if(status) status.textContent = 'Ошибка импорта';
-      showToast('Ошибка импорта из Google: '+String(e), 'error', 6000);
-    }finally{
-      btn.disabled = false; btn.textContent = originalText;
-    }
-  }
+  // (Удалено) Инициализация Google Import/Export и модалка импорта расписания
 
   function createNewsElement(news) {
     const newsEl = document.createElement('div');
