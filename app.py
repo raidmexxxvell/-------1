@@ -1387,9 +1387,9 @@ def api_betting_place():
                 # Отправляем в комнату конкретного матча и в общую комнату прогнозов
                 # Используем emit_to_topic_batched для умной группировки
                 match_id_str = f"{home}_{away}_{date_key or ''}"
-                # Мгновенная доставка для UX: bypass батчинг (priority>0)
-                ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, priority=1)
-                ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, priority=1)
+                # Батчинг 500 мс для сглаживания нагрузки
+                ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=500)
+                ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=500)
         except Exception as e:
             app.logger.error(f"WebSocket odds update failed: {e}")
         # --- КОНЕЦ НОВОГО КОДА ---
@@ -9245,9 +9245,9 @@ def api_vote_match():
                             'fields': odds_fields
                         }
                         match_id_str = f"{home}_{away}_{date_key or ''}"
-                        # Мгновенная доставка после голосования: bypass батчинг
-                        ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, priority=1)
-                        ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, priority=1)
+                        # Батчинг 500 мс после голосования
+                        ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=500)
+                        ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=500)
                 except Exception as _e:
                     app.logger.error(f"vote ws error: {_e}")
                 return jsonify({'status': 'ok'})
