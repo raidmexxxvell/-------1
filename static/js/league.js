@@ -633,7 +633,7 @@
     } catch(_) {}
   }
 
-  function refreshSchedule(){
+  async function refreshSchedule(){
     try {
       const pane = document.getElementById('league-pane-schedule');
       if (!pane || !window.fetchEtag) return;
@@ -646,6 +646,20 @@
         try { renderSchedule(pane, cached.data || cached); } catch(_) {}
         return; // экономим сеть — считаем, что уже свежо
       }
+      // Если кэш устарел и предзагрузка summary ещё идёт — подождём немного
+      try {
+        if (window.__SUMMARY_IN_FLIGHT__) {
+          const waitForSummary = (ms=1200) => new Promise(resolve => {
+            let t=null; const onReady = () => { try { if(t) clearTimeout(t); } catch(_) {}; resolve('ready'); };
+            try { window.addEventListener('preload:summary-ready', onReady, { once: true }); } catch(_) {}
+            t = setTimeout(() => { try { window.removeEventListener('preload:summary-ready', onReady); } catch(_) {}; resolve('timeout'); }, ms);
+          });
+          await waitForSummary(1200);
+          try { cached = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch(_) { cached = null; }
+          const fresh2 = cached && Number.isFinite(cached.ts) && (Date.now() - cached.ts < FRESH_TTL) && ((cached.data?.tours && cached.data.tours.length>0) || (cached?.tours && cached.tours.length>0));
+          if (fresh2) { try { renderSchedule(pane, (cached.data||cached)); } catch(_) {}; return; }
+        }
+      } catch(_) {}
       // Фолбэк: обычная загрузка через ETag
       window.fetchEtag('/api/schedule', { cacheKey: 'league:schedule', swrMs: 8000, extract: j=> (j?.data||j) })
         .then(({ data }) => { try { renderSchedule(pane, data); } catch(_) {} })

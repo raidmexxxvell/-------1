@@ -1162,9 +1162,20 @@
         return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
     }
 
+    // Небольшой помощник: подождать завершения предзагрузки summary (или таймаут)
+    function waitForSummary(ms = 1200) {
+        return new Promise((resolve) => {
+            let timer = null;
+            const cleanup = () => { try { if (timer) clearTimeout(timer); } catch(_) {}; try { window.removeEventListener('preload:summary-ready', onReady); } catch(_) {} };
+            const onReady = () => { cleanup(); resolve('ready'); };
+            try { window.addEventListener('preload:summary-ready', onReady, { once: true }); } catch(_) {}
+            timer = setTimeout(() => { cleanup(); resolve('timeout'); }, ms);
+        });
+    }
+
     // --------- РАСПИСАНИЕ ---------
     let _scheduleLoading = false;
-    function loadSchedule() {
+    async function loadSchedule() {
         if (_scheduleLoading) return;
         const pane = document.getElementById('ufo-schedule');
         if (!pane) return;
@@ -1172,8 +1183,17 @@
         const CACHE_KEY = 'schedule:tours';
         const FRESH_TTL = 10 * 60 * 1000; // 10 минут
         const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
-        const cached = readCache();
+        let cached = readCache();
         if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
+
+        // Если кэш пуст/протух и идёт прогрев summary — подождём немного
+        try {
+            const stale = !(cached && (Date.now() - (cached.ts||0) < FRESH_TTL));
+            if (stale && window.__SUMMARY_IN_FLIGHT__) {
+                await waitForSummary(1200);
+                cached = readCache();
+            }
+        } catch(_) {}
 
         const renderSchedule = (data) => {
             try { window.League?.renderSchedule?.(pane, data?.data || data); } catch(_) {
@@ -1244,7 +1264,7 @@
 
     // --------- РЕЗУЛЬТАТЫ ---------
     let _resultsLoading = false;
-    function loadResults() {
+    async function loadResults() {
         if (_resultsLoading) return;
         const pane = document.getElementById('ufo-results');
         if (!pane) return;
@@ -1252,8 +1272,17 @@
         const CACHE_KEY = 'results:list';
         const FRESH_TTL = 10 * 60 * 1000; // 10 минут
         const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
-        const cached = readCache();
+        let cached = readCache();
         if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';
+
+        // Если кэш пуст/протух и идёт прогрев summary — подождём немного
+        try {
+            const stale = !(cached && (Date.now() - (cached.ts||0) < FRESH_TTL));
+            if (stale && window.__SUMMARY_IN_FLIGHT__) {
+                await waitForSummary(1200);
+                cached = readCache();
+            }
+        } catch(_) {}
 
         const renderResults = (data) => {
             try { window.League?.renderResults?.(pane, data?.data || data); } catch(_) {
@@ -1336,6 +1365,7 @@
         _statsPreloaded = true; trySignalAllReady();
         // Попробуем одним запросом получить summary (schedule+results+tours+leaderboard)
         if (window.fetchEtag) {
+            try { window.__SUMMARY_IN_FLIGHT__ = true; window.__SUMMARY_DONE__ = false; } catch(_) {}
             window.fetchEtag('/api/summary', {
                 cacheKey: 'summary:all',
                 swrMs: 20000,
@@ -1370,6 +1400,7 @@
             }).finally(() => {
                 _schedulePreloaded = true; trySignalAllReady();
                 _resultsPreloaded = true; trySignalAllReady();
+                try { window.__SUMMARY_IN_FLIGHT__ = false; window.__SUMMARY_DONE__ = true; window.dispatchEvent(new CustomEvent('preload:summary-ready')); } catch(_) {}
             });
         } else {
             // Fallback: отдельные запросы
