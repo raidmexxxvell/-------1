@@ -10857,7 +10857,7 @@ def api_admin_generate_season_schedule():
             if mode == 'full_reset':
                 try:
                     # Полный сброс (внутри очистит кэши/снапшоты и т.д.)
-                    _ = _perform_full_reset(clear_admin_logs=True, auto_import_schedule=False)
+                    _ = _perform_full_reset(clear_admin_logs=True)
                 except Exception:
                     # продолжаем, даже если часть шагов сброса не удалась
                     pass
@@ -13407,7 +13407,7 @@ def api_admin_bump_version():
         app.logger.error(f"bump-version error: {e}")
         return jsonify({'error': 'Не удалось обновить версию'}), 500
 
-def _perform_full_reset(clear_admin_logs: bool = False, auto_import_schedule: bool = True):
+def _perform_full_reset(clear_admin_logs: bool = False):
     """Reusable helper to perform full reset. Optionally clears admin_logs and optionally auto-imports schedule.
 
     Returns: dict(status, summary, post)
@@ -13657,35 +13657,8 @@ def _perform_full_reset(clear_admin_logs: bool = False, auto_import_schedule: bo
     except Exception:
         pass
 
-    # Best-effort: сразу импортируем расписание из Sheets (если разрешено)
-    post_import = {'schedule_imported': False}
-    try:
-        if auto_import_schedule and os.environ.get('AUTO_IMPORT_SCHEDULE_AFTER_RESET','1') == '1':
-            try:
-                payload = _build_schedule_payload_from_sheet()
-                if SessionLocal is not None:
-                    dbi: Session = get_db()
-                    try:
-                        _snapshot_set(dbi, Snapshot, 'schedule', payload, app.logger)
-                        post_import['schedule_imported'] = True
-                    finally:
-                        try: dbi.close()
-                        except Exception: pass
-                try:
-                    invalidator = globals().get('invalidator')
-                    if invalidator is not None:
-                        invalidator.invalidate_for_change('schedule_update', {})
-                    else:
-                        if cache_manager:
-                            cache_manager.invalidate('schedule')
-                except Exception:
-                    pass
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    return {'status': 'ok', 'summary': summary, 'post': post_import}, 200
+    # Авто-импорт расписания отключён: расписание теперь всегда генерируется сервером
+    return {'status': 'ok', 'summary': summary}, 200
 
 @app.route('/api/admin/full-reset', methods=['POST'])
 def api_admin_full_reset():
@@ -13705,7 +13678,7 @@ def api_admin_full_reset():
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
 
-        data, code = _perform_full_reset(clear_admin_logs=False, auto_import_schedule=True)
+        data, code = _perform_full_reset(clear_admin_logs=False)
         return jsonify(data), code
     except Exception as e:
         try:

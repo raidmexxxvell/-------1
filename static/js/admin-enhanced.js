@@ -333,6 +333,46 @@
       refreshAllBtn.addEventListener('click', refreshAllData);
     }
 
+    // Season controls
+    const btnGenSoft = document.getElementById('admin-season-generate-soft');
+    if (btnGenSoft) {
+      btnGenSoft.addEventListener('click', () => generateSeason('soft_start'));
+    }
+    const btnGenFull = document.getElementById('admin-season-generate-full');
+    if (btnGenFull) {
+      btnGenFull.addEventListener('click', () => generateSeason('full_reset'));
+    }
+    const btnSeasonDry = document.getElementById('admin-season-dry');
+    if (btnSeasonDry) {
+      btnSeasonDry.addEventListener('click', () => seasonRollover('dry'));
+    }
+    const btnSeasonSoft = document.getElementById('admin-season-soft');
+    if (btnSeasonSoft) {
+      btnSeasonSoft.addEventListener('click', () => seasonRollover('soft'));
+    }
+    const btnSeasonRoll = document.getElementById('admin-season-roll');
+    if (btnSeasonRoll) {
+      btnSeasonRoll.addEventListener('click', () => seasonRollover('full'));
+    }
+    const btnSeasonRollback = document.getElementById('admin-season-rollback');
+    if (btnSeasonRollback) {
+      btnSeasonRollback.addEventListener('click', () => seasonRollback());
+    }
+    const btnApplySeason = document.getElementById('apply-season-btn');
+    if (btnApplySeason) {
+      btnApplySeason.addEventListener('click', () => applySelectedSeason());
+    }
+    // Update helper label for season to be created
+    const startInput = document.getElementById('season-generate-date');
+    if (startInput) {
+      const labelEl = document.getElementById('season-generate-label');
+      const update = () => { if (labelEl) labelEl.textContent = 'Будет создан сезон: ' + computeSeasonLabelFromDate(startInput.value); };
+      startInput.addEventListener('input', update);
+      update();
+    }
+    // Fill seasons picker initially (if exists)
+    try { loadSeasonsIntoPicker(true); } catch(_) {}
+
   }
 
   function createMatchElement(match) {
@@ -372,6 +412,31 @@
       return { class: 'lineup-partial', text: `Частично (${homeMain}/${awayMain})` };
     } else {
       return { class: 'lineup-empty', text: 'Нет составов' };
+    }
+  }
+
+  // ================== MATCHES & LINEUPS LIST ==================
+  async function loadMatches(){
+    const container = document.getElementById('matches-list');
+    if (!container) return;
+    container.innerHTML = '<div class="status-text">Загрузка ближайших матчей...</div>';
+    try{
+      const fd = new FormData();
+      fd.append('initData', window.Telegram?.WebApp?.initData || '');
+      const res = await fetch('/api/admin/matches/upcoming', { method: 'POST', body: fd, credentials: 'include' });
+      const data = await res.json();
+      if(!res.ok || data.error){ throw new Error(data.error || `HTTP ${res.status}`); }
+      const matches = Array.isArray(data.matches) ? data.matches : [];
+      container.innerHTML = '';
+      if(matches.length === 0){
+        container.innerHTML = '<div class="status-text">Нет ближайших матчей</div>';
+        return;
+      }
+      matches.forEach(m => container.appendChild(createMatchElement(m)));
+    } catch(err){
+      console.error('[Admin] loadMatches error', err);
+      container.innerHTML = '<div class="status-text">Ошибка загрузки матчей</div>';
+      showToast('Ошибка загрузки матчей: ' + err.message, 'error');
     }
   }
 
