@@ -127,6 +127,17 @@
         const data = await res.json();
         m = data?.match_of_week;
       }
+        const cached = (function(){ try { return JSON.parse(localStorage.getItem('schedule:tours')||'null'); } catch(_){ return null; } })();
+        const sched = cached?.data || cached || null;
+        if (sched && typeof sched==='object' && sched.match_of_week) {
+          m = sched.match_of_week;
+        } else {
+          try {
+            const r = await window.fetchEtag('/api/schedule', { cacheKey: 'ads:topmatch', extract: j => (j?.data||j) });
+            const data = r.raw || r.data; m = data?.match_of_week || null;
+            try { localStorage.setItem('schedule:tours', JSON.stringify({ data, version: r.etag||null, ts: Date.now() })); } catch(_){ }
+          } catch(_) { m = null; }
+        }
       const host = document.getElementById('home-pane');
       if (!host) return; host.innerHTML='';
       if (!m) { host.innerHTML='<div style="color: var(--gray);">Скоро анонс матча недели</div>'; return; }

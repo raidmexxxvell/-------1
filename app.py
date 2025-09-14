@@ -4380,7 +4380,25 @@ def mirror_match_score_to_schedule(home: str, away: str, score_home: int|None, s
         return False
 
 def get_user_achievements_row(user_id):
-    """Читает или инициализирует строку достижений пользователя."""
+    """Читает или инициализирует строку достижений пользователя.
+
+    Оптимизация: кэшируем результат на ACH_ROW_CACHE_TTL секунд (по умолчанию 1800 = 30 мин),
+    чтобы повторные вызовы /api/achievements не ходили в Google Sheets/БД каждый раз.
+    """
+    # In-memory cache for row lookups
+    try:
+        _ttl = int(os.environ.get('ACH_ROW_CACHE_TTL', '1800'))
+    except Exception:
+        _ttl = 1800
+    global _ACH_ROW_CACHE
+    if '_ACH_ROW_CACHE' not in globals():
+        _ACH_ROW_CACHE = {}
+    now_ts = time.time()
+    ck = f"row:{user_id}"
+    ce = _ACH_ROW_CACHE.get(ck)
+    if ce and (now_ts - ce.get('ts', 0) < _ttl):
+        return ce['row'], ce['data']
+
     ws = get_achievements_sheet()
     try:
         cell = ws.find(str(user_id), in_column=1)
@@ -4388,7 +4406,8 @@ def get_user_achievements_row(user_id):
             row_vals = ws.row_values(cell.row)
             # Гарантируем длину до 19 колонок (A..S)
             row_vals = list(row_vals) + [''] * (19 - len(row_vals))
-            return cell.row, {
+            row = cell.row
+            data = {
                 'credits_tier': int(row_vals[1] or 0),
                 'credits_unlocked_at': row_vals[2] or '',
                 'level_tier': int(row_vals[3] or 0),
@@ -4408,6 +4427,8 @@ def get_user_achievements_row(user_id):
                 'weeks_tier': int((row_vals[17] or 0)),
                 'weeks_unlocked_at': row_vals[18] if len(row_vals) > 18 else ''
             }
+            _ACH_ROW_CACHE[ck] = {'ts': now_ts, 'row': row, 'data': data}
+            return row, data
     except gspread.exceptions.APIError as e:
         app.logger.error(f"Ошибка API при чтении достижений: {e}")
     # Создаём новую строку (включая invited_tier/unlocked_at)
@@ -4426,7 +4447,7 @@ def get_user_achievements_row(user_id):
     ])
     # Найдём только что добавленную (последняя строка)
     last_row = len(ws.get_all_values())
-    return last_row, {
+    data = {
         'credits_tier': 0,
         'credits_unlocked_at': '',
         'level_tier': 0,
@@ -4446,6 +4467,8 @@ def get_user_achievements_row(user_id):
         'weeks_tier': 0,
         'weeks_unlocked_at': ''
     }
+    _ACH_ROW_CACHE[ck] = {'ts': now_ts, 'row': last_row, 'data': data}
+    return last_row, data
 
 def compute_tier(value: int, thresholds) -> int:
     """Возвращает tier по убывающим порогам. thresholds: [(threshold, tier), ...]"""
@@ -8571,8 +8594,8 @@ def get_achievements():
       POST: form-data initData=<telegram init data> (старый способ, обратно совместимо)
       GET:  /api/achievements?initData=<urlencoded initData>  или заголовок X-Telegram-Init-Data
 
-    Кэш на 30 сек в памяти; при совпадении If-None-Match возвращается 304.
-    Заголовок Cache-Control: private, max-age=30, stale-while-revalidate=60
+    In-memory кэш на ACH_CACHE_TTL секунд (по умолчанию 300); при совпадении If-None-Match возвращается 304.
+    Заголовок Cache-Control: private, max-age=60, stale-while-revalidate=300
     """
     try:
         global ACHIEVEMENTS_CACHE
@@ -8594,16 +8617,21 @@ def get_achievements():
         now_ts = time.time()
         client_etag = request.headers.get('If-None-Match')
         ce = ACHIEVEMENTS_CACHE.get(cache_key)
-        if ce and (now_ts - ce.get('ts',0) < 30):
+        # Общий TTL для payload достижений (персональных): по умолчанию 300с, настраивается ACH_CACHE_TTL
+        try:
+            _ach_ttl = int(os.environ.get('ACH_CACHE_TTL', '300'))
+        except Exception:
+            _ach_ttl = 300
+        if ce and (now_ts - ce.get('ts',0) < _ach_ttl):
             # Быстрый ответ из кэша / условный 304
             if client_etag and client_etag == ce.get('etag'):
                 resp = flask.make_response('', 304)
                 resp.headers['ETag'] = ce.get('etag')
-                resp.headers['Cache-Control'] = 'private, max-age=30, stale-while-revalidate=60'
+                resp.headers['Cache-Control'] = 'private, max-age=60, stale-while-revalidate=300'
                 return resp
             resp = _json_response(ce['data'])
             resp.headers['ETag'] = ce.get('etag','')
-            resp.headers['Cache-Control'] = 'private, max-age=30, stale-while-revalidate=60'
+            resp.headers['Cache-Control'] = 'private, max-age=60, stale-while-revalidate=300'
             return resp
 
         # User fetch (DB or Sheets)
@@ -8664,7 +8692,13 @@ def get_achievements():
         bet_cache_key = f"bst:{user_id}"  # bet stats
         bet_stats_entry = _ACH_BET_STATS_CACHE.get(bet_cache_key)
         bet_stats = None
-        if bet_stats_entry and (now_ts - bet_stats_entry['ts'] < 120):  # 2 минуты кэширования расчёта ставок
+        # Кэшируем расчёт ставок дольше, чтобы избежать частых тяжёлых запросов
+        _ach_bet_ttl = 300
+        try:
+            _ach_bet_ttl = int(os.environ.get('ACH_BET_STATS_TTL', '300'))
+        except Exception:
+            _ach_bet_ttl = 300
+        if bet_stats_entry and (now_ts - bet_stats_entry['ts'] < _ach_bet_ttl):  # 5 минут по умолчанию
             bet_stats = bet_stats_entry['data']
         else:
             bet_stats = {'total':0,'won':0,'max_win_odds':0.0,'markets_used':set(),'weeks_active':set()}
@@ -8800,11 +8834,11 @@ def get_achievements():
         if client_etag and client_etag == etag:
             resp = flask.make_response('', 304)
             resp.headers['ETag'] = etag
-            resp.headers['Cache-Control'] = 'private, max-age=30, stale-while-revalidate=60'
+            resp.headers['Cache-Control'] = 'private, max-age=60, stale-while-revalidate=300'
             return resp
         resp = _json_response({**resp_payload, 'version': etag})
         resp.headers['ETag'] = etag
-        resp.headers['Cache-Control'] = 'private, max-age=30, stale-while-revalidate=60'
+        resp.headers['Cache-Control'] = 'private, max-age=60, stale-while-revalidate=300'
         return resp
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {str(e)}")
