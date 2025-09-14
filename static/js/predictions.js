@@ -8,6 +8,64 @@
     const toursEl = document.getElementById('pred-tours');
     const myBetsEl = document.getElementById('my-bets');
 
+    // Вынесено в общий скоуп: вспомогательные функции, используемые и рендером, и глобальным обработчиком событий
+    function setTextAnimated(btn, newText) {
+      if (!btn || btn.textContent === newText) return;
+      btn.textContent = newText;
+      btn.classList.add('updated');
+      setTimeout(() => btn.classList.remove('updated'), 500);
+    }
+
+    function updateCardOddsUI(card, odds, markets) {
+      try {
+        // 1) Основной рынок 1x2
+        const buttons12 = card.querySelectorAll('.bet-btn[data-bet-key]');
+        buttons12.forEach(btn => {
+          const key = btn.dataset.betKey;
+          const label = { home: 'П1', draw: 'Х', away: 'П2' }[key];
+          if (label && odds && odds[key] != null) {
+            setTextAnimated(btn, `${label} (${Number(odds[key]).toFixed(2)})`);
+          }
+        });
+        // 2) Тоталы
+        if (markets && Array.isArray(markets.totals)) {
+          markets.totals.forEach(row => {
+            try {
+              const line = String(row.line);
+              const over = Number(row.odds?.over);
+              const under = Number(row.odds?.under);
+              const overBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="over"][data-line="${line}"]`);
+              const underBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="under"][data-line="${line}"]`);
+              if (overBtn && !Number.isNaN(over)) {
+                setTextAnimated(overBtn, `Больше (${over.toFixed(2)})`);
+              }
+              if (underBtn && !Number.isNaN(under)) {
+                setTextAnimated(underBtn, `Меньше (${under.toFixed(2)})`);
+              }
+            } catch(_){}
+          });
+        }
+        // 3) Спецрынки
+        if (markets && markets.specials) {
+          const sp = markets.specials;
+          const updYN = (mk) => {
+            const o = sp[mk]?.odds || null;
+            if (!o) return;
+            const yesBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="yes"]`);
+            const noBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="no"]`);
+            if (yesBtn && o.yes != null) {
+              setTextAnimated(yesBtn, `Да (${Number(o.yes).toFixed(2)})`);
+            }
+            if (noBtn && o.no != null) {
+              setTextAnimated(noBtn, `Нет (${Number(o.no).toFixed(2)})`);
+            }
+          };
+          updYN('penalty');
+          updYN('redcard');
+        }
+      } catch(_){}
+    }
+
     // Подвкладки раздела
     const pTabs = document.querySelectorAll('#pred-subtabs .subtab-item');
     const pMap = {
@@ -54,61 +112,7 @@
       const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
       const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
 
-      // --- DRY helpers ---
-      function setTextAnimated(btn, newText) {
-        if (!btn || btn.textContent === newText) return;
-        btn.textContent = newText;
-        btn.classList.add('updated');
-        setTimeout(() => btn.classList.remove('updated'), 500);
-      }
-
-      function updateCardOddsUI(card, odds, markets) {
-        // 1) Основной рынок 1x2
-        const buttons12 = card.querySelectorAll('.bet-btn[data-bet-key]');
-        buttons12.forEach(btn => {
-          const key = btn.dataset.betKey;
-          const label = { home: 'П1', draw: 'Х', away: 'П2' }[key];
-          if (label && odds && odds[key] != null) {
-            setTextAnimated(btn, `${label} (${Number(odds[key]).toFixed(2)})`);
-          }
-        });
-        // 2) Тоталы
-        if (markets && Array.isArray(markets.totals)) {
-          markets.totals.forEach(row => {
-            try {
-              const line = String(row.line);
-              const over = Number(row.odds?.over);
-              const under = Number(row.odds?.under);
-              const overBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="over"][data-line="${line}"]`);
-              const underBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="under"][data-line="${line}"]`);
-              if (overBtn && !Number.isNaN(over)) {
-                setTextAnimated(overBtn, `Больше (${over.toFixed(2)})`);
-              }
-              if (underBtn && !Number.isNaN(under)) {
-                setTextAnimated(underBtn, `Меньше (${under.toFixed(2)})`);
-              }
-            } catch(_){}
-          });
-        }
-        // 3) Спецрынки
-        if (markets && markets.specials) {
-          const sp = markets.specials;
-          const updYN = (mk) => {
-            const o = sp[mk]?.odds || null;
-            if (!o) return;
-            const yesBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="yes"]`);
-            const noBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="no"]`);
-            if (yesBtn && o.yes != null) {
-              setTextAnimated(yesBtn, `Да (${Number(o.yes).toFixed(2)})`);
-            }
-            if (noBtn && o.no != null) {
-              setTextAnimated(noBtn, `Нет (${Number(o.no).toFixed(2)})`);
-            }
-          };
-          updYN('penalty');
-          updYN('redcard');
-        }
-      }
+      // --- DRY helpers вынесены выше ---
 
       const renderTours = (data) => {
         const ds = data?.tours ? data : (data?.data || {});

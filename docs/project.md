@@ -342,6 +342,7 @@ class Tournament(Base):
     - `fields`: полный снэпшот рынков: `odds` (ключи `home,draw,away`) и `markets` (`totals`: массив `{line, odds:{over,under}}`; `specials`: `{ penalty: {available, odds:{yes,no}}, redcard: {available, odds:{yes,no}} }`).
     - Отправляется с задержкой (debounce) для группировки нескольких ставок в одно обновление.
 - В payload туров (`/api/betting/tours`) для каждого матча присутствует `odds_version` (инициализация версии на клиенте)
+ - В билдере `/api/betting/tours` добавлена серверная дедупликация матчей внутри тура по ключу `norm(home)|norm(away)|YYYY-MM-DD` (нормализация: trim+lower+замена `ё→е`). Это гарантирует отсутствие дублей в ленте прогнозов даже при исторических артефактах в снапшоте расписания.
 
 Снапшот `results`:
 - Обновляется в `POST /api/match/settle` при наличии финального счёта в `MatchScore` (upsert записи в массиве `results`, обновление `updated_at`). Старые записи по тому же матчу перезаписываются; отдельная история версий не ведётся.

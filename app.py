@@ -6455,6 +6455,29 @@ def _build_betting_tours_payload():
 
     now_local = datetime.now()
     for t in tours:
+        # Дедупликация матчей внутри тура по ключу (norm(home)|norm(away)|YYYY-MM-DD)
+        try:
+            seen = set()
+            uniq = []
+            def _norm(s: str) -> str:
+                try:
+                    return (s or '').strip().lower().replace('ё','е')
+                except Exception:
+                    return (s or '')
+            for m in t.get('matches', []) or []:
+                try:
+                    d = (m.get('date') or m.get('datetime') or '')
+                    d = (d or '')[:10]
+                    key = f"{_norm(m.get('home',''))}|{_norm(m.get('away',''))}|{d}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    uniq.append(m)
+                except Exception:
+                    uniq.append(m)
+            t['matches'] = uniq
+        except Exception:
+            pass
         # Скрываем матчи, которые уже стартовали, из списка для ставок
         filtered_matches = []
         for m in t.get('matches', []):
@@ -10619,64 +10642,136 @@ def api_admin_google_import_schedule():
             return jsonify({'error': 'sheet_read_failed'}), 500
         db = get_db()
         try:
-            # Persist all tours/matches into `matches` table: full load from sheet
+            # Persist all tours/matches into `matches` table: full replace using key (tour, home_id, away_id)
+            def _norm_name(s: str) -> str:
+                try:
+                    return (s or '').strip().lower().replace('ё','е')
+                except Exception:
+                    return (s or '')
+            def _parse_match_dt(m):
+                # Accept m['datetime'] (ISO), or join m['date'] + m['time']
+                try:
+                    ds = m.get('datetime')
+                    if ds:
+                        dt = datetime.fromisoformat(ds)
+                        # drop tz to naive UTC if provided
+                        if dt.tzinfo is not None:
+                            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                        return dt
+                except Exception:
+                    pass
+                d = (m.get('date') or '')
+                tm = (m.get('time') or '00:00')
+                if d:
+                    try:
+                        dt = datetime.fromisoformat(f"{d}T{tm}")
+                        if dt.tzinfo is not None:
+                            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                        return dt
+                    except Exception:
+                        return None
+                return None
+
+            # Build team name → id map with normalization
             try:
-                # load team name -> id map
                 team_rows = db.query(Team).all()
-                team_name_map = { (t.name or '').strip().lower(): t.id for t in team_rows }
+                team_name_map = {}
+                for trow in team_rows:
+                    nm = (trow.name or '')
+                    team_name_map[_norm_name(nm)] = trow.id
             except Exception:
                 team_name_map = {}
 
-            # Option: we perform upsert-like behavior: find existing by home/away/date and update or insert
+            # Load existing matches to detect updates/deletes
+            existing_rows = db.query(Match).all()
+            # Index by (tour|default -1, home_id, away_id)
+            def _key_for(mm):
+                try:
+                    tour_k = int(mm.tour) if getattr(mm, 'tour', None) is not None else -1
+                except Exception:
+                    tour_k = -1
+                return (tour_k, int(mm.home_team_id or 0), int(mm.away_team_id or 0))
+            existing_by_key = {}
+            for mm in existing_rows:
+                k = _key_for(mm)
+                existing_by_key.setdefault(k, []).append(mm)
+
+            used_keys = set()
+            # Upsert by (tour, home, away)
             for t in payload.get('tours', []) or []:
+                tour_num = t.get('tour') if isinstance(t.get('tour'), int) else None
+                tour_k = int(tour_num) if tour_num is not None else -1
                 for m in t.get('matches', []) or []:
                     try:
-                        home_name = (m.get('home') or '').strip()
-                        away_name = (m.get('away') or '').strip()
-                        tour_num = t.get('tour') if isinstance(t.get('tour'), int) else None
-                        date_s = m.get('datetime') or m.get('date') or ''
-                        if not home_name or not away_name or not date_s:
+                        home_name = (m.get('home') or '')
+                        away_name = (m.get('away') or '')
+                        if not home_name or not away_name:
                             continue
-                        # parse datetime
-                        try:
-                            dt = datetime.fromisoformat(date_s)
-                        except Exception:
-                            try:
-                                dt = datetime.fromisoformat(m.get('date'))
-                            except Exception:
-                                dt = None
-
-                        home_id = team_name_map.get(home_name.lower())
-                        away_id = team_name_map.get(away_name.lower())
-                        if not home_id or not away_id or dt is None:
+                        home_id = team_name_map.get(_norm_name(home_name))
+                        away_id = team_name_map.get(_norm_name(away_name))
+                        if not home_id or not away_id:
+                            # команда не распознана — пропускаем строку
                             continue
-
-                        # find existing match with same home/away and date within tolerance (exact match preferred)
-                        existing = None
-                        try:
-                            existing = db.query(Match).filter(Match.home_team_id==home_id, Match.away_team_id==away_id, Match.match_date==dt).first()
-                        except Exception:
-                            existing = None
-
-                        if existing:
-                            # update minimal fields
-                            existing.match_date = dt
-                            existing.home_team_id = home_id
-                            existing.away_team_id = away_id
-                            if tour_num is not None:
-                                try:
-                                    existing.tour = int(tour_num)
-                                except Exception:
-                                    pass
-                            existing.status = existing.status or 'scheduled'
-                            db.add(existing)
+                        dt = _parse_match_dt(m)
+                        if dt is None:
+                            continue
+                        key = (tour_k, int(home_id), int(away_id))
+                        used_keys.add(key)
+                        lst = existing_by_key.get(key) or []
+                        # если есть несколько записей по ключу — первую оставляем как основную, остальные отменяем ниже
+                        primary = lst[0] if lst else None
+                        if primary is not None:
+                            # Обновляем только безопасные поля: дата/время, тур (если был -1 → None), место/заметки при необходимости.
+                            if primary.status not in ('finished', 'live'):
+                                primary.match_date = dt
+                                if tour_num is not None:
+                                    try:
+                                        primary.tour = int(tour_num)
+                                    except Exception:
+                                        pass
+                                # не трогаем home_score / away_score / status, если они уже есть
+                                db.add(primary)
                         else:
-                            # insert new match
-                            nm = Match(home_team_id=home_id, away_team_id=away_id, match_date=dt, status='scheduled', tour=(int(tour_num) if tour_num is not None else None))
+                            # Вставка новой записи
+                            nm = Match(
+                                home_team_id=int(home_id),
+                                away_team_id=int(away_id),
+                                match_date=dt,
+                                status='scheduled',
+                                tour=(int(tour_num) if tour_num is not None else None)
+                            )
                             db.add(nm)
                     except Exception:
-                        app.logger.debug('failed to persist match row from sheet', exc_info=True)
-            # commit persisted matches
+                        app.logger.debug('failed to upsert match row from sheet', exc_info=True)
+
+            # Мягко отменим (cancel) записи, которых больше нет в источнике, а также явные дубликаты по ключу
+            now_utc = datetime.now(timezone.utc)
+            for k, rows in existing_by_key.items():
+                # сохранить только один primary (первый) — остальные дубликаты отменить
+                for dup in rows[1:]:
+                    try:
+                        if dup.status in ('finished', 'live'):
+                            continue
+                        dup.status = 'cancelled'
+                        db.add(dup)
+                    except Exception:
+                        pass
+                if k not in used_keys:
+                    # если ключ отсутствует среди импортированных и матч ещё не начался — отменить
+                    for mm in rows[:1]:
+                        try:
+                            if mm.status in ('finished','live'):
+                                continue
+                            # Смотрим только будущие/ожидаемые
+                            dt = mm.match_date
+                            dt_cmp = dt if (dt and dt.tzinfo is not None) else (dt.replace(tzinfo=timezone.utc) if dt else None)
+                            if (dt_cmp is None) or (dt_cmp >= now_utc):
+                                mm.status = 'cancelled'
+                                db.add(mm)
+                        except Exception:
+                            pass
+
+            # commit persisted changes
             try:
                 db.commit()
             except Exception:
@@ -10685,7 +10780,7 @@ def api_admin_google_import_schedule():
                 except Exception:
                     pass
 
-            # After persisting full set into matches, rebuild snapshot from DB (keeps 3-tour logic)
+            # After persisting full set into matches, rebuild snapshot from DB
             try:
                 _update_schedule_snapshot_from_matches(db, app.logger)
             except Exception:
