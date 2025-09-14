@@ -10852,10 +10852,17 @@ def api_admin_generate_season_schedule():
             if mode == 'soft_start' and existing_cnt > 0:
                 return jsonify({'error': 'already_has_matches', 'tournament_id': active.id, 'count': int(existing_cnt)}), 409
 
-            # full_reset: удалим все незавершённые матчи текущего активного турнира
-            if mode == 'full_reset' and existing_cnt > 0:
+            # full_reset: выполнить полный сброс доменных данных (включая ставки и админ-логи),
+            # затем жёстко удалить все матчи активного турнира (включая finished) перед генерацией
+            if mode == 'full_reset':
                 try:
-                    db.query(Match).filter(Match.tournament_id == active.id, Match.status != 'finished').delete(synchronize_session=False)
+                    # Полный сброс (внутри очистит кэши/снапшоты и т.д.)
+                    _ = _perform_full_reset(clear_admin_logs=True, auto_import_schedule=False)
+                except Exception:
+                    # продолжаем, даже если часть шагов сброса не удалась
+                    pass
+                try:
+                    db.query(Match).filter(Match.tournament_id == active.id).delete(synchronize_session=False)
                     db.commit()
                 except Exception:
                     try: db.rollback()
@@ -13400,6 +13407,286 @@ def api_admin_bump_version():
         app.logger.error(f"bump-version error: {e}")
         return jsonify({'error': 'Не удалось обновить версию'}), 500
 
+def _perform_full_reset(clear_admin_logs: bool = False, auto_import_schedule: bool = True):
+    """Reusable helper to perform full reset. Optionally clears admin_logs and optionally auto-imports schedule.
+
+    Returns: dict(status, summary, post)
+    """
+    if SessionLocal is None:
+        return {'status': 'error', 'error': 'db_unavailable'}, 503
+
+    summary = {
+        'db_deleted': {},
+        'caches': {'memory': 0, 'redis': 'unknown'},
+        'snapshots_cleared': True,
+        'users_preserved': True,
+        'admin_logs_preserved': (not clear_admin_logs),
+    }
+
+    db: Session = get_db()
+    try:
+        # Последовательно очищаем таблицы доменной логики (кроме users)
+        def _safe_delete(q):
+            try:
+                cnt = q.delete(synchronize_session=False)
+                return int(cnt or 0)
+            except Exception:
+                return 0
+
+        # Основные промежуточные таблицы/агрегаты
+        summary['db_deleted']['league_table'] = _safe_delete(db.query(LeagueTableRow))
+        summary['db_deleted']['stats_table'] = _safe_delete(db.query(StatsTableRow))
+        summary['db_deleted']['match_votes'] = _safe_delete(db.query(MatchVote))
+        # Очистка счётов/событий/составов/агрегатов
+        try:
+            summary['db_deleted']['match_scores'] = _safe_delete(db.query(MatchScore))
+        except Exception:
+            pass
+        try:
+            summary['db_deleted']['match_player_events'] = _safe_delete(db.query(MatchPlayerEvent))
+        except Exception:
+            pass
+        try:
+            summary['db_deleted']['match_lineups'] = _safe_delete(db.query(MatchLineupPlayer))
+        except Exception:
+            pass
+        try:
+            summary['db_deleted']['match_stats_state'] = _safe_delete(db.query(MatchStatsAggregationState))
+        except Exception:
+            pass
+        # Флаги/спецсобытия/агрегированные статы
+        try:
+            summary['db_deleted']['match_flags'] = _safe_delete(db.query(MatchFlags))
+        except Exception:
+            pass
+        try:
+            summary['db_deleted']['match_specials'] = _safe_delete(db.query(MatchSpecials))
+        except Exception:
+            pass
+        try:
+            summary['db_deleted']['match_stats'] = _safe_delete(db.query(MatchStats))
+        except Exception:
+            pass
+        summary['db_deleted']['shop_order_items'] = _safe_delete(db.query(ShopOrderItem))
+        summary['db_deleted']['shop_orders'] = _safe_delete(db.query(ShopOrder))
+        summary['db_deleted']['bets'] = _safe_delete(db.query(Bet))
+        summary['db_deleted']['referrals'] = _safe_delete(db.query(Referral))
+        summary['db_deleted']['match_streams'] = _safe_delete(db.query(MatchStream))
+        summary['db_deleted']['match_comments'] = _safe_delete(db.query(MatchComment))
+        summary['db_deleted']['weekly_credit_baselines'] = _safe_delete(db.query(WeeklyCreditBaseline))
+        summary['db_deleted']['monthly_credit_baselines'] = _safe_delete(db.query(MonthlyCreditBaseline))
+        summary['db_deleted']['user_limits'] = _safe_delete(db.query(UserLimits))
+        summary['db_deleted']['snapshots'] = _safe_delete(db.query(Snapshot))
+
+        # Очистка агрегированной таблицы игроков, если присутствует (источник для /api/scorers)
+        try:
+            if 'TeamPlayerStats' in globals():
+                summary['db_deleted']['team_player_stats'] = _safe_delete(db.query(TeamPlayerStats))
+        except Exception:
+            pass
+
+        # Опционально очистим административные логи
+        if clear_admin_logs:
+            try:
+                from database.database_models import AdminLog as _AdminLog
+                summary['db_deleted']['admin_logs'] = _safe_delete(db.query(_AdminLog))
+            except Exception:
+                summary['db_deleted']['admin_logs'] = 0
+
+        db.commit()
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+    # Очистка in-memory структур
+    try:
+        # Версии коэффициентов ставок
+        try:
+            _ODDS_VERSION.clear()
+        except Exception:
+            pass
+
+        # Локальные кэши лидерборда
+        try:
+            LEADER_PRED_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
+            LEADER_RICH_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
+            LEADER_SERVER_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
+            LEADER_PRIZES_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
+        except Exception:
+            pass
+
+        # Кэш бомбардиров
+        try:
+            global SCORERS_CACHE
+            SCORERS_CACHE = {'ts': 0, 'items': []}
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # Полная инвалидация многоуровневого кэша (memory + redis)
+    try:
+        cm = globals().get('cache_manager')
+        if cm is None:
+            try:
+                from optimizations.multilevel_cache import get_cache
+                cm = get_cache()
+            except Exception:
+                cm = None
+        if cm is not None:
+            try:
+                summary['caches']['memory'] = cm.invalidate_pattern('cache:')
+                # Явно инвалидируем ключи, которые чаще всего смотрятся в UI
+                try:
+                    cm.invalidate('schedule')
+                    cm.invalidate('league_table')
+                    cm.invalidate('stats_table')
+                    cm.invalidate('results')
+                    cm.invalidate('betting-tours')
+                except Exception:
+                    pass
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Очистка метрик производительности (api/cache/ws) и локальных ETag метрик
+    try:
+        from optimizations import metrics as _perf_metrics_mod
+        try:
+            _perf_metrics_mod.reset()
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
+        # Локальный ETag helper cache и метрики
+        if '_ETAG_HELPER_CACHE' in globals():
+            try:
+                _ETAG_HELPER_CACHE.clear()
+            except Exception:
+                pass
+        if '_ETAG_METRICS' in globals():
+            try:
+                _ETAG_METRICS['by_key'].clear()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Очистка продвинутых таблиц (расширенная схема): PlayerStatistics / MatchEvent — best-effort
+    try:
+        from database.database_models import db_manager as adv_db, PlayerStatistics as AdvPlayerStatistics, MatchEvent as AdvMatchEvent
+        with adv_db.get_session() as adv_sess:
+            deleted = 0
+            try:
+                deleted += int(adv_sess.query(AdvPlayerStatistics).delete(synchronize_session=False) or 0)
+            except Exception:
+                pass
+            try:
+                deleted += int(adv_sess.query(AdvMatchEvent).delete(synchronize_session=False) or 0)
+            except Exception:
+                pass
+            try:
+                adv_sess.commit()
+            except Exception:
+                pass
+            summary['db_deleted']['advanced_player_stats_and_events'] = deleted
+    except Exception:
+        pass
+
+    # Принудительная инвалидация ключевых snapshot-ключей (если не удалены ранее) – защита от устаревших ETag в памяти
+    try:
+        cm = globals().get('cache_manager')
+        if cm is not None:
+            for k in ('results', 'schedule', 'league_table', 'stats_table', 'scorers'):
+                try:
+                    cm.invalidate(k)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # Широковещательное уведомление через WebSocket/Redis о полном сбросе
+    try:
+        invalidator = globals().get('invalidator')
+        if invalidator is not None:
+            payload = {'reason': 'full_reset', 'ts': datetime.now(timezone.utc).isoformat()}
+            try:
+                invalidator.publish_topic('global', 'topic_update', payload, priority=2)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Централизованная инвалидация через SmartInvalidator для основных сущностей после сброса
+    try:
+        invalidator = globals().get('invalidator')
+        if invalidator is not None:
+            try:
+                invalidator.invalidate_for_change('schedule_update', {})
+            except Exception:
+                pass
+            try:
+                invalidator.invalidate_for_change('league_table_update', {})
+            except Exception:
+                pass
+            try:
+                invalidator.invalidate_for_change('betting_tours_update', {})
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # После полного сброса: повторная очистка снапшотов ключей (защита от гонок фоновых задач)
+    try:
+        if SessionLocal is not None:
+            dbc: Session = get_db()
+            try:
+                for k in ('schedule', 'results', 'league-table', 'stats-table', 'betting-tours', 'feature-match'):
+                    try:
+                        _snapshot_set(dbc, Snapshot, k, None, app.logger)
+                    except Exception:
+                        pass
+                dbc.commit()
+            finally:
+                try: dbc.close()
+                except Exception: pass
+    except Exception:
+        pass
+
+    # Best-effort: сразу импортируем расписание из Sheets (если разрешено)
+    post_import = {'schedule_imported': False}
+    try:
+        if auto_import_schedule and os.environ.get('AUTO_IMPORT_SCHEDULE_AFTER_RESET','1') == '1':
+            try:
+                payload = _build_schedule_payload_from_sheet()
+                if SessionLocal is not None:
+                    dbi: Session = get_db()
+                    try:
+                        _snapshot_set(dbi, Snapshot, 'schedule', payload, app.logger)
+                        post_import['schedule_imported'] = True
+                    finally:
+                        try: dbi.close()
+                        except Exception: pass
+                try:
+                    invalidator = globals().get('invalidator')
+                    if invalidator is not None:
+                        invalidator.invalidate_for_change('schedule_update', {})
+                    else:
+                        if cache_manager:
+                            cache_manager.invalidate('schedule')
+                except Exception:
+                    pass
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return {'status': 'ok', 'summary': summary, 'post': post_import}, 200
+
 @app.route('/api/admin/full-reset', methods=['POST'])
 def api_admin_full_reset():
     """Полный сброс приложения до состояния "с нуля".
@@ -13418,277 +13705,8 @@ def api_admin_full_reset():
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
 
-        if SessionLocal is None:
-            return jsonify({'error': 'БД недоступна'}), 500
-
-        summary = {
-            'db_deleted': {},
-            'caches': {'memory': 0, 'redis': 'unknown'},
-            'snapshots_cleared': True,
-            'users_preserved': True,
-            'admin_logs_preserved': True,
-        }
-
-        db: Session = get_db()
-        try:
-            # Последовательно очищаем таблицы доменной логики (кроме users)
-            def _safe_delete(q):
-                try:
-                    cnt = q.delete(synchronize_session=False)
-                    return int(cnt or 0)
-                except Exception:
-                    return 0
-
-            # Основные промежуточные таблицы/агрегаты
-            summary['db_deleted']['league_table'] = _safe_delete(db.query(LeagueTableRow))
-            summary['db_deleted']['stats_table'] = _safe_delete(db.query(StatsTableRow))
-            summary['db_deleted']['match_votes'] = _safe_delete(db.query(MatchVote))
-            # Новое: полное очищение счётов, игровых событий и составов, чтобы после сброса UI показывал чистый сланец
-            try:
-                summary['db_deleted']['match_scores'] = _safe_delete(db.query(MatchScore))
-            except Exception:
-                pass
-            try:
-                summary['db_deleted']['match_player_events'] = _safe_delete(db.query(MatchPlayerEvent))
-            except Exception:
-                pass
-            try:
-                summary['db_deleted']['match_lineups'] = _safe_delete(db.query(MatchLineupPlayer))
-            except Exception:
-                pass
-            try:
-                summary['db_deleted']['match_stats_state'] = _safe_delete(db.query(MatchStatsAggregationState))
-            except Exception:
-                pass
-            # Новое: очистка флагов статуса матчей и спецсобытий, а также агрегированных статов матча
-            try:
-                summary['db_deleted']['match_flags'] = _safe_delete(db.query(MatchFlags))
-            except Exception:
-                pass
-            try:
-                summary['db_deleted']['match_specials'] = _safe_delete(db.query(MatchSpecials))
-            except Exception:
-                pass
-            try:
-                summary['db_deleted']['match_stats'] = _safe_delete(db.query(MatchStats))
-            except Exception:
-                pass
-            summary['db_deleted']['shop_order_items'] = _safe_delete(db.query(ShopOrderItem))
-            summary['db_deleted']['shop_orders'] = _safe_delete(db.query(ShopOrder))
-            summary['db_deleted']['bets'] = _safe_delete(db.query(Bet))
-            summary['db_deleted']['referrals'] = _safe_delete(db.query(Referral))
-            summary['db_deleted']['match_streams'] = _safe_delete(db.query(MatchStream))
-            summary['db_deleted']['match_comments'] = _safe_delete(db.query(MatchComment))
-            summary['db_deleted']['weekly_credit_baselines'] = _safe_delete(db.query(WeeklyCreditBaseline))
-            summary['db_deleted']['monthly_credit_baselines'] = _safe_delete(db.query(MonthlyCreditBaseline))
-            summary['db_deleted']['user_limits'] = _safe_delete(db.query(UserLimits))
-            summary['db_deleted']['snapshots'] = _safe_delete(db.query(Snapshot))
-
-            # Очистка агрегированной таблицы игроков, если присутствует (источник для /api/scorers)
-            try:
-                if 'TeamPlayerStats' in globals():
-                    summary['db_deleted']['team_player_stats'] = _safe_delete(db.query(TeamPlayerStats))
-            except Exception:
-                pass
-
-            db.commit()
-        finally:
-            try:
-                db.close()
-            except Exception:
-                pass
-
-        # Очистка in-memory структур
-        try:
-            # Версии коэффициентов ставок
-            try:
-                _ODDS_VERSION.clear()
-            except Exception:
-                pass
-
-            # Локальные кэши лидерборда
-            try:
-                LEADER_PRED_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
-                LEADER_RICH_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
-                LEADER_SERVER_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
-                LEADER_PRIZES_CACHE.update({'data': None, 'ts': 0, 'etag': ''})
-            except Exception:
-                pass
-
-            # Кэш бомбардиров
-            try:
-                global SCORERS_CACHE
-                SCORERS_CACHE = {'ts': 0, 'items': []}
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-        # Полная инвалидация многоуровневого кэша (memory + redis)
-        try:
-            cm = globals().get('cache_manager')
-            if cm is None:
-                try:
-                    from optimizations.multilevel_cache import get_cache
-                    cm = get_cache()
-                except Exception:
-                    cm = None
-            if cm is not None:
-                try:
-                    summary['caches']['memory'] = cm.invalidate_pattern('cache:')
-                    # Явно инвалидируем ключи, которые чаще всего смотрятся в UI
-                    try:
-                        cm.invalidate('schedule')
-                        cm.invalidate('league_table')
-                        cm.invalidate('stats_table')
-                        cm.invalidate('results')
-                        cm.invalidate('betting-tours')
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # Очистка метрик производительности (api/cache/ws) и локальных ETag метрик
-        try:
-            from optimizations import metrics as _perf_metrics_mod
-            try:
-                _perf_metrics_mod.reset()
-            except Exception:
-                pass
-        except Exception:
-            pass
-        try:
-            # Локальный ETag helper cache и метрики
-            if '_ETAG_HELPER_CACHE' in globals():
-                try:
-                    _ETAG_HELPER_CACHE.clear()
-                except Exception:
-                    pass
-            if '_ETAG_METRICS' in globals():
-                try:
-                    _ETAG_METRICS['by_key'].clear()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # Очистка продвинутых таблиц (расширенная схема): PlayerStatistics / MatchEvent — best-effort
-        try:
-            from database.database_models import db_manager as adv_db, PlayerStatistics as AdvPlayerStatistics, MatchEvent as AdvMatchEvent
-            with adv_db.get_session() as adv_sess:
-                deleted = 0
-                try:
-                    deleted += int(adv_sess.query(AdvPlayerStatistics).delete(synchronize_session=False) or 0)
-                except Exception:
-                    pass
-                try:
-                    deleted += int(adv_sess.query(AdvMatchEvent).delete(synchronize_session=False) or 0)
-                except Exception:
-                    pass
-                try:
-                    adv_sess.commit()
-                except Exception:
-                    pass
-                summary['db_deleted']['advanced_player_stats_and_events'] = deleted
-        except Exception:
-            pass
-
-        # Принудительная инвалидация ключевых snapshot-ключей (если не удалены ранее) – защита от устаревших ETag в памяти
-        try:
-            cm = globals().get('cache_manager')
-            if cm is not None:
-                for k in ('results', 'schedule', 'league_table', 'stats_table', 'scorers'):
-                    try:
-                        cm.invalidate(k)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        # Широковещательное уведомление через WebSocket/Redis о полном сбросе
-        try:
-            invalidator = globals().get('invalidator')
-            if invalidator is not None:
-                payload = {'reason': 'full_reset', 'ts': datetime.now(timezone.utc).isoformat()}
-                try:
-                    invalidator.publish_topic('global', 'topic_update', payload, priority=2)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # Централизованная инвалидация через SmartInvalidator для основных сущностей после сброса
-        try:
-            invalidator = globals().get('invalidator')
-            if invalidator is not None:
-                try:
-                    # Сброс расписания, таблицы и туров прогнозов (задействует память, Redis, WS и pub/sub)
-                    invalidator.invalidate_for_change('schedule_update', {})
-                except Exception:
-                    pass
-                try:
-                    invalidator.invalidate_for_change('league_table_update', {})
-                except Exception:
-                    pass
-                try:
-                    invalidator.invalidate_for_change('betting_tours_update', {})
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # После полного сброса: повторная очистка снапшотов ключей (защита от гонок фоновых задач)
-        try:
-            if SessionLocal is not None:
-                dbc: Session = get_db()
-                try:
-                    for k in ('schedule', 'results', 'league-table', 'stats-table', 'betting-tours', 'feature-match'):
-                        try:
-                            _snapshot_set(dbc, Snapshot, k, None, app.logger)
-                        except Exception:
-                            pass
-                    dbc.commit()
-                finally:
-                    try: dbc.close()
-                    except Exception: pass
-        except Exception:
-            pass
-
-        # Пробуем сразу же инициировать импорт расписания из Google Sheets, если админ хочет получить актуальные данные.
-        # Это best-effort: если не настроена интеграция — пропускаем.
-        post_import = {'schedule_imported': False}
-        try:
-            if os.environ.get('AUTO_IMPORT_SCHEDULE_AFTER_RESET','1') == '1':
-                # Используем билдера напрямую (не обращаемся к внешнему HTTP снова)
-                try:
-                    payload = _build_schedule_payload_from_sheet()
-                    if SessionLocal is not None:
-                        dbi: Session = get_db()
-                        try:
-                            _snapshot_set(dbi, Snapshot, 'schedule', payload, app.logger)
-                            post_import['schedule_imported'] = True
-                        finally:
-                            try: dbi.close()
-                            except Exception: pass
-                    # Централизованная инвалидация после авто-импорта расписания
-                    try:
-                        invalidator = globals().get('invalidator')
-                        if invalidator is not None:
-                            invalidator.invalidate_for_change('schedule_update', {})
-                        else:
-                            # Fallback на прямой сброс, если invalidator недоступен
-                            if cache_manager:
-                                cache_manager.invalidate('schedule')
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        return jsonify({'status': 'ok', 'summary': summary, 'post': post_import})
+        data, code = _perform_full_reset(clear_admin_logs=False, auto_import_schedule=True)
+        return jsonify(data), code
     except Exception as e:
         try:
             app.logger.error(f"full-reset error: {e}")
