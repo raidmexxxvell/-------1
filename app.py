@@ -9384,34 +9384,123 @@ def api_betting_tours():
                 try:
                     snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
                     if snap and snap.get('payload'):
-                        # Перед отдачей поверх снепшота освежаем коэффициенты и odds_version,
-                        # чтобы клиентский ETag‑fallback всегда видел актуальные значения.
+                        # Поверх снепшота освежаем коэффициенты, вычисляем lock и скрываем начавшиеся матчи.
                         try:
                             payload = snap['payload']
                             tours = payload.get('tours') or []
-                            for t in tours:
-                                matches = t.get('matches') or []
-                                for m in matches:
+                            now_local = datetime.now()
+
+                            def _parse_match_dt(m):
+                                dt = None
+                                try:
+                                    if m.get('datetime'):
+                                        try:
+                                            dt = datetime.fromisoformat(m['datetime'])
+                                        except Exception:
+                                            dt = None
+                                    if dt is None and m.get('date'):
+                                        try:
+                                            dd = datetime.fromisoformat(m['date']).date()
+                                        except Exception:
+                                            dd = None
+                                        if dd:
+                                            tm_raw = (m.get('time') or '').strip()
+                                            tm = None
+                                            if tm_raw:
+                                                for fmt in ('%H:%M:%S','%H:%M'):
+                                                    try:
+                                                        tm = datetime.strptime(tm_raw, fmt).time(); break
+                                                    except Exception:
+                                                        continue
+                                            dt = datetime.combine(dd, tm or datetime.min.time())
+                                except Exception:
+                                    dt = None
+                                return dt
+
+                            def _all_started(matches):
+                                any_match = False
+                                for m in (matches or []):
+                                    any_match = True
+                                    dt = _parse_match_dt(m)
                                     try:
+                                        if dt is not None:
+                                            if dt > now_local:
+                                                return False
+                                        else:
+                                            # если нет точного времени, ориентируемся по дате
+                                            dd = datetime.fromisoformat((m.get('date') or '')[:10]).date() if m.get('date') else None
+                                            if dd and dd >= now_local.date():
+                                                return False
+                                    except Exception:
+                                        return False
+                                return any_match
+
+                            # Возможность учитывать статус матча из таблицы флагов
+                            def _apply_lock(m, dt):
+                                lock = False
+                                if dt is not None:
+                                    lock = (dt - timedelta(minutes=BET_LOCK_AHEAD_MINUTES)) <= now_local
+                                try:
+                                    row = db.query(MatchFlags).filter(
+                                        MatchFlags.home==(m.get('home') or ''),
+                                        MatchFlags.away==(m.get('away') or '')
+                                    ).first()
+                                    if row and row.status in ('live','finished') and dt is not None:
+                                        if row.status == 'live':
+                                            if dt - timedelta(minutes=10) <= now_local < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                                lock = True
+                                        elif row.status == 'finished':
+                                            if now_local >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                                lock = True
+                                except Exception:
+                                    pass
+                                m['lock'] = bool(lock)
+
+                            # Пройдём по турам и матчам: фильтрация начавшихся и обновление odds/lock
+                            for t in tours:
+                                filtered = []
+                                for m in (t.get('matches') or []):
+                                    try:
+                                        dt = _parse_match_dt(m)
+                                        # скрываем начавшиеся
+                                        if dt is not None and dt <= now_local:
+                                            continue
+                                        if dt is None and m.get('date'):
+                                            try:
+                                                dd = datetime.fromisoformat((m.get('date') or '')[:10]).date()
+                                                if dd < now_local.date():
+                                                    continue
+                                            except Exception:
+                                                pass
+                                        # пересчёт коэффициентов и версии
                                         home = (m.get('home') or '').strip()
                                         away = (m.get('away') or '').strip()
-                                        # Дата матча: используем ISO YYYY-MM-DD если доступна
                                         draw = m.get('date') or m.get('datetime') or ''
                                         date_key = str(draw)[:10] if draw else ''
-                                        # Пересчёт коэффициентов и обновление версии
-                                        new_odds = _compute_match_odds(home, away, date_key)
-                                        m['odds'] = new_odds
+                                        m['odds'] = _compute_match_odds(home, away, date_key)
                                         try:
                                             m['odds_version'] = _get_odds_version(home, away)
                                         except Exception:
                                             pass
+                                        # lock
+                                        _apply_lock(m, dt)
+                                        filtered.append(m)
                                     except Exception:
-                                        # Не ломаем выдачу тура при точечных ошибках матча
                                         continue
-                            return payload
+                                t['matches'] = filtered
+
+                            # Если в снапшоте всего 1 тур и все его матчи уже стартовали — перестроим payload целиком
+                            try:
+                                if len(tours) == 1 and _all_started(tours[0].get('matches') or []):
+                                    raise RuntimeError('primary_tour_started')
+                            except RuntimeError:
+                                pass
+                            else:
+                                return payload
+
                         except Exception:
-                            # Если что-то пошло не так — вернём исходный снепшот как есть
-                            return snap['payload']
+                            # Если что-то пошло не так — продолжим к on-demand сборке
+                            pass
                 finally:
                     db.close()
             # 2) On-demand сборка и запись снапшота
