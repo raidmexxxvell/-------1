@@ -10753,10 +10753,20 @@ def api_admin_generate_season_schedule():
     Результат: создаёт матчи, пересобирает snapshot schedule и betting-tours, инвалидирует кэши.
     """
     try:
-        # Считываем вход
-        mode = (request.values.get('mode') or (request.json or {}).get('mode') if request.is_json else None) or 'soft_start'
-        start_date_raw = (request.values.get('start_date') or ((request.json or {}).get('start_date') if request.is_json else None)) or '05.10.25'
-        time_slots_raw = (request.values.get('time_slots') or ((request.json or {}).get('time_slots') if request.is_json else None)) or '10:00,11:00,12:00,13:00'
+        # Считываем вход (устойчиво к multipart/form-data и JSON)
+        payload_json = request.get_json(silent=True) or {}
+        mode = (request.form.get('mode')
+                or request.args.get('mode')
+                or payload_json.get('mode')
+                or 'soft_start')
+        start_date_raw = (request.form.get('start_date')
+                          or request.args.get('start_date')
+                          or payload_json.get('start_date')
+                          or '05.10.25')
+        time_slots_raw = (request.form.get('time_slots')
+                          or request.args.get('time_slots')
+                          or payload_json.get('time_slots')
+                          or '10:00,11:00,12:00,13:00')
         time_slots = [s.strip() for s in str(time_slots_raw).split(',') if s.strip()]
 
         if SessionLocal is None:
@@ -10839,6 +10849,8 @@ def api_admin_generate_season_schedule():
                 active = Tournament(name=f"Лига Обнинска {season}", season=season, status='active', start_date=first_sunday)
                 db.add(active)
                 db.flush()
+            # Сохраняем идентификатор до коммита/закрытия, чтобы избежать ошибок Session expired
+            active_id = int(active.id)
 
             # Загружаем активные команды
             teams = db.query(Team).filter((Team.is_active == True)).order_by(Team.id.asc()).all()  # noqa: E712
@@ -10848,9 +10860,9 @@ def api_admin_generate_season_schedule():
                 return jsonify({'error': 'not_enough_teams', 'count': len(team_ids)}), 400
 
             # Проверка наличия существующих матчей
-            existing_cnt = db.query(func.count(Match.id)).filter(Match.tournament_id == active.id).scalar() or 0
+            existing_cnt = db.query(func.count(Match.id)).filter(Match.tournament_id == active_id).scalar() or 0
             if mode == 'soft_start' and existing_cnt > 0:
-                return jsonify({'error': 'already_has_matches', 'tournament_id': active.id, 'count': int(existing_cnt)}), 409
+                return jsonify({'error': 'already_has_matches', 'tournament_id': int(active_id), 'count': int(existing_cnt)}), 409
 
             # full_reset: выполнить полный сброс доменных данных (включая ставки и админ-логи),
             # затем жёстко удалить все матчи активного турнира (включая finished) перед генерацией
@@ -10862,7 +10874,7 @@ def api_admin_generate_season_schedule():
                     # продолжаем, даже если часть шагов сброса не удалась
                     pass
                 try:
-                    db.query(Match).filter(Match.tournament_id == active.id).delete(synchronize_session=False)
+                    db.query(Match).filter(Match.tournament_id == active_id).delete(synchronize_session=False)
                     db.commit()
                 except Exception:
                     try: db.rollback()
@@ -10889,7 +10901,7 @@ def api_admin_generate_season_schedule():
                     except Exception:
                         dt = datetime.combine(date_i, datetime.strptime('10:00', '%H:%M').time())
                     m = Match(
-                        tournament_id=active.id,
+                        tournament_id=active_id,
                         home_team_id=int(home_id),
                         away_team_id=int(away_id),
                         match_date=dt,
@@ -10932,7 +10944,17 @@ def api_admin_generate_season_schedule():
         except Exception:
             pass
 
-        return jsonify({'status': 'ok', 'tournament_id': int(active.id), 'teams': len(team_ids), 'rounds': rounds_total, 'matches_created': created, 'warnings': warnings})
+        # Совместимый ответ: добавляем tours/tours_created для фронтенда, сохраняем rounds для обратной совместимости
+        return jsonify({
+            'status': 'ok',
+            'tournament_id': int(active_id),
+            'teams': len(team_ids),
+            'rounds': rounds_total,
+            'tours': rounds_total,
+            'tours_created': rounds_total,
+            'matches_created': created,
+            'warnings': warnings
+        })
     except Exception as e:
         app.logger.error(f"generate season schedule error: {e}")
         return jsonify({'error': 'internal'}), 500
@@ -13492,6 +13514,36 @@ def _perform_full_reset(clear_admin_logs: bool = False):
                 summary['db_deleted']['admin_logs'] = _safe_delete(db.query(_AdminLog))
             except Exception:
                 summary['db_deleted']['admin_logs'] = 0
+
+        # Удаление динамических таблиц team_stats_% и меток применения статов, если существуют
+        try:
+            from sqlalchemy import text as _sql_text
+            # Найти все таблицы team_stats_*
+            try:
+                res = db.execute(_sql_text("""
+                    SELECT tablename FROM pg_tables
+                    WHERE schemaname = 'public' AND tablename LIKE 'team_stats_%'
+                """))
+                names = [row[0] for row in res]
+            except Exception:
+                names = []
+            dropped = 0
+            for tn in names:
+                try:
+                    db.execute(_sql_text(f'DROP TABLE IF EXISTS "{tn}" CASCADE;'))
+                    dropped += 1
+                except Exception:
+                    pass
+            if dropped:
+                summary['db_deleted']['team_stats_dynamic_tables'] = int(dropped)
+            # dynamic_team_stats_applied
+            try:
+                db.execute(_sql_text('TRUNCATE TABLE dynamic_team_stats_applied;'))
+                summary['db_deleted']['dynamic_team_stats_applied'] = -1  # неизвестно, используем флаг
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         db.commit()
     finally:
