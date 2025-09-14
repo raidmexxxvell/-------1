@@ -7998,7 +7998,7 @@ def api_user_avatars():
         out = {}
         for r in rows:
             if r.photo_url:
-                out[str(int(r.user_id))] = r.photo_url
+                out[str(int(r.user_id))] = { 'avatar_url': r.photo_url }
         resp = _json_response({'avatars': out})
         resp.headers['Cache-Control'] = 'public, max-age=3600'
         return resp

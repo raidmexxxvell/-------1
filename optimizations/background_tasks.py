@@ -119,7 +119,7 @@ class BackgroundTaskManager:
         logger.info("Background task manager stopped")
 
     def submit_task(self, task_id: str, func: Callable, *args, 
-                   priority: TaskPriority = TaskPriority.NORMAL,
+                   priority: TaskPriority | int = TaskPriority.NORMAL,
                    max_retries: int = 3, timeout: Optional[float] = None,
                    delay: float = 0.0, callback: Optional[Callable] = None,
                    **kwargs) -> bool:
@@ -136,9 +136,15 @@ class BackgroundTaskManager:
             callback: Функция обратного вызова
         """
         try:
+            # Приведение приоритета к Enum, если пришел int
+            try:
+                prio_enum = priority if isinstance(priority, TaskPriority) else TaskPriority(int(priority))
+            except Exception:
+                prio_enum = TaskPriority.NORMAL
+
             task = BackgroundTask(
                 task_id=task_id,
-                priority=priority,
+                priority=prio_enum,
                 func=func,
                 args=args,
                 kwargs=kwargs,
@@ -336,9 +342,17 @@ class BackgroundTaskManager:
 
     def _add_to_history(self, task: BackgroundTask, status: str, duration: float, error: Exception = None):
         """Добавляет запись в историю выполнения"""
+        # Безопасное имя приоритета (поддержка int и Enum)
+        try:
+            prio_name = task.priority.name  # Enum
+        except Exception:
+            try:
+                prio_name = TaskPriority(int(task.priority)).name
+            except Exception:
+                prio_name = 'UNKNOWN'
         record = {
             'task_id': task.task_id,
-            'priority': task.priority.name,
+            'priority': prio_name,
             'status': status,
             'duration': duration,
             'completed_at': time.time(),
