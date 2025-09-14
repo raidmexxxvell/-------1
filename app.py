@@ -6352,6 +6352,29 @@ def _build_betting_tours_payload():
     # Для запросов флагов статуса матчей переиспользуем одну DB-сессию (снижает нагрузку и предотвращает лишние коннекты)
     db_flags = get_db() if SessionLocal is not None else None
     for t in tours:
+        # Дедупликация матчей внутри тура по ключу (norm(home)|norm(away)|YYYY-MM-DD)
+        try:
+            seen = set()
+            uniq = []
+            def _norm(s: str) -> str:
+                try:
+                    return (s or '').strip().lower().replace('ё','е')
+                except Exception:
+                    return (s or '')
+            for m in t.get('matches', []) or []:
+                try:
+                    d = (m.get('date') or m.get('datetime') or '')
+                    d = (d or '')[:10]
+                    key = f"{_norm(m.get('home',''))}|{_norm(m.get('away',''))}|{d}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    uniq.append(m)
+                except Exception:
+                    uniq.append(m)
+            t['matches'] = uniq
+        except Exception:
+            pass
         # Скрываем матчи, которые уже стартовали, из списка для ставок
         filtered_matches = []
         for m in t.get('matches', []):
@@ -6398,66 +6421,53 @@ def _build_betting_tours_payload():
                             # Учитываем статус только относительно даты/времени именно этого матча,
                             # чтобы не закрывать будущие реванши из-за прошлого статуса тех же команд.
                             match_dt = None
-                    if match_dt is None and m.get('date'):
-                        try:
-                            dd = datetime.fromisoformat(m['date']).date()
-                        except Exception:
-                            dd = None
-                        if dd:
-                            tm_raw = (m.get('time') or '').strip()
-                            tm = None
-                            if tm_raw:
-                                for fmt in ('%H:%M:%S','%H:%M'):
-                                    try:
-                                        tm = datetime.strptime(tm_raw, fmt).time(); break
-                                    except Exception:
-                                        continue
-                            match_dt = datetime.combine(dd, tm or datetime.min.time())
-                    if match_dt:
-                        lock = (match_dt - timedelta(minutes=BET_LOCK_AHEAD_MINUTES)) <= now_local
-                    # Флаги live/finished — учитываем только для конкретного матча
-                    if SessionLocal is not None and db_flags is not None:
-                        row = db_flags.query(MatchFlags).filter(MatchFlags.home==m.get('home',''), MatchFlags.away==m.get('away','')).first()
-                        if row and row.status in ('live','finished') and match_dt is not None:
-                            if row.status == 'live':
-                                if match_dt - timedelta(minutes=10) <= now_local < match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                    lock = True
-                            elif row.status == 'finished':
-                                if now_local >= match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                    lock = True
-                    m['lock'] = bool(lock)
-                    # date_key для влияния голосования
-                    dk = None
-                    try:
-                        if m.get('datetime'):
-                            dk = datetime.fromisoformat(m['datetime']).date().isoformat()
-                        elif m.get('date'):
-                            dk = datetime.fromisoformat(m['date']).date().isoformat()
+                            try:
+                                if m.get('datetime'):
+                                    match_dt = datetime.fromisoformat(m['datetime'])
+                                elif m.get('date'):
+                                    dd = datetime.fromisoformat(m['date']).date()
+                                    tm = datetime.strptime((m.get('time') or '00:00') or '00:00', '%H:%M').time()
+                                    match_dt = datetime.combine(dd, tm)
+                            except Exception:
+                                match_dt = None
+                            if match_dt is not None:
+                                if row.status == 'live':
+                                    if match_dt - timedelta(minutes=10) <= now_local < match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                        lock = True
+                                elif row.status == 'finished':
+                                    if now_local >= match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                        lock = True
                     except Exception:
-                        dk = None
-                    m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''), dk)
-                    totals = []
-                    for ln in (3.5, 4.5, 5.5):
-                        totals.append({'line': ln, 'odds': _compute_totals_odds(m.get('home',''), m.get('away',''), ln)})
-                    sp_pen = _compute_specials_odds(m.get('home',''), m.get('away',''), 'penalty')
-                    sp_red = _compute_specials_odds(m.get('home',''), m.get('away',''), 'redcard')
-                    m['markets'] = {
-                        'totals': totals,
-                        'specials': {
-                            'penalty': { 'available': True, 'odds': sp_pen },
-                            'redcard': { 'available': True, 'odds': sp_red }
-                        }
-                    }
-                    # Версия коэффициентов на матч для сверки на клиенте
-                    m['odds_version'] = _get_odds_version(m.get('home',''), m.get('away',''))
+                        pass
+                    finally:
+                        db.close()
+                m['lock'] = bool(lock)
+                # date_key для влияния голосования
+                dk = None
+                try:
+                    if m.get('datetime'):
+                        dk = datetime.fromisoformat(m['datetime']).date().isoformat()
+                    elif m.get('date'):
+                        dk = datetime.fromisoformat(m['date']).date().isoformat()
                 except Exception:
-                    m['lock'] = True
-    # Конец цикла по турам
-    try:
-        if db_flags:
-            db_flags.close()
-    except Exception:
-        pass
+                    dk = None
+                m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''), dk)
+                totals = []
+                for ln in (3.5, 4.5, 5.5):
+                    totals.append({'line': ln, 'odds': _compute_totals_odds(m.get('home',''), m.get('away',''), ln)})
+                sp_pen = _compute_specials_odds(m.get('home',''), m.get('away',''), 'penalty')
+                sp_red = _compute_specials_odds(m.get('home',''), m.get('away',''), 'redcard')
+                m['markets'] = {
+                    'totals': totals,
+                    'specials': {
+                        'penalty': { 'available': True, 'odds': sp_pen },
+                        'redcard': { 'available': True, 'odds': sp_red }
+                    }
+                }
+                # Версия коэффициентов на матч для сверки на клиенте
+                m['odds_version'] = _get_odds_version(m.get('home',''), m.get('away',''))
+            except Exception:
+                m['lock'] = True
     return { 'tours': tours, 'updated_at': datetime.now(timezone.utc).isoformat() }
 
 def _build_odds_fields(home: str, away: str) -> dict:
