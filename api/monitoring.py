@@ -61,6 +61,20 @@ def endpoint_metrics():
         'total_endpoints': len(endpoints)
     })
 
+@monitoring_bp.route('/metrics/ws', methods=['GET'])
+@require_admin()
+@rate_limit(max_requests=20, time_window=60)
+def websocket_metrics():
+    """WebSocket metrics: sent/batched/bypass counters."""
+    try:
+        from flask import current_app
+        ws = current_app.config.get('websocket_manager')
+        if ws and hasattr(ws, 'get_metrics'):
+            return jsonify({'websocket': ws.get_metrics()})
+        return jsonify({'websocket': {'ws_messages_sent': 0, 'ws_messages_batched': 0, 'ws_messages_bypass': 0}})
+    except Exception:
+        return jsonify({'websocket': {'ws_messages_sent': 0, 'ws_messages_batched': 0, 'ws_messages_bypass': 0}})
+
 @monitoring_bp.route('/metrics/slow-queries', methods=['GET'])
 @require_admin()
 @rate_limit(max_requests=10, time_window=60)
