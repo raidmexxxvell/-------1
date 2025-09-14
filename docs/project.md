@@ -322,6 +322,29 @@ TTL примеры: league_table 300s/1800s, news 120s/300s.
 ### 3a. ETag поверх кэша
 Публичные ответы сериализуются (sorted keys, UTF-8) → MD5 → `ETag`. Клиент при совпадении отправляет `If-None-Match`, сервер отдаёт 304.
 
+### 3b. Объединённый эндпоинт и rate limit (новое)
+
+Новый публичный эндпоинт:
+- `GET /api/summary` — агрегирует несколько часто запрашиваемых блоков одним ответом:
+    - `schedule`, `results`, `tours` (ставки), `leaderboard` (подтипы: `top-predictors`, `top-rich`, `server-leaders`, `prizes`).
+    - Параметры запроса:
+        - `include` — CSV из `schedule,results,tours,leaderboard` (по умолчанию все)
+        - `leaderboard` — CSV из `top-predictors,top-rich,server-leaders,prizes` (по умолчанию все)
+    - Кэширование: `etag_json` с `cache_ttl=20s`, `max_age=20s`, `swr=40s`.
+    - Core-фильтр стабилизирует ETag (обрезает длинные списки, исключает `updated_at`).
+    - Rate limit: `RL_SUMMARY_RPM` (per‑ip; по умолчанию 6 rpm).
+
+Пер-эндпоинт rate limit (настройка через переменные окружения; при отсутствии — безопасные дефолты, приложение работает «из коробки»):
+- `RL_TOURS_RPM` — `GET /api/betting/tours` (по умолчанию 20 rpm, per‑ip)
+- `RL_SCHEDULE_RPM` — `GET /api/schedule` (12 rpm, per‑ip)
+- `RL_RESULTS_RPM` — `GET /api/results` (12 rpm, per‑ip)
+- `RL_MATCH_STATUS_LIVE_RPM` — `GET /api/match/status/live` (12 rpm, per‑ip)
+- `RL_ACHIEVEMENTS_RPM` — `GET /api/achievements` (6 rpm, per‑user)
+- `RL_SUMMARY_RPM` — `GET /api/summary` (6 rpm, per‑ip)
+
+Карта ключевых эндпоинтов (дополнение):
+- `GET /api/summary` — агрегированный ответ (schedule/results/tours/leaderboard), ETag + SWR 40s, Rate‑Limit `RL_SUMMARY_RPM`.
+
 ### 4. Паттерн Repository для работы с данными (актуален)
 
 ```python

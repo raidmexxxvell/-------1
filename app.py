@@ -7539,6 +7539,7 @@ def api_match_status_set_live():
         return jsonify({'error': 'Не удалось установить live-статус'}), 500
 
 @app.route('/api/match/status/live', methods=['GET'])
+@rate_limit(max_requests=int(os.environ.get('RL_MATCH_STATUS_LIVE_RPM', '12')), time_window=60, per='ip')
 def api_match_status_live():
     """Список live-матчей по расписанию (без ручных флагов)."""
     items = []
@@ -8545,6 +8546,7 @@ def daily_checkin():
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
 @app.route('/api/achievements', methods=['GET','POST'])
+@rate_limit(max_requests=int(os.environ.get('RL_ACHIEVEMENTS_RPM', '6')), time_window=60, per='user')
 def get_achievements():
     """Получает достижения пользователя с поддержкой ETag + SWR.
 
@@ -9036,6 +9038,7 @@ def api_league_table():
         return jsonify({'error': 'Не удалось загрузить таблицу'}), 500
 
 @app.route('/api/schedule', methods=['GET'])
+@rate_limit(max_requests=int(os.environ.get('RL_SCHEDULE_RPM', '12')), time_window=60, per='ip')
 def api_schedule():
     """Расписание (до 3 туров) через etag_json: только snapshot (без чтения Sheets), с match_of_week логикой."""
     def _build():
@@ -9344,6 +9347,7 @@ def api_vote_aggregates_batch():
 
 
 @app.route('/api/betting/tours', methods=['GET'])
+@rate_limit(max_requests=int(os.environ.get('RL_TOURS_RPM', '20')), time_window=60, per='ip')
 def api_betting_tours():
     """Возвращает ближайший тур для ставок, из снапшота БД; при отсутствии — собирает on-demand.
     Для матчей в прошлом блокируем ставки (поле lock: true). Поддерживает ETag/304."""
@@ -10287,6 +10291,7 @@ def api_league_table_live():
 """_settle_open_bets удалён: логика перенесена в services.betting_settle.settle_open_bets"""
 
 @app.route('/api/results', methods=['GET'])
+@rate_limit(max_requests=int(os.environ.get('RL_RESULTS_RPM', '12')), time_window=60, per='ip')
 def api_results():
     """Результаты (прошедшие матчи) через etag_json: только snapshot (без чтения Sheets)."""
     def _build():
@@ -10301,6 +10306,138 @@ def api_results():
             payload={'results': []}
         return payload
     return etag_json('results', _build, cache_ttl=900, max_age=900, swr=600, core_filter=lambda p: {'results': (p.get('results') or [])[:200]})
+
+# ---------------------------------------------------------------------------
+# Combined summary endpoint: schedule + results + betting tours + leaderboards
+# ---------------------------------------------------------------------------
+@app.route('/api/summary', methods=['GET'])
+@rate_limit(max_requests=int(os.environ.get('RL_SUMMARY_RPM', '6')), time_window=60, per='ip')
+def api_summary():
+    """Возвращает объединённый payload, чтобы сократить количество запросов клиента.
+
+    Параметры:
+      include: csv из schedule,results,tours,leaderboard (по умолчанию все)
+      leaderboard: csv из top-predictors,top-rich,server-leaders,prizes (по умолчанию все)
+    """
+    include_param = (request.args.get('include') or 'schedule,results,tours,leaderboard').lower()
+    include_blocks = {p.strip() for p in include_param.split(',') if p.strip()}
+    lb_param = (request.args.get('leaderboard') or 'top-predictors,top-rich,server-leaders,prizes').lower()
+    lb_blocks = [p.strip() for p in lb_param.split(',') if p.strip()]
+
+    def _build():
+        out = {'updated_at': datetime.now(timezone.utc).isoformat()}
+        # schedule
+        if 'schedule' in include_blocks:
+            try:
+                sch = None
+                if SessionLocal is not None:
+                    db = get_db(); snap=None
+                    try:
+                        snap = _snapshot_get(db, Snapshot, 'schedule', app.logger)
+                    finally:
+                        db.close()
+                    sch = (snap or {}).get('payload') or {'tours': []}
+                else:
+                    sch = {'tours': []}
+            except Exception:
+                sch = {'tours': []}
+            out['schedule'] = sch
+        # results
+        if 'results' in include_blocks:
+            try:
+                res = None
+                if SessionLocal is not None:
+                    db = get_db(); snap=None
+                    try:
+                        snap = _snapshot_get(db, Snapshot, 'results', app.logger)
+                    finally:
+                        db.close()
+                    res = (snap or {}).get('payload') or {'results': []}
+                else:
+                    res = {'results': []}
+            except Exception:
+                res = {'results': []}
+            out['results'] = res
+        # betting tours (payload only core)
+        if 'tours' in include_blocks:
+            try:
+                bt = None
+                if SessionLocal is not None:
+                    db = get_db(); snap=None
+                    try:
+                        snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
+                    finally:
+                        db.close()
+                    bt = (snap or {}).get('payload') or {'tours': []}
+                else:
+                    bt = {'tours': []}
+            except Exception:
+                bt = {'tours': []}
+            out['tours'] = {'tours': bt.get('tours') or []}
+        # leaderboards (prefer precomputed cache_manager)
+        if 'leaderboard' in include_blocks:
+            lbs = {}
+            for name in lb_blocks:
+                try:
+                    data = None
+                    if cache_manager:
+                        # cache namespaces use keys like 'top-predictors', etc.
+                        data = cache_manager.get('leaderboards', name)
+                    if not data and SessionLocal is not None:
+                        # fallback to snapshots
+                        key_map = {
+                            'top-predictors': 'leader-top-predictors',
+                            'top-rich': 'leader-top-rich',
+                            'server-leaders': 'leader-server-leaders',
+                            'prizes': 'leader-prizes'
+                        }
+                        snap_key = key_map.get(name)
+                        if snap_key:
+                            db = get_db(); snap=None
+                            try:
+                                snap = _snapshot_get(db, Snapshot, snap_key, app.logger)
+                            finally:
+                                db.close()
+                            data = (snap or {}).get('payload')
+                    lbs[name] = data or {'items': []}
+                except Exception:
+                    lbs[name] = {'items': []}
+            out['leaderboard'] = lbs
+
+        return out
+
+    def _core(p):
+        core = {}
+        if 'schedule' in include_blocks and isinstance(p.get('schedule'), dict):
+            core['schedule'] = {'tours': (p['schedule'].get('tours') or [])}
+        if 'results' in include_blocks and isinstance(p.get('results'), dict):
+            core['results'] = {'results': (p['results'].get('results') or [])[:200]}
+        if 'tours' in include_blocks and isinstance(p.get('tours'), dict):
+            core['tours'] = {'tours': (p['tours'].get('tours') or [])}
+        if 'leaderboard' in include_blocks and isinstance(p.get('leaderboard'), dict):
+            lbs = {}
+            for k,v in p['leaderboard'].items():
+                if isinstance(v, dict):
+                    if 'items' in v:
+                        lbs[k] = {'items': v.get('items')}
+                    elif 'data' in v:
+                        lbs[k] = {'data': v.get('data')}
+                    else:
+                        lbs[k] = {}
+                else:
+                    lbs[k] = {}
+            core['leaderboard'] = lbs
+        return core
+
+    return etag_json(
+        'summary',
+        _build,
+        cache_ttl=20,
+        max_age=20,
+        swr=40,
+        cache_visibility='public',
+        core_filter=_core
+    )
 
 @app.route('/api/match-details', methods=['GET'])
 def api_match_details():

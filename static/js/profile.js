@@ -1334,28 +1334,70 @@
         // Новая статистика (goal+assist) загружается лениво через loadStatsTable при открытии вкладки,
         // поэтому старый предварительный preload /api/stats-table удалён.
         _statsPreloaded = true; trySignalAllReady();
-        // Расписание — сохраним в кэш с версией
-        fetch('/api/schedule', { headers: { 'Cache-Control': 'no-cache' } })
-            .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('schedule:tours', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
-            .finally(() => { _schedulePreloaded = true; trySignalAllReady(); });
-        // Результаты — сохраним в кэш с версией
-        fetch('/api/results', { headers: { 'Cache-Control': 'no-cache' } })
-            .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('results:list', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
-            .finally(() => { _resultsPreloaded = true; trySignalAllReady(); });
+        // Попробуем одним запросом получить summary (schedule+results+tours+leaderboard)
+        if (window.fetchEtag) {
+            window.fetchEtag('/api/summary', {
+                cacheKey: 'summary:all',
+                swrMs: 20000,
+                forceRevalidate: true,
+                params: {
+                    include: 'schedule,results,tours,leaderboard',
+                    leaderboard: 'top-predictors,top-rich,server-leaders,prizes'
+                },
+                extract: j => j
+            }).then(store => {
+                const now = Date.now();
+                const raw = store.raw || store.data || {};
+                // Сохраним под уже используемыми ключами, но без version (чтобы не слать чужой ETag)
+                try {
+                    if (raw.schedule) localStorage.setItem('schedule:tours', JSON.stringify({ data: raw.schedule, version: null, ts: now }));
+                } catch(_) {}
+                try {
+                    if (raw.results) localStorage.setItem('results:list', JSON.stringify({ data: raw.results, version: null, ts: now }));
+                } catch(_) {}
+                try {
+                    if (raw.tours) localStorage.setItem('betting:tours', JSON.stringify({ data: raw.tours, version: null, ts: now }));
+                } catch(_) {}
+                try {
+                    const lb = raw.leaderboard || {};
+                    if (lb['top-predictors']) localStorage.setItem('lb:predictors', JSON.stringify({ etag: null, ts: now, data: lb['top-predictors'], raw: lb['top-predictors'] }));
+                    if (lb['top-rich']) localStorage.setItem('lb:rich', JSON.stringify({ etag: null, ts: now, data: lb['top-rich'], raw: lb['top-rich'] }));
+                    if (lb['server-leaders']) localStorage.setItem('lb:server', JSON.stringify({ etag: null, ts: now, data: lb['server-leaders'], raw: lb['server-leaders'] }));
+                    if (lb['prizes']) localStorage.setItem('lb:prizes', JSON.stringify({ etag: null, ts: now, data: lb['prizes'], raw: lb['prizes'] }));
+                } catch(_) {}
+            }).catch(() => {
+                // Fallback: разнести на отдельные запросы ниже
+            }).finally(() => {
+                _schedulePreloaded = true; trySignalAllReady();
+                _resultsPreloaded = true; trySignalAllReady();
+            });
+        } else {
+            // Fallback: отдельные запросы
+            // Расписание — сохраним в кэш с версией
+            fetch('/api/schedule', { headers: { 'Cache-Control': 'no-cache' } })
+                .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('schedule:tours', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
+                .finally(() => { _schedulePreloaded = true; trySignalAllReady(); });
+            // Результаты — сохраним в кэш с версией
+            fetch('/api/results', { headers: { 'Cache-Control': 'no-cache' } })
+                .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('results:list', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
+                .finally(() => { _resultsPreloaded = true; trySignalAllReady(); });
+        }
 
         // Прогнозы/Ставки: предзагрузка ближайшего тура и моих ставок (если в Telegram)
         try {
             const tg = window.Telegram?.WebApp || null;
             const FRESH_TTL = 5 * 60 * 1000; // 5 минут
-            // Туры для ставок (публично, GET)
-            fetch('/api/betting/tours', { headers: { 'Cache-Control': 'no-cache' } })
-                .then(async r => {
-                    const data = await r.json();
-                    const version = data.version || r.headers.get('ETag') || null;
-                    const store = { data, version, ts: Date.now() };
-                    try { localStorage.setItem('betting:tours', JSON.stringify(store)); } catch(_) {}
-                })
-                .catch(()=>{});
+            // Туры для ставок (публично, GET) — уже прогрели через summary; если нет — fallback ниже
+            if (!localStorage.getItem('betting:tours')) {
+                fetch('/api/betting/tours', { headers: { 'Cache-Control': 'no-cache' } })
+                    .then(async r => {
+                        const data = await r.json();
+                        const version = data.version || r.headers.get('ETag') || null;
+                        const store = { data, version, ts: Date.now() };
+                        try { localStorage.setItem('betting:tours', JSON.stringify(store)); } catch(_) {}
+                    })
+                    .catch(()=>{});
+            }
             // Мои ставки (только в Telegram)
             if (tg?.initDataUnsafe?.user) {
                 const fd = new FormData(); fd.append('initData', tg.initData || '');
