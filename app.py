@@ -3729,56 +3729,7 @@ def get_user_sheet():
     doc = _get_doc(sheet_id)
     return doc.worksheet("users")
 
-def get_achievements_sheet():
-    """Возвращает лист достижений, создаёт при отсутствии."""
-    from config import Config
-    mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
-    if mode == 'disabled' or mode == 'admin_import_only':
-        raise RuntimeError('Google Sheets access for achievements is disabled in current configuration')
-    client = get_google_client()
-    sheet_id = os.environ.get('SHEET_ID')
-    if not sheet_id:
-        raise ValueError("SHEET_ID не установлен в переменных окружения")
-    doc = _get_doc(sheet_id)
-    try:
-        ws = doc.worksheet("achievements")
-    except gspread.exceptions.WorksheetNotFound:
-        ws = doc.add_worksheet(title="achievements", rows=1000, cols=20)
-        # user_id | credits_tier | credits_unlocked_at | level_tier | level_unlocked_at | streak_tier | streak_unlocked_at | invited_tier | invited_unlocked_at
-        _metrics_inc('sheet_writes', 1)
-        ws.update(values=[[
-            'user_id',
-            'credits_tier','credits_unlocked_at',
-            'level_tier','level_unlocked_at',
-            'streak_tier','streak_unlocked_at',
-            'invited_tier','invited_unlocked_at',
-            'betcount_tier','betcount_unlocked_at',
-            'betwins_tier','betwins_unlocked_at',
-            'bigodds_tier','bigodds_unlocked_at',
-            'markets_tier','markets_unlocked_at',
-            'weeks_tier','weeks_unlocked_at'
-        ]], range_name='A1:S1')
-    # Убедимся, что колонки для invited присутствуют
-    try:
-        headers = ws.row_values(1)
-        want = [
-            'user_id',
-            'credits_tier','credits_unlocked_at',
-            'level_tier','level_unlocked_at',
-            'streak_tier','streak_unlocked_at',
-            'invited_tier','invited_unlocked_at',
-            'betcount_tier','betcount_unlocked_at',
-            'betwins_tier','betwins_unlocked_at',
-            'bigodds_tier','bigodds_unlocked_at',
-            'markets_tier','markets_unlocked_at',
-            'weeks_tier','weeks_unlocked_at'
-        ]
-        if headers != want:
-            _metrics_inc('sheet_writes', 1)
-            ws.update(values=[want], range_name='A1:S1')
-    except Exception as e:
-        app.logger.warning(f"Не удалось проверить/обновить заголовки achievements: {e}")
-    return ws
+# [Removed] Legacy Google Sheets achievements helpers were removed after DB migration.
 
 def get_table_sheet():
     """Возвращает лист таблицы лиги 'ТАБЛИЦА'."""
@@ -4334,96 +4285,7 @@ def get_rosters_sheet():
 
 # Запись счёта матча в лист "РАСПИСАНИЕ ИГР" в колонки B (home) и D (away)
 
-def get_user_achievements_row(user_id):
-    """Читает или инициализирует строку достижений пользователя.
-
-    Оптимизация: кэшируем результат на ACH_ROW_CACHE_TTL секунд (по умолчанию 1800 = 30 мин),
-    чтобы повторные вызовы /api/achievements не ходили в Google Sheets/БД каждый раз.
-    """
-    # In-memory cache for row lookups
-    try:
-        _ttl = int(os.environ.get('ACH_ROW_CACHE_TTL', '1800'))
-    except Exception:
-        _ttl = 1800
-    global _ACH_ROW_CACHE
-    if '_ACH_ROW_CACHE' not in globals():
-        _ACH_ROW_CACHE = {}
-    now_ts = time.time()
-    ck = f"row:{user_id}"
-    ce = _ACH_ROW_CACHE.get(ck)
-    if ce and (now_ts - ce.get('ts', 0) < _ttl):
-        return ce['row'], ce['data']
-
-    ws = get_achievements_sheet()
-    try:
-        cell = ws.find(str(user_id), in_column=1)
-        if cell:
-            row_vals = ws.row_values(cell.row)
-            # Гарантируем длину до 19 колонок (A..S)
-            row_vals = list(row_vals) + [''] * (19 - len(row_vals))
-            row = cell.row
-            data = {
-                'credits_tier': int(row_vals[1] or 0),
-                'credits_unlocked_at': row_vals[2] or '',
-                'level_tier': int(row_vals[3] or 0),
-                'level_unlocked_at': row_vals[4] or '',
-                'streak_tier': int(row_vals[5] or 0),
-                'streak_unlocked_at': row_vals[6] or '',
-                'invited_tier': int(row_vals[7] or 0),
-                'invited_unlocked_at': row_vals[8] or '',
-                'betcount_tier': int((row_vals[9] or 0)),
-                'betcount_unlocked_at': row_vals[10] or '',
-                'betwins_tier': int((row_vals[11] or 0)),
-                'betwins_unlocked_at': row_vals[12] or '',
-                'bigodds_tier': int((row_vals[13] or 0)),
-                'bigodds_unlocked_at': row_vals[14] or '',
-                'markets_tier': int((row_vals[15] or 0)),
-                'markets_unlocked_at': row_vals[16] or '',
-                'weeks_tier': int((row_vals[17] or 0)),
-                'weeks_unlocked_at': row_vals[18] if len(row_vals) > 18 else ''
-            }
-            _ACH_ROW_CACHE[ck] = {'ts': now_ts, 'row': row, 'data': data}
-            return row, data
-    except gspread.exceptions.APIError as e:
-        app.logger.error(f"Ошибка API при чтении достижений: {e}")
-    # Создаём новую строку (включая invited_tier/unlocked_at)
-    # Инициализируем 19 колонок: user_id + 9 пар (tier, unlocked_at)
-    ws.append_row([
-        str(user_id),
-        '0','',  # credits
-        '0','',  # level
-        '0','',  # streak
-        '0','',  # invited
-        '0','',  # betcount
-        '0','',  # betwins
-        '0','',  # bigodds
-        '0','',  # markets
-        '0',''   # weeks
-    ])
-    # Найдём только что добавленную (последняя строка)
-    last_row = len(ws.get_all_values())
-    data = {
-        'credits_tier': 0,
-        'credits_unlocked_at': '',
-        'level_tier': 0,
-        'level_unlocked_at': '',
-        'streak_tier': 0,
-        'streak_unlocked_at': '',
-        'invited_tier': 0,
-        'invited_unlocked_at': '',
-        'betcount_tier': 0,
-        'betcount_unlocked_at': '',
-        'betwins_tier': 0,
-        'betwins_unlocked_at': '',
-        'bigodds_tier': 0,
-        'bigodds_unlocked_at': '',
-        'markets_tier': 0,
-        'markets_unlocked_at': '',
-        'weeks_tier': 0,
-        'weeks_unlocked_at': ''
-    }
-    _ACH_ROW_CACHE[ck] = {'ts': now_ts, 'row': last_row, 'data': data}
-    return last_row, data
+# [Removed] Legacy get_user_achievements_row removed — DB model UserAchievement is the source of truth.
 
 def compute_tier(value: int, thresholds) -> int:
     """Возвращает tier по убывающим порогам. thresholds: [(threshold, tier), ...]"""
