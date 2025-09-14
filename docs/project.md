@@ -193,6 +193,7 @@
 | **Security** | Various | - | Rate limiting, CSRF, validation |
 | **Deployment** | Gunicorn | 21.2.0 | Production WSGI сервер (через wsgi.py) |
 | **Migrations** | Alembic | 1.13.2 | Миграции (подключено, требует инициализации) |
+|  |  |  | Замечание: добавлена ревизия для `user_achievements` в `migrations/versions/2025_09_14_create_user_achievements.py` и инструкция в `migrations/README.md`. |
 | **Sanitize** | Bleach | 6.1.0 | Очистка HTML (план: новости) |
 | **Rate Limit** | flask-limiter | 3.5.0 | Лимиты запросов |
 | **Monitoring** | psutil | 5.9.8 | Системный мониторинг |
