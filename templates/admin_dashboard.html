@@ -386,6 +386,25 @@
                             <button id="apply-season-btn" class="action-btn" style="background:#444;">Сделать активным</button>
                         </div>
                     </div>
+                    <!-- Генерация сезона (расписание) -->
+                    <div style="margin-top:10px; padding:10px; border:1px solid #333; border-radius:8px; background:#0f0f0f;">
+                        <h4 style="margin:0 0 8px 0;">Генерация расписания сезона</h4>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                            <label style="display:flex; gap:6px; align-items:center;">
+                                Дата старта:
+                                <input id="season-generate-date" type="text" placeholder="ДД.ММ.ГГГГ" style="background:#111; color:#fff; border:1px solid #333; padding:6px 8px; border-radius:6px; min-width:140px;">
+                            </label>
+                            <span class="help-text" style="margin:0;">Слоты: 10:00, 11:00, 12:00, 13:00, каждое воскресенье</span>
+                            <span id="season-generate-label" class="help-text" style="margin-left:auto; font-weight:600;">Будет создан сезон: —</span>
+                        </div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+                            <button id="admin-season-generate-soft" class="action-btn" style="background:#2f855a;">Сгенерировать сезон (мягкий старт)</button>
+                            <button id="admin-season-generate-full" class="action-btn" style="background:#b22222;">Сгенерировать сезон (полный сброс)</button>
+                        </div>
+                        <p class="help-text" style="margin-top:6px;">
+                            Мягкий старт: вернёт 409, если в активном турнире уже есть матчи (не трогает текущее расписание). Полный сброс: полностью перезапишет текущий сезон (для чистого старта/тестов).
+                        </p>
+                    </div>
                     <p class="help-text">План — пробный запуск без изменений. Мягкий — без очистки старых данных. Полный — удаляет старые служебные данные. Deep + Полный — дополнительно удаляет матчи прошлого турнира и импортирует новое расписание.</p>
                     <pre id="season-rollover-log" style="max-height:160px; overflow:auto; font-size:12px; background:#111; padding:8px; border:1px solid #333; border-radius:6px; display:none;"></pre>
                     <div class="help-text" style="margin-top:6px; line-height:1.4;">

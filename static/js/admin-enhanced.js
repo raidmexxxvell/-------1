@@ -422,6 +422,11 @@
   const seasonPicker = document.getElementById('season-picker');
   const applySeasonBtn = document.getElementById('apply-season-btn');
   const activeSeasonLabel = document.getElementById('active-season-label');
+  // Season generation controls
+  const seasonGenDate = document.getElementById('season-generate-date');
+  const seasonGenLabel = document.getElementById('season-generate-label');
+  const btnSeasonGenSoft = document.getElementById('admin-season-generate-soft');
+  const btnSeasonGenFull = document.getElementById('admin-season-generate-full');
   if (btnDry) btnDry.onclick = ()=> seasonRollover('dry');
   if (btnSoft) btnSoft.onclick = ()=> seasonRollover('soft');
     if (btnRoll) btnRoll.onclick = ()=> {
@@ -435,6 +440,27 @@
   if (btnSheetsSelftest) btnSheetsSelftest.onclick = ()=> sheetsSelfTest();
   if (seasonPicker) loadSeasonsIntoPicker();
   if (applySeasonBtn) applySeasonBtn.onclick = ()=> applySelectedSeason();
+  // Prefill date with today and wire season label updater
+  if (seasonGenDate) {
+    try {
+      const now = new Date();
+      const dd = String(now.getDate()).padStart(2,'0');
+      const mm = String(now.getMonth()+1).padStart(2,'0');
+      const yyyy = String(now.getFullYear());
+      if(!seasonGenDate.value){ seasonGenDate.value = `${dd}.${mm}.${yyyy}`; }
+    } catch(_){}
+    const updateLabel = ()=>{
+      const label = computeSeasonLabelFromDate(seasonGenDate.value);
+      if (seasonGenLabel) seasonGenLabel.textContent = 'Будет создан сезон: ' + label;
+    };
+    seasonGenDate.addEventListener('input', updateLabel);
+    updateLabel();
+  }
+  if (btnSeasonGenSoft) btnSeasonGenSoft.onclick = ()=> generateSeason('soft_start');
+  if (btnSeasonGenFull) btnSeasonGenFull.onclick = ()=> {
+    const ok = confirm('Полный сброс: текущее расписание сезона будет полностью перезаписано. Продолжить?');
+    if (!ok) return; generateSeason('full_reset');
+  };
   }
 
   // Match management functions
@@ -870,6 +896,77 @@
         showToast('Данные выгружены в Google','success');
       }).catch(e=>{ showToast('Ошибка выгрузки: '+e.message,'error',6000); })
       .finally(()=>{ btn.disabled=false; btn.textContent=t; });
+  }
+
+  // ---- Season generation helpers ----
+  function computeSeasonLabelFromDate(dmy){
+    // Accepts 'DD.MM.YYYY'; falls back to today
+    let day, month, year;
+    try{
+      const m = String(dmy||'').trim().match(/^(\d{1,2})[.](\d{1,2})[.](\d{4})$/);
+      if(m){ day=parseInt(m[1],10); month=parseInt(m[2],10); year=parseInt(m[3],10); }
+      else { const d=new Date(); day=d.getDate(); month=d.getMonth()+1; year=d.getFullYear(); }
+    }catch(_){ const d=new Date(); day=d.getDate(); month=d.getMonth()+1; year=d.getFullYear(); }
+    const yy = String(year).slice(-2);
+    // Rule: if month <= 6 → single year (season in first half-year), else cross-year (YY-YY+1)
+    if (month <= 6) return yy;
+    const next = String((year+1)).slice(-2);
+    return yy+'-'+next;
+  }
+
+  function parseStartDateForBackend(dmy){
+    // Backend accepts DD.MM.YY or YYYY-MM-DD; keep as DD.MM.YYYY to match UI
+    const v = String(dmy||'').trim();
+    if (/^\d{1,2}[.]\d{1,2}[.]\d{4}$/.test(v)) return v;
+    // try ISO
+    const d=new Date(v);
+    if(!isNaN(d)){
+      const dd=String(d.getDate()).padStart(2,'0');
+      const mm=String(d.getMonth()+1).padStart(2,'0');
+      const yyyy=d.getFullYear();
+      return `${dd}.${mm}.${yyyy}`;
+    }
+    return '';
+  }
+
+  function generateSeason(mode){
+    const startInput = document.getElementById('season-generate-date');
+    if(!startInput){ showToast('Поле даты не найдено','error'); return; }
+    const startRaw = startInput.value;
+    const start = parseStartDateForBackend(startRaw);
+    if(!start){ showToast('Неверный формат даты. Используйте ДД.ММ.ГГГГ','error'); return; }
+    const btnSoft = document.getElementById('admin-season-generate-soft');
+    const btnFull = document.getElementById('admin-season-generate-full');
+    const disable= (b)=>{ if(b){ b.disabled=true; b.dataset.t=b.textContent; b.textContent='Выполняю...'; }};
+    const enable= (b)=>{ if(b){ b.disabled=false; if(b.dataset.t){ b.textContent=b.dataset.t; delete b.dataset.t; } }};
+    disable(btnSoft); disable(btnFull);
+    const fd = new FormData();
+    fd.append('initData', window.Telegram?.WebApp?.initData || '');
+    fd.append('mode', mode);
+    fd.append('start_date', start);
+    // time slots implied by backend defaults; can be customized later
+    fetch('/api/admin/schedule/generate', { method:'POST', body: fd })
+      .then(async r=>{
+        const data = await r.json().catch(()=>({}));
+        if(r.status===409){ throw new Error(data?.error || 'Soft start невозможен: в активном турнире уже есть матчи'); }
+        if(!r.ok){ throw new Error(data?.error || ('HTTP '+r.status)); }
+        return data;
+      })
+      .then(res=>{
+        const label = computeSeasonLabelFromDate(start);
+        const tours = res?.tours_created ?? res?.tours ?? '—';
+        const matches = res?.matches_created ?? res?.created ?? '—';
+        showToast(`Сезон ${label} создан: туров ${tours}, матчей ${matches}`,'success',6000);
+        if (res?.warnings && Array.isArray(res.warnings) && res.warnings.length) {
+          showToast('Предупреждения: ' + res.warnings.join('; '), 'info', 8000);
+        }
+        // Refresh UI pieces
+        try{ loadMatches(); }catch(_){}
+      })
+      .catch(err=>{
+        showToast('Ошибка генерации сезона: '+err.message,'error',7000);
+      })
+      .finally(()=>{ enable(btnSoft); enable(btnFull); });
   }
 
   function loadStats() {

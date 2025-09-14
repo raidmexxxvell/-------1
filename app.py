@@ -478,7 +478,19 @@ def _update_schedule_snapshot_from_matches(db_session, logger):
             team_map = {}
         # Load matches ordered
         try:
-            match_rows = db_session.query(Match).order_by(Match.match_date.asc()).all()
+            # Ограничиваемся активным турниром, если доступен и найдён
+            active_tid = None
+            try:
+                from database.database_models import Tournament as _T
+                active = db_session.query(_T).filter(_T.status=='active').order_by(_T.start_date.desc().nullslast(), _T.created_at.desc()).first()
+                if active:
+                    active_tid = active.id
+            except Exception:
+                active_tid = None
+            q = db_session.query(Match)
+            if active_tid is not None:
+                q = q.filter(Match.tournament_id == active_tid)
+            match_rows = q.order_by(Match.match_date.asc()).all()
         except Exception:
             match_rows = []
 
@@ -10721,6 +10733,202 @@ def api_results_refresh():
     except Exception as e:
         app.logger.error(f"Ошибка принудительного обновления результатов: {e}")
         return jsonify({'error': 'Не удалось обновить результаты'}), 500
+
+# -------- Season schedule generator (DB-first, no Sheets) --------
+@app.route('/api/admin/schedule/generate', methods=['POST'])
+@require_admin()
+@log_data_sync("Генерация расписания сезона (двойной круг)")
+def api_admin_generate_season_schedule():
+    """Админ: сгенерировать расписание сезона в таблицу matches без Google.
+    Параметры (form/json/query):
+      - mode: full_reset | soft_start (default soft_start)
+      - start_date: дата начала (ДД.ММ.ГГ или YYYY-MM-DD), например 05.10.25
+      - time_slots: CSV времени матчей, по умолчанию 10:00,11:00,12:00,13:00
+    Логика:
+      - Берём активный турнир (или создаём, если нет) и активные команды из teams
+      - Строим двойной круг (каждый с каждым дома/в гостях), 9 команд -> 18 туров по 4 матча
+      - Тур №i назначается на воскресенье, начиная с ближайшего/данного start_date, времена по слотам.
+      - full_reset: удаляем (hard delete) все незавершённые матчи активного турнира перед генерацией
+      - soft_start: если матчи уже есть — 409
+    Результат: создаёт матчи, пересобирает snapshot schedule и betting-tours, инвалидирует кэши.
+    """
+    try:
+        # Считываем вход
+        mode = (request.values.get('mode') or (request.json or {}).get('mode') if request.is_json else None) or 'soft_start'
+        start_date_raw = (request.values.get('start_date') or ((request.json or {}).get('start_date') if request.is_json else None)) or '05.10.25'
+        time_slots_raw = (request.values.get('time_slots') or ((request.json or {}).get('time_slots') if request.is_json else None)) or '10:00,11:00,12:00,13:00'
+        time_slots = [s.strip() for s in str(time_slots_raw).split(',') if s.strip()]
+
+        if SessionLocal is None:
+            return jsonify({'error': 'db_unavailable'}), 503
+
+        # Парсер даты (ДД.ММ.ГГ | ДД.ММ.ГГГГ | YYYY-MM-DD)
+        def _parse_start_date(s: str):
+            from datetime import datetime as _dt
+            s = (s or '').strip()
+            fmts = ['%d.%m.%y', '%d.%m.%Y', '%Y-%m-%d']
+            for f in fmts:
+                try:
+                    d = _dt.strptime(s, f).date()
+                    # нормализуем век для %y: 25 -> 2025 (strptime уже так делает: 1969..2068 window)
+                    return d
+                except Exception:
+                    continue
+            # fallback — сегодня
+            return _dt.now().date()
+
+        def _to_sunday_on_or_after(d):
+            # weekday(): Monday=0 .. Sunday=6
+            wd = d.weekday()
+            # целимся в воскресенье (6)
+            delta = (6 - wd) % 7
+            return d + timedelta(days=delta)
+
+        # Круговой алгоритм (circle method)
+        def _build_double_round_pairs(team_ids: list[int]):
+            import random as _rnd
+            ids = list(team_ids)
+            n = len(ids)
+            byes = False
+            if n % 2 == 1:
+                ids.append(None)  # пропуск
+                byes = True
+                n += 1
+            rounds = n - 1  # для нечётного исходного — это n (с учётом добавленного None)
+            # Примечание: при нечётном исходном n_rounds = original_n (9), при чётном — original_n-1
+            fixed = ids[0]
+            rot = ids[1:]
+            first_half = []  # список раундов, каждый — список пар (home_id, away_id)
+            for r in range(rounds):
+                pairs = []
+                left = [fixed] + rot[: (len(rot)//2)]
+                right = list(reversed(rot[(len(rot)//2):]))
+                for a, b in zip(left, right):
+                    if a is None or b is None:
+                        continue
+                    # Дом/гости чередуем на основе чётности раунда для баланса
+                    if r % 2 == 0:
+                        pairs.append((a, b))
+                    else:
+                        pairs.append((b, a))
+                # Перемешаем пары внутри тура, чтобы порядок был «хаотичный»
+                _rnd.shuffle(pairs)
+                first_half.append(pairs)
+                # Ротация
+                if rot:
+                    rot = [rot[-1]] + rot[:-1]
+            # Вторая половина — зеркально меняем дом/гости
+            second_half = [[(b, a) for (a, b) in pairs] for pairs in first_half]
+            return first_half + second_half
+
+        # Стартовые значения
+        d0 = _parse_start_date(start_date_raw)
+        first_sunday = _to_sunday_on_or_after(d0)
+
+        db = get_db()
+        try:
+            # Определяем активный турнир (или создаём)
+            from database.database_models import Tournament
+            active = db.query(Tournament).filter(Tournament.status == 'active').order_by(Tournament.start_date.desc().nullslast(), Tournament.created_at.desc()).first()
+            if not active:
+                # Создаём новый сезон по правилу «июль-начало»
+                y = first_sunday.year
+                a = y % 100 if first_sunday.month >= 7 else (y - 1) % 100
+                b = (y + 1) % 100 if first_sunday.month >= 7 else y % 100
+                season = f"{a:02d}-{b:02d}"
+                active = Tournament(name=f"Лига Обнинска {season}", season=season, status='active', start_date=first_sunday)
+                db.add(active)
+                db.flush()
+
+            # Загружаем активные команды
+            teams = db.query(Team).filter((Team.is_active == True)).order_by(Team.id.asc()).all()  # noqa: E712
+            team_ids = [t.id for t in teams]
+            team_map = {t.id: t.name for t in teams}
+            if len(team_ids) < 2:
+                return jsonify({'error': 'not_enough_teams', 'count': len(team_ids)}), 400
+
+            # Проверка наличия существующих матчей
+            existing_cnt = db.query(func.count(Match.id)).filter(Match.tournament_id == active.id).scalar() or 0
+            if mode == 'soft_start' and existing_cnt > 0:
+                return jsonify({'error': 'already_has_matches', 'tournament_id': active.id, 'count': int(existing_cnt)}), 409
+
+            # full_reset: удалим все незавершённые матчи текущего активного турнира
+            if mode == 'full_reset' and existing_cnt > 0:
+                try:
+                    db.query(Match).filter(Match.tournament_id == active.id, Match.status != 'finished').delete(synchronize_session=False)
+                    db.commit()
+                except Exception:
+                    try: db.rollback()
+                    except Exception: pass
+
+            # Генерируем пары на 2 круга
+            rounds_pairs = _build_double_round_pairs(team_ids)
+            rounds_total = len(rounds_pairs)
+            per_round = len(time_slots)
+            # sanity: число матчей в туре должно совпадать со слотами (для 9 команд — 4)
+            # если нет — ограничим по слотам и вернём предупреждение
+            warnings = []
+
+            # Создаём матчи
+            created = 0
+            for idx, pairs in enumerate(rounds_pairs, start=1):
+                date_i = first_sunday + timedelta(weeks=idx-1)
+                # Перемешивание уже выполнено; выровняем по слотам
+                for k, (home_id, away_id) in enumerate(pairs[:per_round]):
+                    tm = time_slots[k] if k < len(time_slots) else time_slots[-1]
+                    try:
+                        hh, mm = tm.split(':', 1)
+                        dt = datetime.combine(date_i, datetime.strptime(f"{hh}:{mm}", '%H:%M').time())
+                    except Exception:
+                        dt = datetime.combine(date_i, datetime.strptime('10:00', '%H:%M').time())
+                    m = Match(
+                        tournament_id=active.id,
+                        home_team_id=int(home_id),
+                        away_team_id=int(away_id),
+                        match_date=dt,
+                        status='scheduled',
+                        tour=idx
+                    )
+                    db.add(m)
+                    created += 1
+                # Если матчей больше, чем слотов — сообщим (для нестандартного N)
+                if len(pairs) > per_round:
+                    warnings.append({'round': idx, 'pairs': len(pairs), 'slots': per_round})
+
+            db.commit()
+
+            # Пересоберём snapshot расписания из matches
+            try:
+                _update_schedule_snapshot_from_matches(db, app.logger)
+            except Exception as _ss_err:
+                app.logger.warning(f"schedule snapshot rebuild failed: {_ss_err}")
+
+        finally:
+            db.close()
+
+        # Пересоберём betting-tours и инвалидируем кэши
+        try:
+            _sync_betting_tours()
+        except Exception:
+            pass
+        try:
+            if cache_manager:
+                cache_manager.invalidate('schedule')
+                cache_manager.invalidate('betting-tours')
+                cache_manager.invalidate('league_table')
+        except Exception:
+            pass
+        try:
+            ws = globals().get('websocket_manager')
+            if ws:
+                ws.notify_data_change('schedule', {'updated_at': datetime.now(timezone.utc).isoformat()})
+        except Exception:
+            pass
+
+        return jsonify({'status': 'ok', 'tournament_id': int(active.id), 'teams': len(team_ids), 'rounds': rounds_total, 'matches_created': created, 'warnings': warnings})
+    except Exception as e:
+        app.logger.error(f"generate season schedule error: {e}")
+        return jsonify({'error': 'internal'}), 500
 
 # -------- Google Sheets Admin Sync (import/export) --------
 @app.route('/api/admin/google/import-schedule', methods=['POST'])

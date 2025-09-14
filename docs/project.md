@@ -166,6 +166,11 @@
     - Persistent roster: `app.py` → сохранение составов, синхронизация с `team_roster`
     - Массовое обновление снапшотов: `POST /api/admin/refresh-all` — последовательный запуск `_sync_league_table`, `_sync_stats_table`, `_sync_schedule`, `_sync_results`, `_sync_betting_tours` с WebSocket прогрессом.
     - Публичные составы: `app.py` → `GET /api/match/lineups?match_id=...`
+        - Генерация расписания сезона: `app.py` → `POST /api/admin/schedule/generate`
+            - Параметры: `mode` (`soft_start` | `full_reset`), `start_date` (`ДД.ММ.ГГГГ` или `YYYY-MM-DD`) и фиксированные слоты времени (10:00, 11:00, 12:00, 13:00) по воскресеньям.
+            - Источник команд: таблица `teams` (количество не фиксировано: 6/8/9/10 и т.д.).
+            - Поведение: `soft_start` вернёт 409, если уже есть матчи в активном турнире; `full_reset` — полностью перезапишет матчи текущего сезона.
+            - После генерации: пересбор `schedule` только по активному турниру, синхронизация betting‑tours, инвалидация кэшей и WS‑уведомление.
 
 - Кэширование и ETag
     - Универсальный ответ: `app.py` → `_json_response`
@@ -236,6 +241,12 @@ UI админ‑панели (`templates/admin_dashboard.html` + `static/js/admi
   
 Дополнительно:
 - Admin-only endpoint `POST /api/admin/leaderboards/refresh` выполняет принудительный refresh/инвалидацию лидербордов и сбрасывает in-memory ETag — полезно при `ENABLE_SCHEDULER=0` и `LEADER_PRECOMPUTE_ENABLED=0`.
+  
+Новый UI блок во вкладке «Сервис» → «Сезон»:
+- Поле «Дата старта» (ДД.ММ.ГГГГ) и динамическая подсказка «Будет создан сезон: …».
+- Расчёт метки сезона: если месяц даты ≤ 6 — однолетний («26»), иначе — крест‑год («25-26»).
+- Кнопки: «Сгенерировать сезон (мягкий старт)» и «Сгенерировать сезон (полный сброс)».
+- Клиент: `static/js/admin-enhanced.js` — функции `computeSeasonLabelFromDate`, `generateSeason(mode)`.
 
 ### Живая турнирная таблица (live)
 
