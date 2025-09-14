@@ -330,7 +330,7 @@ TTL примеры: league_table 300s/1800s, news 120s/300s.
     - Параметры запроса:
         - `include` — CSV из `schedule,results,tours,leaderboard` (по умолчанию все)
         - `leaderboard` — CSV из `top-predictors,top-rich,server-leaders,prizes` (по умолчанию все)
-    - Кэширование: `etag_json` с `cache_ttl=20s`, `max_age=20s`, `swr=40s`.
+    - Кэширование: `etag_json` с `cache_ttl=60s`, `max_age=60s`, `swr=120s`.
     - Core-фильтр стабилизирует ETag (обрезает длинные списки, исключает `updated_at`).
     - Rate limit: `RL_SUMMARY_RPM` (per‑ip; по умолчанию 6 rpm).
 
@@ -343,7 +343,13 @@ TTL примеры: league_table 300s/1800s, news 120s/300s.
 - `RL_SUMMARY_RPM` — `GET /api/summary` (6 rpm, per‑ip)
 
 Карта ключевых эндпоинтов (дополнение):
-- `GET /api/summary` — агрегированный ответ (schedule/results/tours/leaderboard), ETag + SWR 40s, Rate‑Limit `RL_SUMMARY_RPM`.
+- `GET /api/summary` — агрегированный ответ (schedule/results/tours/leaderboard), ETag + SWR 120s, Rate‑Limit `RL_SUMMARY_RPM`.
+
+Параметры окружения для ETag‑кэшей (новое):
+- `ETAG_CACHE_MAX_KEYS` — максимальное количество ключей в in-memory ETag‑кэше (по умолчанию 256). При превышении лимита удаляются самые старые записи по времени `ts`.
+
+Безопасность персональных ответов:
+- `/api/achievements` возвращает `Cache-Control: private, max-age=30, stale-while-revalidate=60` (ETag/304 поддерживается), чтобы исключить кэширование на общих прокси и CDN.
 
 ### 4. Паттерн Repository для работы с данными (актуален)
 

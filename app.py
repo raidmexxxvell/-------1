@@ -4657,6 +4657,11 @@ def _json_response(payload: dict, status: int = 200):
 # ---------------------- ETag JSON Helper ----------------------
 _ETAG_HELPER_CACHE = {}
 _ETAG_HELPER_SWEEP = {'count': 0}
+# Максимальное количество ключей в in-memory ETag-кэше (LRU-подобное вытеснение по старейшему ts)
+try:
+    _ETAG_CACHE_MAX_KEYS = int(os.environ.get('ETAG_CACHE_MAX_KEYS', '256'))
+except Exception:
+    _ETAG_CACHE_MAX_KEYS = 256
 # Lightweight ETag metrics (per endpoint_key). Thread-safe via local lock.
 _ETAG_METRICS_LOCK = threading.Lock()
 _ETAG_METRICS = {
@@ -4752,6 +4757,18 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
     except Exception:
         etag = hashlib.md5(str(endpoint_key).encode()).hexdigest()
     _ETAG_HELPER_CACHE[endpoint_key] = {'ts': now, 'payload': payload, 'etag': etag, 'ttl': cache_ttl}
+    # Ограничение размера кэша: при превышении лимита удаляем самые старые по ts
+    try:
+        max_keys = int(_ETAG_CACHE_MAX_KEYS or 256)
+        if max_keys > 0 and len(_ETAG_HELPER_CACHE) > max_keys:
+            # Собираем пары (key, ts) и удаляем лишние с наименьшим ts
+            items = [(k, v.get('ts', 0)) for k, v in _ETAG_HELPER_CACHE.items()]
+            items.sort(key=lambda x: x[1])
+            to_remove = len(_ETAG_HELPER_CACHE) - max_keys
+            for k, _ in items[:to_remove]:
+                _ETAG_HELPER_CACHE.pop(k, None)
+    except Exception:
+        pass
     _etag_metrics_inc(endpoint_key, 'builds', 1)
     # Periodic cleanup of stale cached entries to avoid unbounded growth
     try:
@@ -8555,7 +8572,7 @@ def get_achievements():
       GET:  /api/achievements?initData=<urlencoded initData>  или заголовок X-Telegram-Init-Data
 
     Кэш на 30 сек в памяти; при совпадении If-None-Match возвращается 304.
-    Заголовок Cache-Control: public, max-age=30, stale-while-revalidate=30
+    Заголовок Cache-Control: private, max-age=30, stale-while-revalidate=60
     """
     try:
         global ACHIEVEMENTS_CACHE
@@ -8582,11 +8599,11 @@ def get_achievements():
             if client_etag and client_etag == ce.get('etag'):
                 resp = flask.make_response('', 304)
                 resp.headers['ETag'] = ce.get('etag')
-                resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+                resp.headers['Cache-Control'] = 'private, max-age=30, stale-while-revalidate=60'
                 return resp
             resp = _json_response(ce['data'])
             resp.headers['ETag'] = ce.get('etag','')
-            resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+            resp.headers['Cache-Control'] = 'private, max-age=30, stale-while-revalidate=60'
             return resp
 
         # User fetch (DB or Sheets)
@@ -8783,11 +8800,11 @@ def get_achievements():
         if client_etag and client_etag == etag:
             resp = flask.make_response('', 304)
             resp.headers['ETag'] = etag
-            resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+            resp.headers['Cache-Control'] = 'private, max-age=30, stale-while-revalidate=60'
             return resp
         resp = _json_response({**resp_payload, 'version': etag})
         resp.headers['ETag'] = etag
-        resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+        resp.headers['Cache-Control'] = 'private, max-age=30, stale-while-revalidate=60'
         return resp
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {str(e)}")
@@ -10432,9 +10449,9 @@ def api_summary():
     return etag_json(
         'summary',
         _build,
-        cache_ttl=20,
-        max_age=20,
-        swr=40,
+        cache_ttl=60,
+        max_age=60,
+        swr=120,
         cache_visibility='public',
         core_filter=_core
     )
