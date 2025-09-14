@@ -1,3 +1,16 @@
+"""
+WSGI entrypoint with early gevent monkey-patching.
+Patching must happen before importing any module that may import socket/ssl/urllib3.
+"""
+
+# Apply gevent monkey patch as early as possible to avoid SSL/urllib3 recursion issues
+try:
+	from gevent import monkey  # type: ignore
+	monkey.patch_all()
+except Exception:
+	# Safe no-op if gevent is not available (e.g., sync worker fallback)
+	pass
+
 from app import app, socketio
 
 # Gunicorn entrypoint
