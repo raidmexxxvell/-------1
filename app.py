@@ -3536,6 +3536,35 @@ if engine is not None:
     try:
         Base.metadata.create_all(engine)
         print('[INFO] DB tables ensured')
+
+        # Если включён флаг INIT_DATABASE_TABLES, обеспечить создание таблицы user_achievements
+        try:
+            if os.getenv('INIT_DATABASE_TABLES', '').lower() in ('1', 'true', 'yes'):
+                print('[INFO] INIT_DATABASE_TABLES enabled: ensuring user_achievements table')
+                try:
+                    # Создаём только таблицу, соответствующую модели UserAchievement
+                    if 'UserAchievement' in globals() and getattr(UserAchievement, '__table__', None) is not None:
+                        UserAchievement.__table__.create(bind=engine, checkfirst=True)
+                        print('[INFO] user_achievements table ensured via ORM')
+                    else:
+                        raise RuntimeError('UserAchievement model not available')
+                except Exception as orm_err:
+                    print(f"[WARN] ORM create for user_achievements failed: {orm_err}; falling back to SQL script if available")
+                    try:
+                        sql_path = os.path.join(os.path.dirname(__file__), 'scripts', 'create_user_achievements_table.sql')
+                        if os.path.exists(sql_path):
+                            with open(sql_path, 'r', encoding='utf-8') as f:
+                                sql = f.read()
+                            with engine.connect() as conn:
+                                conn.execute(text(sql))
+                                conn.commit()
+                            print('[INFO] user_achievements table ensured via SQL script')
+                        else:
+                            print(f"[WARN] SQL script not found at {sql_path}; user_achievements not ensured")
+                    except Exception as sql_err:
+                        print(f"[ERROR] Fallback SQL for user_achievements failed: {sql_err}")
+        except Exception as flag_err:
+            print(f"[WARN] INIT_DATABASE_TABLES flow failed: {flag_err}")
     except Exception as e:
         print(f'[ERROR] DB init failed: {e}')
 
