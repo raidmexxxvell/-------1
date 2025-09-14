@@ -6,3 +6,6 @@ from app import app, socketio
 
 # Provide explicit socketio app reference if needed
 socketio_app = app  # compatibility alias
+
+# Some platforms look for 'application' by default
+application = app

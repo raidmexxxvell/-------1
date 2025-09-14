@@ -606,6 +606,14 @@ class Tournament(Base):
 
 Примечание: Реализация безопасна для бесплатного Render-слоя — WebSocket включается через флаги, а при выключенном WS используется ETag-подход с опросом.
 
+### Развёртывание WebSocket на Render (важно)
+
+- Для Flask-SocketIO через gevent используйте Python 3.12. На Python 3.13 текущие колёса gevent могут быть недоступны и сборка падает с ошибкой Cython.
+- В `render.yaml` явно укажите `pythonVersion: 3.12` и перенесите `startCommand` внутрь блока сервиса. Пример:
+    - `startCommand: gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 -b 0.0.0.0:$PORT wsgi:app`
+- Добавьте env флаги: `WEBSOCKETS_ENABLED=1`, `WS_TOPIC_SUBSCRIPTIONS_ENABLED=1`.
+- После правок сделайте Clear build cache → Deploy, чтобы Render переинициализировал окружение с Python 3.12.
+
 План Этап 2 (безопасные улучшения):
 - Подстроить TTL в `optimizations/multilevel_cache.py` для `schedule`/`results` с акцентом на снижение холодных загрузок — выполнено.
 - Мягкий debounce (~250мс) на стороне сервера перед широковещательными WebSocket-патчами — реализовано (с безопасным fallback на прямую отправку).
