@@ -56,8 +56,17 @@ def get_google_sheets_client():
 
 def import_schedule_from_sheets():
     """Import schedule from Google Sheets"""
+    # Check configuration: if Sheets are disabled, don't attempt import
+    try:
+        from config import Config
+        mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+    except Exception:
+        mode = 'admin_import_only'
+    if mode == 'disabled':
+        print("[INFO] Skipping Google Sheets import because SHEETS_MODE=disabled")
+        return False
+
     print("[INFO] Starting schedule import from Google Sheets...")
-    
     sheet = get_google_sheets_client()
     if not sheet:
         print("[ERROR] Could not connect to Google Sheets")

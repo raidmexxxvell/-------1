@@ -1376,7 +1376,8 @@
       container.innerHTML = '<div class="loading-indicator">Загрузка метрик...</div>';
       const perfParams = new URLSearchParams();
       if (initData) perfParams.append('initData', initData);
-      fetch(`/health/perf?${perfParams.toString()}`)
+      // use credentials include so admin cookie is sent when hosted cross-site
+      fetch(`/health/perf?${perfParams.toString()}`, { credentials: 'include' })
         .then(r => { if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
         .then(data => {
           renderMetricsSnapshot(container, data);
@@ -1392,9 +1393,17 @@
     }
     toggleMetricsControls(false);
 
-    fetch(`/api/admin/logs?${params.toString()}`)
+    // Ensure cookies (admin_auth) are sent; helpful when site is served via proxy or cross-site
+    fetch(`/api/admin/logs?${params.toString()}`, { credentials: 'include' })
     .then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        if (r.status === 401) {
+          // Show clearer message prompting to login via admin form or Telegram
+          container.innerHTML = '<div class="status-text">Требуется авторизация. Пожалуйста, войдите в админку (логин/пароль или Telegram).</div>';
+          throw new Error('Unauthorized');
+        }
+        throw new Error(`HTTP ${r.status}`);
+      }
       return r.json();
     })
     .then(data => {
@@ -1409,7 +1418,9 @@
     })
     .catch(err => {
       console.error('[Admin] Error loading logs:', err);
-      container.innerHTML = '<div class="status-text">Ошибка загрузки логов</div>';
+      if (!container.innerHTML || container.innerHTML.indexOf('Требуется авторизация') === -1) {
+        container.innerHTML = '<div class="status-text">Ошибка загрузки логов</div>';
+      }
     });
   }
 

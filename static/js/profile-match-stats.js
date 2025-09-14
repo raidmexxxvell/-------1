@@ -28,9 +28,13 @@
         } catch(_){ }
       });
     };
-    const state={ etag:null, sig:null, timer:null, busy:false, cancelled:false };
-    host.__statsPollCancel = ()=>{ state.cancelled=true; try { if(state.timer) clearTimeout(state.timer); } catch(_){} };
-    const schedule = ()=>{ if(state.cancelled) return; const base=10000; const jitter=5000; const delay=base + Math.floor(Math.random()*jitter); state.timer=setTimeout(loop, delay); };
+  const state={ etag:null, sig:null, timer:null, busy:false, cancelled:false };
+  // WS-топик для этого матча
+  const wsTopic = (()=>{ try { const h=(match?.home||'').toLowerCase().trim(); const a=(match?.away||'').toLowerCase().trim(); const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):'')); const d=raw?raw.slice(0,10):''; return `match:${h}__${a}__${d}:details`; } catch(_) { return null; } })();
+  const wsActive = ()=>{ try { return !!(window.__WEBSOCKETS_ENABLED__ && wsTopic && window.realtimeUpdater && window.realtimeUpdater.getTopicEnabled && window.realtimeUpdater.hasTopic && window.realtimeUpdater.getTopicEnabled() && window.realtimeUpdater.hasTopic(wsTopic)); } catch(_) { return false; } };
+  let wsRefreshHandler = null; let watch=null;
+  host.__statsPollCancel = ()=>{ state.cancelled=true; try { if(state.timer) clearTimeout(state.timer); } catch(_){} try { if(watch) clearInterval(watch); } catch(_){} try { if(wsRefreshHandler) document.removeEventListener('matchStatsRefresh', wsRefreshHandler); } catch(_){} };
+  const schedule = ()=>{ if(state.cancelled) return; if(wsActive()) return; const base=10000; const jitter=5000; const delay=base + Math.floor(Math.random()*jitter); state.timer=setTimeout(loop, delay); };
     const loop = async ()=>{
       if(state.cancelled) return; if(document.hidden){ schedule(); return; } if(state.busy){ schedule(); return; }
       state.busy=true;
@@ -58,10 +62,36 @@
         state.sig=sig; state.etag=etag||state.etag;
       } finally { state.busy=false; schedule(); }
     };
+    // Реакция на WS-событие обновления статистики: мгновенный refetch (одноразовый)
+    wsRefreshHandler = (e)=>{
+      try {
+        const { home, away } = e.detail||{};
+        if(!home || !away) return;
+        // Защита от лишних запросов: только если это наш матч
+        if(String(home)!==(match.home||'') || String(away)!==(match.away||'')) return;
+        fetch(url, { headers: state.etag? { 'If-None-Match': state.etag }: {} })
+          .then(async r=>{ const et=r.headers.get('ETag'); const d= r.status===304? null: await r.json().catch(()=>null); if(d) { if(rows.size===0) buildOnce(d); else applyUpdate(d); state.sig = metrics.map(m=>{ const v=Array.isArray(d[m.key])?d[m.key]:[0,0]; return `${v[0]||0}-${v[1]||0}`; }).join('|'); } state.etag=et; })
+          .catch(()=>{});
+      } catch(_){}
+    };
+    document.addEventListener('matchStatsRefresh', wsRefreshHandler);
+
     // Первичная загрузка
     fetch(url, { headers: state.etag? { 'If-None-Match': state.etag }: {} })
       .then(async r=>{ const et=r.headers.get('ETag'); const d= r.status===304? null: await r.json().catch(()=>null); if(d) { buildOnce(d); state.sig = metrics.map(m=>{ const v=Array.isArray(d[m.key])?d[m.key]:[0,0]; return `${v[0]||0}-${v[1]||0}`; }).join('|'); } state.etag=et; schedule(); })
       .catch(()=>{ host.innerHTML='<div class="stats-wrap">Нет данных</div>'; schedule(); });
+
+    // Следим за состоянием WS-подписки и включаем/выключаем polling
+    const armWatch = ()=>{
+      try {
+        const adjust = ()=>{
+          try { if(state.cancelled) return; if(wsActive()){ if(state.timer){ clearTimeout(state.timer); state.timer=null; } } else { if(!state.timer) schedule(); } } catch(_){}
+        };
+        adjust();
+        watch = setInterval(adjust, 5000);
+      } catch(_){ }
+    };
+    armWatch();
   }
   window.MatchStats={ render };
 })();

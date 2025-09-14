@@ -6,7 +6,7 @@ services:
     pythonVersion: 3.12
     plan: free
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT wsgi:app
+    startCommand: gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 -b 0.0.0.0:$PORT wsgi:app
     healthCheckPath: /ping
     autoDeploy: true
     envVars:
@@ -22,15 +22,15 @@ services:
         generateValue: true
       - key: METRICS_SECRET
         generateValue: true
+      - key: WEBSOCKETS_ENABLED
+        value: "1"
+      - key: WS_TOPIC_SUBSCRIPTIONS_ENABLED
+        value: "1"
       # DATABASE_URL (PostgreSQL) и REDIS_URL задаются автоматически сервисами Render при привязке
       # Добавьте вручную в панели: BOT_TOKEN, ADMIN_USER_ID, SHEET_ID (или SPREADSHEET_ID), GOOGLE_SHEETS_CREDENTIALS (или GOOGLE_CREDENTIALS_B64)
 
-# Быстрый откат на dev сервер (при проблемах с gunicorn):
-#   заменить startCommand на: python app.py
-# Для полноценного WebSocket (Flask-SocketIO) можно переключиться на gevent позже:
-#   pip install gevent gevent-websocket
-#   startCommand: gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 -b 0.0.0.0:$PORT wsgi:app
-
-# Примечание:
-#  - Python 3.13 пока может быть не полностью совместим с eventlet; 3.12 стабильнее.
-#  - Масштабирование: увеличьте workers (-w) после тестирования (обычно 1 для eventlet достаточно, он асинхронный).
+# Примечания:
+# - Изменение версии Python в Render может потребовать очистки build cache (Clear build cache → Deploy).
+# - Для отката без WebSocket используйте sync worker:
+#     startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT wsgi:app
+# - Масштабирование: увеличивайте -w после тестирования (gevent асинхронен; часто 1 достаточно).

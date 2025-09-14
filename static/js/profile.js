@@ -468,6 +468,15 @@
         return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
     }
 
+    // Универсальный доступ к расписанию из локального кэша, прогреваемого /api/summary
+    function getScheduleCached(){
+        try {
+            const cached = JSON.parse(localStorage.getItem('schedule:tours')||'null');
+            return cached?.data || cached || null;
+        } catch(_) { return null; }
+    }
+    try { window.getScheduleCached = getScheduleCached; } catch(_) {}
+
     // Блок «Топ матч недели» под рекламой на Главной
     async function renderTopMatchOfWeek(overrideMatch) {
         try {
@@ -481,9 +490,21 @@
             if (overrideMatch && typeof overrideMatch === 'object') {
                 m = overrideMatch;
             } else {
-                const res = await fetch(`/api/schedule?_=${Date.now()}`);
-                const data = await res.json();
-                m = data?.match_of_week;
+                // 1) Пробуем из локального кэша (прогрет через /api/summary)
+                const cached = (function(){ try { return JSON.parse(localStorage.getItem('schedule:tours')||'null'); } catch(_){ return null; } })();
+                const sched = cached?.data || cached || null;
+                if (sched && typeof sched==='object' && sched.match_of_week) {
+                    m = sched.match_of_week;
+                } else {
+                    // 2) Fallback: один сетевой запрос через fetchEtag (ETag/304) без лишних дублей
+                    try {
+                        const r = await window.fetchEtag('/api/schedule', { cacheKey: 'profile:topmatch', extract: j => (j?.data||j) });
+                        const data = r.raw || r.data;
+                        m = data?.match_of_week || null;
+                        // сохраним в общий кэш
+                        try { localStorage.setItem('schedule:tours', JSON.stringify({ data, version: r.etag||null, ts: Date.now() })); } catch(_){ }
+                    } catch(_) { m = null; }
+                }
             }
             const host = document.getElementById('home-pane');
             if (!host) return;
@@ -1162,9 +1183,20 @@
         return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
     }
 
+    // Небольшой помощник: подождать завершения предзагрузки summary (или таймаут)
+    function waitForSummary(ms = 1200) {
+        return new Promise((resolve) => {
+            let timer = null;
+            const cleanup = () => { try { if (timer) clearTimeout(timer); } catch(_) {}; try { window.removeEventListener('preload:summary-ready', onReady); } catch(_) {} };
+            const onReady = () => { cleanup(); resolve('ready'); };
+            try { window.addEventListener('preload:summary-ready', onReady, { once: true }); } catch(_) {}
+            timer = setTimeout(() => { cleanup(); resolve('timeout'); }, ms);
+        });
+    }
+
     // --------- РАСПИСАНИЕ ---------
     let _scheduleLoading = false;
-    function loadSchedule() {
+    async function loadSchedule() {
         if (_scheduleLoading) return;
         const pane = document.getElementById('ufo-schedule');
         if (!pane) return;
@@ -1172,8 +1204,17 @@
         const CACHE_KEY = 'schedule:tours';
         const FRESH_TTL = 10 * 60 * 1000; // 10 минут
         const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
-        const cached = readCache();
+        let cached = readCache();
         if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
+
+        // Если кэш пуст/протух и идёт прогрев summary — подождём немного
+        try {
+            const stale = !(cached && (Date.now() - (cached.ts||0) < FRESH_TTL));
+            if (stale && window.__SUMMARY_IN_FLIGHT__) {
+                await waitForSummary(1200);
+                cached = readCache();
+            }
+        } catch(_) {}
 
         const renderSchedule = (data) => {
             try { window.League?.renderSchedule?.(pane, data?.data || data); } catch(_) {
@@ -1244,7 +1285,7 @@
 
     // --------- РЕЗУЛЬТАТЫ ---------
     let _resultsLoading = false;
-    function loadResults() {
+    async function loadResults() {
         if (_resultsLoading) return;
         const pane = document.getElementById('ufo-results');
         if (!pane) return;
@@ -1252,8 +1293,17 @@
         const CACHE_KEY = 'results:list';
         const FRESH_TTL = 10 * 60 * 1000; // 10 минут
         const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
-        const cached = readCache();
+        let cached = readCache();
         if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';
+
+        // Если кэш пуст/протух и идёт прогрев summary — подождём немного
+        try {
+            const stale = !(cached && (Date.now() - (cached.ts||0) < FRESH_TTL));
+            if (stale && window.__SUMMARY_IN_FLIGHT__) {
+                await waitForSummary(1200);
+                cached = readCache();
+            }
+        } catch(_) {}
 
         const renderResults = (data) => {
             try { window.League?.renderResults?.(pane, data?.data || data); } catch(_) {
@@ -1334,28 +1384,78 @@
         // Новая статистика (goal+assist) загружается лениво через loadStatsTable при открытии вкладки,
         // поэтому старый предварительный preload /api/stats-table удалён.
         _statsPreloaded = true; trySignalAllReady();
-        // Расписание — сохраним в кэш с версией
-        fetch('/api/schedule', { headers: { 'Cache-Control': 'no-cache' } })
-            .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('schedule:tours', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
-            .finally(() => { _schedulePreloaded = true; trySignalAllReady(); });
-        // Результаты — сохраним в кэш с версией
-        fetch('/api/results', { headers: { 'Cache-Control': 'no-cache' } })
-            .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('results:list', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
-            .finally(() => { _resultsPreloaded = true; trySignalAllReady(); });
+        // Попробуем одним запросом получить summary (schedule+results+tours+leaderboard)
+        if (window.fetchEtag) {
+            try { window.__SUMMARY_IN_FLIGHT__ = true; window.__SUMMARY_DONE__ = false; } catch(_) {}
+            window.fetchEtag('/api/summary', {
+                cacheKey: 'summary:all',
+                swrMs: 20000,
+                forceRevalidate: true,
+                params: {
+                    include: 'schedule,results,tours,leaderboard',
+                    leaderboard: 'top-predictors,top-rich,server-leaders,prizes'
+                },
+                extract: j => j
+            }).then(store => {
+                const now = Date.now();
+                const raw = store.raw || store.data || {};
+                // Сохраним под уже используемыми ключами, но без version (чтобы не слать чужой ETag)
+                try {
+                    if (raw.schedule) localStorage.setItem('schedule:tours', JSON.stringify({ data: raw.schedule, version: null, ts: now }));
+                } catch(_) {}
+                try {
+                    if (raw.results) localStorage.setItem('results:list', JSON.stringify({ data: raw.results, version: null, ts: now }));
+                } catch(_) {}
+                try {
+                    if (raw.tours) localStorage.setItem('betting:tours', JSON.stringify({ data: raw.tours, version: null, ts: now }));
+                } catch(_) {}
+                try {
+                    const lb = raw.leaderboard || {};
+                    if (lb['top-predictors']) localStorage.setItem('lb:predictors', JSON.stringify({ etag: null, ts: now, data: lb['top-predictors'], raw: lb['top-predictors'] }));
+                    if (lb['top-rich']) localStorage.setItem('lb:rich', JSON.stringify({ etag: null, ts: now, data: lb['top-rich'], raw: lb['top-rich'] }));
+                    if (lb['server-leaders']) localStorage.setItem('lb:server', JSON.stringify({ etag: null, ts: now, data: lb['server-leaders'], raw: lb['server-leaders'] }));
+                    if (lb['prizes']) localStorage.setItem('lb:prizes', JSON.stringify({ etag: null, ts: now, data: lb['prizes'], raw: lb['prizes'] }));
+                } catch(_) {}
+            }).catch(() => {
+                // Fallback: разнести на отдельные запросы ниже
+            }).finally(() => {
+                _schedulePreloaded = true; trySignalAllReady();
+                _resultsPreloaded = true; trySignalAllReady();
+                try { window.__SUMMARY_IN_FLIGHT__ = false; window.__SUMMARY_DONE__ = true; window.dispatchEvent(new CustomEvent('preload:summary-ready')); } catch(_) {}
+            });
+        } else {
+            // Fallback: отдельные запросы
+            // Расписание — сохраним в кэш с версией
+            // Если суммари уже в полёте или есть кэш — не дёргаем отдельный /api/schedule
+            const cached = getScheduleCached();
+            if (window.__SUMMARY_IN_FLIGHT__ || cached) {
+                _schedulePreloaded = true; trySignalAllReady();
+            } else {
+                window.fetchEtag('/api/schedule', { cacheKey: 'prewarm:schedule', extract: j => (j?.data||j) })
+                    .then(({ data, etag }) => { try { localStorage.setItem('schedule:tours', JSON.stringify({ data, version: etag||null, ts: Date.now() })); } catch(_) {} })
+                    .finally(() => { _schedulePreloaded = true; trySignalAllReady(); });
+            }
+            // Результаты — сохраним в кэш с версией
+            fetch('/api/results', { headers: { 'Cache-Control': 'no-cache' } })
+                .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('results:list', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
+                .finally(() => { _resultsPreloaded = true; trySignalAllReady(); });
+        }
 
         // Прогнозы/Ставки: предзагрузка ближайшего тура и моих ставок (если в Telegram)
         try {
             const tg = window.Telegram?.WebApp || null;
             const FRESH_TTL = 5 * 60 * 1000; // 5 минут
-            // Туры для ставок (публично, GET)
-            fetch('/api/betting/tours', { headers: { 'Cache-Control': 'no-cache' } })
-                .then(async r => {
-                    const data = await r.json();
-                    const version = data.version || r.headers.get('ETag') || null;
-                    const store = { data, version, ts: Date.now() };
-                    try { localStorage.setItem('betting:tours', JSON.stringify(store)); } catch(_) {}
-                })
-                .catch(()=>{});
+            // Туры для ставок (публично, GET) — уже прогрели через summary; если нет — fallback ниже
+            if (!localStorage.getItem('betting:tours')) {
+                fetch('/api/betting/tours', { headers: { 'Cache-Control': 'no-cache' } })
+                    .then(async r => {
+                        const data = await r.json();
+                        const version = data.version || r.headers.get('ETag') || null;
+                        const store = { data, version, ts: Date.now() };
+                        try { localStorage.setItem('betting:tours', JSON.stringify(store)); } catch(_) {}
+                    })
+                    .catch(()=>{});
+            }
             // Мои ставки (только в Telegram)
             if (tg?.initDataUnsafe?.user) {
                 const fd = new FormData(); fd.append('initData', tg.initData || '');

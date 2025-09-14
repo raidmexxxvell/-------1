@@ -6,7 +6,8 @@
   const raf = (cb) => (window.requestAnimationFrame || window.setTimeout)(cb, 0);
   const rIC = window.requestIdleCallback || function (cb) { return setTimeout(() => cb({ timeRemaining: () => 0 }), 0); };
 
-  // Нормализация даты к формату YYYY-MM-DD
+  // Нормализация даты к формату YYYY-MM-DD без преобразования часового пояса
+  // Важно: не используем new Date(...), чтобы избежать смещения дня при разных TZ
   function normalizeDateStr(raw) {
     try {
       if (!raw) return '';
@@ -14,15 +15,27 @@
       // dd.mm.yyyy -> yyyy-mm-dd
       const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
       if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-      // отрезаем время, если есть
-      if (s.length > 10) s = s.slice(0, 10);
-      // если это уже yyyy-mm-dd
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-      // иначе пробуем распарсить
-      const d = new Date(raw);
-      if (!isNaN(d.getTime())) return d.toISOString().slice(0,10);
-      return s;
+      // Если ISO-подобное — берём первые 10 символов (yyyy-mm-dd)
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      // Если внутри есть 'T' (datetime), тоже берём yyyy-mm-dd до 'T'
+      const tIdx = s.indexOf('T');
+      if (tIdx > 0 && /^\d{4}-\d{2}-\d{2}$/.test(s.slice(0,10))) return s.slice(0,10);
+      // Фолбэк: попытка выделить yyyy-mm-dd из произвольной строки
+      const m2 = s.match(/(\d{4}-\d{2}-\d{2})/);
+      if (m2) return m2[1];
+      // Иначе вернём обрезанную под YYYY-MM-DD строку — лучше, чем уходить в TZ-конвертацию
+      return s.slice(0, 10);
     } catch(_) { return String(raw||'').slice(0,10); }
+  }
+
+  // Форматирование yyyy-mm-dd -> dd.mm.yyyy (стабильно, без TZ)
+  function formatDateRu(isoDate) {
+    try {
+      const s = String(isoDate||'').slice(0,10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const [y,m,d] = s.split('-');
+      return `${d}.${m}.${y}`;
+    } catch(_) { return String(isoDate||''); }
   }
 
   // Унифицированный ключ матча: home__away__YYYY-MM-DD
@@ -256,7 +269,7 @@
       const card = document.createElement('div');
       card.className = 'match-card';
       const header = document.createElement('div'); header.className = 'match-header';
-  const dateStr = (() => { try { const ds = normalizeDateStr(m.date || m.datetime); if (ds) { const d = new Date(ds); return isNaN(d.getTime()) ? '' : d.toLocaleDateString(); } } catch(_) {} return ''; })();
+  const dateStr = (() => { try { const ds = normalizeDateStr(m.date || m.datetime); return ds ? formatDateRu(ds) : ''; } catch(_) { return ''; } })();
       const timeStr = m.time || '';
   let isLive = false;
   try { if (window.MatchUtils) { isLive = window.MatchUtils.isLiveNow(m); } } catch(_) {}
@@ -563,16 +576,19 @@
       matches.forEach(m => {
         const card = document.createElement('div'); card.className='match-card result';
         const header = document.createElement('div'); header.className='match-header';
-        const dateStr = (() => { try { if (m.date) { const d = new Date(m.date); return d.toLocaleDateString(); } } catch(_) {} return ''; })();
+  const dateStr = (() => { try { const ds = normalizeDateStr(m.date || m.datetime); return ds ? formatDateRu(ds) : ''; } catch(_) { return ''; } })();
         header.textContent = `${dateStr}${m.time ? ' ' + m.time : ''}`; card.appendChild(header);
         const center = document.createElement('div'); center.className='match-center';
         const home = document.createElement('div'); home.className='team home';
   const hImg = document.createElement('img'); hImg.className='logo'; hImg.alt = m.home || ''; hImg.setAttribute('data-team-name', m.home || ''); try { hImg.loading='lazy'; hImg.decoding='async'; } catch(_) {} loadTeamLogo(hImg, m.home || '');
         const hName = document.createElement('div'); hName.className='team-name'; hName.setAttribute('data-team-name', m.home || ''); hName.textContent = withTeamCount(m.home || '');
         home.append(hImg, hName);
-        const score = document.createElement('div'); score.className='score';
-        const sH = (m.score_home || '').toString().trim(); const sA = (m.score_away || '').toString().trim();
-        score.textContent = (sH && sA) ? `${sH} : ${sA}` : '— : —';
+  const score = document.createElement('div'); score.className='score';
+  const hasSh = (m.score_home !== undefined && m.score_home !== null && m.score_home !== '');
+  const hasSa = (m.score_away !== undefined && m.score_away !== null && m.score_away !== '');
+  const sH = hasSh ? String(m.score_home) : '';
+  const sA = hasSa ? String(m.score_away) : '';
+  score.textContent = (hasSh && hasSa) ? `${sH} : ${sA}` : '— : —';
         const away = document.createElement('div'); away.className='team away';
   const aImg = document.createElement('img'); aImg.className='logo'; aImg.alt = m.away || ''; aImg.setAttribute('data-team-name', m.away || ''); try { aImg.loading='lazy'; aImg.decoding='async'; } catch(_) {} loadTeamLogo(aImg, m.away || '');
         const aName = document.createElement('div'); aName.className='team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');
@@ -617,10 +633,34 @@
     } catch(_) {}
   }
 
-  function refreshSchedule(){
+  async function refreshSchedule(){
     try {
       const pane = document.getElementById('league-pane-schedule');
       if (!pane || !window.fetchEtag) return;
+      // Сначала пробуем прогретый кэш от /api/summary
+      const STORE_KEY = 'schedule:tours';
+      const FRESH_TTL = 10 * 60 * 1000; // 10 минут как в profile.js
+      let cached = null; try { cached = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch(_) { cached = null; }
+      const isFresh = cached && Number.isFinite(cached.ts) && (Date.now() - cached.ts < FRESH_TTL) && ((cached.data?.tours && cached.data.tours.length>0) || (cached?.tours && cached.tours.length>0));
+      if (isFresh) {
+        try { renderSchedule(pane, cached.data || cached); } catch(_) {}
+        return; // экономим сеть — считаем, что уже свежо
+      }
+      // Если кэш устарел и предзагрузка summary ещё идёт — подождём немного
+      try {
+        if (window.__SUMMARY_IN_FLIGHT__) {
+          const waitForSummary = (ms=1200) => new Promise(resolve => {
+            let t=null; const onReady = () => { try { if(t) clearTimeout(t); } catch(_) {}; resolve('ready'); };
+            try { window.addEventListener('preload:summary-ready', onReady, { once: true }); } catch(_) {}
+            t = setTimeout(() => { try { window.removeEventListener('preload:summary-ready', onReady); } catch(_) {}; resolve('timeout'); }, ms);
+          });
+          await waitForSummary(1200);
+          try { cached = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch(_) { cached = null; }
+          const fresh2 = cached && Number.isFinite(cached.ts) && (Date.now() - cached.ts < FRESH_TTL) && ((cached.data?.tours && cached.data.tours.length>0) || (cached?.tours && cached.tours.length>0));
+          if (fresh2) { try { renderSchedule(pane, (cached.data||cached)); } catch(_) {}; return; }
+        }
+      } catch(_) {}
+      // Фолбэк: обычная загрузка через ETag
       window.fetchEtag('/api/schedule', { cacheKey: 'league:schedule', swrMs: 8000, extract: j=> (j?.data||j) })
         .then(({ data }) => { try { renderSchedule(pane, data); } catch(_) {} })
         .catch(()=>{});

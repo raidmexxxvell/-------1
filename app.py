@@ -1239,9 +1239,23 @@ def api_betting_place():
                 try:
                     if m.get('datetime'):
                         match_dt = datetime.fromisoformat(m['datetime'])
-                    elif m.get('date'):
-                        d = datetime.fromisoformat(m['date']).date()
-                        match_dt = datetime.combine(d, datetime.min.time())
+                    else:
+                        d = None; tm = None
+                        if m.get('date'):
+                            try:
+                                d = datetime.fromisoformat(str(m['date'])[:10]).date()
+                            except Exception:
+                                d = None
+                        if m.get('time'):
+                            ts = str(m['time']).strip()
+                            # поддержка HH:MM и HH:MM:SS
+                            for fmt in ("%H:%M:%S", "%H:%M"):
+                                try:
+                                    tm = datetime.strptime(ts, fmt).time(); break
+                                except Exception:
+                                    tm = None
+                        if d is not None:
+                            match_dt = datetime.combine(d, tm or datetime.min.time())
                 except Exception:
                     match_dt = None
                 break
@@ -1373,17 +1387,15 @@ def api_betting_place():
                 # Отправляем в комнату конкретного матча и в общую комнату прогнозов
                 # Используем emit_to_topic_batched для умной группировки
                 match_id_str = f"{home}_{away}_{date_key or ''}"
-                ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=3500)
-                ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=3500)
+                # Батчинг 500 мс для сглаживания нагрузки
+                ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=500)
+                ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=500)
         except Exception as e:
             app.logger.error(f"WebSocket odds update failed: {e}")
         # --- КОНЕЦ НОВОГО КОДА ---
         db.refresh(db_user)
         db.refresh(bet)
-        try:
-            mirror_user_to_sheets(db_user)
-        except Exception as e:
-            app.logger.warning(f"Mirror after bet failed: {e}")
+        # Ранее здесь зеркалировались данные пользователя в Google Sheets (удалено)
         def _present_selection(market, sel_val):
             # Для рынка 1x2 возвращаем читабельное представление с названием команды
             if market == '1x2':
@@ -1722,6 +1734,33 @@ class MonthlyCreditBaseline(Base):
     credits_base = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+# Персистентные достижения пользователя (перманентные tier'ы и даты открытия)
+class UserAchievement(Base):
+    __tablename__ = 'user_achievements'
+    user_id = Column(Integer, primary_key=True)
+    # Наивысшие достигнутые уровни (0..3)
+    best_streak_tier = Column(Integer, default=0)
+    best_credits_tier = Column(Integer, default=0)
+    best_level_tier = Column(Integer, default=0)
+    best_invited_tier = Column(Integer, default=0)
+    best_betcount_tier = Column(Integer, default=0)
+    best_betwins_tier = Column(Integer, default=0)
+    best_bigodds_tier = Column(Integer, default=0)
+    best_markets_tier = Column(Integer, default=0)
+    best_weeks_tier = Column(Integer, default=0)
+    # Даты первого достижения уровней
+    streak_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    credits_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    level_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    invited_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    betcount_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    betwins_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    bigodds_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    markets_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    weeks_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class Snapshot(Base):
     __tablename__ = 'snapshots'
     key = Column(String(64), primary_key=True)
@@ -1987,11 +2026,7 @@ def api_shop_checkout():
                 error=None,
                 extra={'order_id': order.id}
             )
-            # Зеркалирование пользователя в Sheets best-effort
-            try:
-                mirror_user_to_sheets(u)
-            except Exception as e:
-                app.logger.warning(f"Mirror after checkout failed: {e}")
+            # Зеркалирование в Google Sheets удалено
             # Уведомление администратору о новом заказе (best-effort)
             try:
                 admin_id = os.environ.get('ADMIN_USER_ID', '')
@@ -2017,7 +2052,12 @@ def api_shop_checkout():
                 app.logger.warning(f"Admin notify failed: {e}")
             return jsonify({'order_id': order.id, 'total': total, 'balance': int(u.credits or 0)})
         finally:
-            db.close()
+            try:
+                db.close()
+            except Exception:
+                # Suppress rollback/close errors (e.g., transient SSL bad record mac)
+                # to avoid bubbling up 500 from helper
+                pass
     except Exception as e:
         log_shop_order_event(
             user_id=parsed['user'].get('id') if 'parsed' in locals() and parsed and parsed.get('user') else None,
@@ -2113,11 +2153,7 @@ def api_admin_order_set_status(order_id: int):
                     refund_amount = int(row.total or 0)
                     u.credits = int(u.credits or 0) + refund_amount
                     u.updated_at = datetime.now(timezone.utc)
-                    # Зеркалим пользователя в Sheets best-effort
-                    try:
-                        mirror_user_to_sheets(u)
-                    except Exception as _e:
-                        app.logger.warning(f"Mirror after refund failed: {_e}")
+                    # Ранее зеркалировались данные пользователя в Google Sheets (удалено)
             if prev != st:
                 row.status = st
                 row.updated_at = datetime.now(timezone.utc)
@@ -3500,6 +3536,35 @@ if engine is not None:
     try:
         Base.metadata.create_all(engine)
         print('[INFO] DB tables ensured')
+
+        # Если включён флаг INIT_DATABASE_TABLES, обеспечить создание таблицы user_achievements
+        try:
+            if os.getenv('INIT_DATABASE_TABLES', '').lower() in ('1', 'true', 'yes'):
+                print('[INFO] INIT_DATABASE_TABLES enabled: ensuring user_achievements table')
+                try:
+                    # Создаём только таблицу, соответствующую модели UserAchievement
+                    if 'UserAchievement' in globals() and getattr(UserAchievement, '__table__', None) is not None:
+                        UserAchievement.__table__.create(bind=engine, checkfirst=True)
+                        print('[INFO] user_achievements table ensured via ORM')
+                    else:
+                        raise RuntimeError('UserAchievement model not available')
+                except Exception as orm_err:
+                    print(f"[WARN] ORM create for user_achievements failed: {orm_err}; falling back to SQL script if available")
+                    try:
+                        sql_path = os.path.join(os.path.dirname(__file__), 'scripts', 'create_user_achievements_table.sql')
+                        if os.path.exists(sql_path):
+                            with open(sql_path, 'r', encoding='utf-8') as f:
+                                sql = f.read()
+                            with engine.connect() as conn:
+                                conn.execute(text(sql))
+                                conn.commit()
+                            print('[INFO] user_achievements table ensured via SQL script')
+                        else:
+                            print(f"[WARN] SQL script not found at {sql_path}; user_achievements not ensured")
+                    except Exception as sql_err:
+                        print(f"[ERROR] Fallback SQL for user_achievements failed: {sql_err}")
+        except Exception as flag_err:
+            print(f"[WARN] INIT_DATABASE_TABLES flow failed: {flag_err}")
     except Exception as e:
         print(f'[ERROR] DB init failed: {e}')
 
@@ -3680,6 +3745,12 @@ def _get_doc(sheet_id: str):
 
 def get_user_sheet():
     """Получает лист пользователей из Google Sheets"""
+    # Allow usage only if sheets mode permits mirror/read operations
+    from config import Config
+    mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+    if mode == 'disabled' or mode == 'admin_import_only':
+        # In admin_import_only mode we only allow the admin import endpoint to read the sheet
+        raise RuntimeError('Google Sheets access for user sheet is disabled in current configuration')
     client = get_google_client()
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
@@ -3687,55 +3758,14 @@ def get_user_sheet():
     doc = _get_doc(sheet_id)
     return doc.worksheet("users")
 
-def get_achievements_sheet():
-    """Возвращает лист достижений, создаёт при отсутствии."""
-    client = get_google_client()
-    sheet_id = os.environ.get('SHEET_ID')
-    if not sheet_id:
-        raise ValueError("SHEET_ID не установлен в переменных окружения")
-    doc = _get_doc(sheet_id)
-    try:
-        ws = doc.worksheet("achievements")
-    except gspread.exceptions.WorksheetNotFound:
-        ws = doc.add_worksheet(title="achievements", rows=1000, cols=20)
-        # user_id | credits_tier | credits_unlocked_at | level_tier | level_unlocked_at | streak_tier | streak_unlocked_at | invited_tier | invited_unlocked_at
-        _metrics_inc('sheet_writes', 1)
-        ws.update(values=[[
-            'user_id',
-            'credits_tier','credits_unlocked_at',
-            'level_tier','level_unlocked_at',
-            'streak_tier','streak_unlocked_at',
-            'invited_tier','invited_unlocked_at',
-            'betcount_tier','betcount_unlocked_at',
-            'betwins_tier','betwins_unlocked_at',
-            'bigodds_tier','bigodds_unlocked_at',
-            'markets_tier','markets_unlocked_at',
-            'weeks_tier','weeks_unlocked_at'
-        ]], range_name='A1:S1')
-    # Убедимся, что колонки для invited присутствуют
-    try:
-        headers = ws.row_values(1)
-        want = [
-            'user_id',
-            'credits_tier','credits_unlocked_at',
-            'level_tier','level_unlocked_at',
-            'streak_tier','streak_unlocked_at',
-            'invited_tier','invited_unlocked_at',
-            'betcount_tier','betcount_unlocked_at',
-            'betwins_tier','betwins_unlocked_at',
-            'bigodds_tier','bigodds_unlocked_at',
-            'markets_tier','markets_unlocked_at',
-            'weeks_tier','weeks_unlocked_at'
-        ]
-        if headers != want:
-            _metrics_inc('sheet_writes', 1)
-            ws.update(values=[want], range_name='A1:S1')
-    except Exception as e:
-        app.logger.warning(f"Не удалось проверить/обновить заголовки achievements: {e}")
-    return ws
+# [Removed] Legacy Google Sheets achievements helpers were removed after DB migration.
 
 def get_table_sheet():
     """Возвращает лист таблицы лиги 'ТАБЛИЦА'."""
+    from config import Config
+    mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+    if mode == 'disabled' or mode == 'admin_import_only':
+        raise RuntimeError('Google Sheets access for league table is disabled in current configuration')
     client = get_google_client()
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
@@ -4250,58 +4280,13 @@ def _compute_specials_odds(home: str, away: str, market: str) -> dict:
             return 1.10
     return { 'yes': to_odds(p_yes), 'no': to_odds(p_no) }
 
-def get_referrals_sheet():
-    """Возвращает лист 'referrals', создаёт при отсутствии."""
-    client = get_google_client()
-    sheet_id = os.environ.get('SHEET_ID')
-    if not sheet_id:
-        raise ValueError("SHEET_ID не установлен в переменных окружения")
-    doc = _get_doc(sheet_id)
-    try:
-        ws = doc.worksheet("referrals")
-    except gspread.exceptions.WorksheetNotFound:
-        ws = doc.add_worksheet(title="referrals", rows=1000, cols=6)
-        ws.update(values=[[
-            'user_id', 'referral_code', 'referrer_id', 'invited_count', 'created_at', 'updated_at'
-        ]], range_name='A1:F1')
-    return ws
-
-def mirror_referral_to_sheets(user_id: int, referral_code: str, referrer_id: int|None, invited_count: int, created_at_iso: str|None = None):
-    """Создаёт/обновляет строку в листе referrals."""
-    try:
-        ws = get_referrals_sheet()
-    except Exception as e:
-        app.logger.warning(f"Не удалось получить лист referrals: {e}")
-        return
-    try:
-        cell = ws.find(str(user_id), in_column=1)
-    except Exception:
-        cell = None
-    updated_at = datetime.now(timezone.utc).isoformat()
-    created_at = created_at_iso or updated_at
-    if not cell:
-        try:
-            _metrics_inc('sheet_writes', 1)
-            ws.append_row([
-                str(user_id), referral_code or '', str(referrer_id or ''), str(invited_count or 0), created_at, updated_at
-            ])
-        except Exception as e:
-            app.logger.warning(f"Не удалось добавить referral в лист: {e}")
-    else:
-        row = cell.row
-        try:
-            _metrics_inc('sheet_writes', 1)
-            ws.batch_update([
-                {'range': f'B{row}', 'values': [[referral_code or '']]},
-                {'range': f'C{row}', 'values': [[str(referrer_id or '')]]},
-                {'range': f'D{row}', 'values': [[str(invited_count or 0)]]},
-                {'range': f'F{row}', 'values': [[updated_at]]},
-            ])
-        except Exception as e:
-            app.logger.warning(f"Не удалось обновить referral в листе: {e}")
 
 def get_stats_sheet():
     """Возвращает лист статистики 'СТАТИСТИКА'."""
+    from config import Config
+    mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+    if mode == 'disabled' or mode == 'admin_import_only':
+        raise RuntimeError('Google Sheets access for stats is disabled in current configuration')
     client = get_google_client()
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
@@ -4328,105 +4313,8 @@ def get_rosters_sheet():
     return doc.worksheet("СОСТАВЫ")
 
 # Запись счёта матча в лист "РАСПИСАНИЕ ИГР" в колонки B (home) и D (away)
-def mirror_match_score_to_schedule(home: str, away: str, score_home: int|None, score_away: int|None) -> bool:
-    try:
-        if score_home is None or score_away is None:
-            return False
-        ws = get_schedule_sheet()
-        _metrics_inc('sheet_reads', 1)
-        rows = ws.get_all_values() or []
-        # Ищем первую строку с совпадением home в A и away в E (как в билдере расписания)
-        target_row_idx = None
-        for i, r in enumerate(rows, start=1):
-            a = (r[0] if len(r) > 0 else '').strip()
-            e = (r[4] if len(r) > 4 else '').strip()
-            if a == home and e == away:
-                target_row_idx = i
-                break
-        if target_row_idx is None:
-            return False
-        # Пишем как числа с USER_ENTERED, чтобы не было ведущего апострофа в ячейках
-        rng = f"B{target_row_idx}:D{target_row_idx}"
-        try:
-            # gspread Worksheet.update поддерживает value_input_option
-            ws.update(rng, [[int(score_home), '', int(score_away)]], value_input_option='USER_ENTERED')
-        except Exception:
-            # fallback, если вдруг не поддерживается — обычный update (может оставить строку)
-            ws.update(rng, [[int(score_home), '', int(score_away)]])
-        _metrics_inc('sheet_writes', 1)
-        return True
-    except Exception as e:
-        _metrics_note_rate_limit(e)
-        app.logger.warning(f"Mirror match score to schedule failed: {e}")
-        return False
 
-def get_user_achievements_row(user_id):
-    """Читает или инициализирует строку достижений пользователя."""
-    ws = get_achievements_sheet()
-    try:
-        cell = ws.find(str(user_id), in_column=1)
-        if cell:
-            row_vals = ws.row_values(cell.row)
-            # Гарантируем длину до 19 колонок (A..S)
-            row_vals = list(row_vals) + [''] * (19 - len(row_vals))
-            return cell.row, {
-                'credits_tier': int(row_vals[1] or 0),
-                'credits_unlocked_at': row_vals[2] or '',
-                'level_tier': int(row_vals[3] or 0),
-                'level_unlocked_at': row_vals[4] or '',
-                'streak_tier': int(row_vals[5] or 0),
-                'streak_unlocked_at': row_vals[6] or '',
-                'invited_tier': int(row_vals[7] or 0),
-                'invited_unlocked_at': row_vals[8] or '',
-                'betcount_tier': int((row_vals[9] or 0)),
-                'betcount_unlocked_at': row_vals[10] or '',
-                'betwins_tier': int((row_vals[11] or 0)),
-                'betwins_unlocked_at': row_vals[12] or '',
-                'bigodds_tier': int((row_vals[13] or 0)),
-                'bigodds_unlocked_at': row_vals[14] or '',
-                'markets_tier': int((row_vals[15] or 0)),
-                'markets_unlocked_at': row_vals[16] or '',
-                'weeks_tier': int((row_vals[17] or 0)),
-                'weeks_unlocked_at': row_vals[18] if len(row_vals) > 18 else ''
-            }
-    except gspread.exceptions.APIError as e:
-        app.logger.error(f"Ошибка API при чтении достижений: {e}")
-    # Создаём новую строку (включая invited_tier/unlocked_at)
-    # Инициализируем 19 колонок: user_id + 9 пар (tier, unlocked_at)
-    ws.append_row([
-        str(user_id),
-        '0','',  # credits
-        '0','',  # level
-        '0','',  # streak
-        '0','',  # invited
-        '0','',  # betcount
-        '0','',  # betwins
-        '0','',  # bigodds
-        '0','',  # markets
-        '0',''   # weeks
-    ])
-    # Найдём только что добавленную (последняя строка)
-    last_row = len(ws.get_all_values())
-    return last_row, {
-        'credits_tier': 0,
-        'credits_unlocked_at': '',
-        'level_tier': 0,
-        'level_unlocked_at': '',
-        'streak_tier': 0,
-        'streak_unlocked_at': '',
-        'invited_tier': 0,
-        'invited_unlocked_at': '',
-        'betcount_tier': 0,
-        'betcount_unlocked_at': '',
-        'betwins_tier': 0,
-        'betwins_unlocked_at': '',
-        'bigodds_tier': 0,
-        'bigodds_unlocked_at': '',
-        'markets_tier': 0,
-        'markets_unlocked_at': '',
-        'weeks_tier': 0,
-        'weeks_unlocked_at': ''
-    }
+# [Removed] Legacy get_user_achievements_row removed — DB model UserAchievement is the source of truth.
 
 def compute_tier(value: int, thresholds) -> int:
     """Возвращает tier по убывающим порогам. thresholds: [(threshold, tier), ...]"""
@@ -4449,63 +4337,6 @@ def _thresholds_from_targets(targets):
         return []
 
 # Вспомогательные функции
-def find_user_row(user_id):
-    """Ищет строку пользователя по user_id"""
-    sheet = get_user_sheet()
-    try:
-        cell = sheet.find(str(user_id), in_column=1)
-        return cell.row if cell else None
-    except gspread.exceptions.APIError as e:
-        app.logger.error(f"Ошибка API при поиске пользователя: {e}")
-        return None
-
-def mirror_user_to_sheets(db_user: 'User'):
-    """Создаёт или обновляет запись пользователя в Google Sheets по данным из БД."""
-    try:
-        sheet = get_user_sheet()
-    except Exception as e:
-        app.logger.warning(f"Не удалось получить лист users для зеркалирования: {e}")
-        return
-    row_num = find_user_row(db_user.user_id)
-    # Подготовка значений под формат таблицы
-    last_checkin_str = db_user.last_checkin_date.isoformat() if isinstance(db_user.last_checkin_date, date) else ''
-    created_at = (db_user.created_at or datetime.now(timezone.utc)).isoformat()
-    updated_at = (db_user.updated_at or datetime.now(timezone.utc)).isoformat()
-    if not row_num:
-        new_row = [
-            str(db_user.user_id),
-            db_user.display_name or 'Игрок',
-            db_user.tg_username or '',
-            str(db_user.credits or 0),
-            str(db_user.xp or 0),
-            str(db_user.level or 1),
-            str(db_user.consecutive_days or 0),
-            last_checkin_str,
-            str(db_user.badge_tier or 0),
-            '',  # badge_unlocked_at (не ведём в БД)
-            created_at,
-            updated_at
-        ]
-        try:
-            _metrics_inc('sheet_writes', 1)
-            sheet.append_row(new_row)
-        except Exception as e:
-            app.logger.warning(f"Не удалось добавить пользователя в лист users: {e}")
-    else:
-        try:
-            _metrics_inc('sheet_writes', 1)
-            sheet.batch_update([
-                {'range': f'B{row_num}', 'values': [[db_user.display_name or 'Игрок']]},
-                {'range': f'C{row_num}', 'values': [[db_user.tg_username or '']]},
-                {'range': f'D{row_num}', 'values': [[str(db_user.credits or 0)]]},
-                {'range': f'E{row_num}', 'values': [[str(db_user.xp or 0)]]},
-                {'range': f'F{row_num}', 'values': [[str(db_user.level or 1)]]},
-                {'range': f'G{row_num}', 'values': [[str(db_user.consecutive_days or 0)]]},
-                {'range': f'H{row_num}', 'values': [[last_checkin_str]]},
-                {'range': f'L{row_num}', 'values': [[updated_at]]}
-            ])
-        except Exception as e:
-            app.logger.warning(f"Не удалось обновить пользователя в листе users: {e}")
 
 def _to_int(val, default=0):
     try:
@@ -4638,6 +4469,11 @@ def _json_response(payload: dict, status: int = 200):
 # ---------------------- ETag JSON Helper ----------------------
 _ETAG_HELPER_CACHE = {}
 _ETAG_HELPER_SWEEP = {'count': 0}
+# Максимальное количество ключей в in-memory ETag-кэше (LRU-подобное вытеснение по старейшему ts)
+try:
+    _ETAG_CACHE_MAX_KEYS = int(os.environ.get('ETAG_CACHE_MAX_KEYS', '256'))
+except Exception:
+    _ETAG_CACHE_MAX_KEYS = 256
 # Lightweight ETag metrics (per endpoint_key). Thread-safe via local lock.
 _ETAG_METRICS_LOCK = threading.Lock()
 _ETAG_METRICS = {
@@ -4733,6 +4569,18 @@ def etag_json(endpoint_key: str, builder_func, *, cache_ttl: int = 30, max_age: 
     except Exception:
         etag = hashlib.md5(str(endpoint_key).encode()).hexdigest()
     _ETAG_HELPER_CACHE[endpoint_key] = {'ts': now, 'payload': payload, 'etag': etag, 'ttl': cache_ttl}
+    # Ограничение размера кэша: при превышении лимита удаляем самые старые по ts
+    try:
+        max_keys = int(_ETAG_CACHE_MAX_KEYS or 256)
+        if max_keys > 0 and len(_ETAG_HELPER_CACHE) > max_keys:
+            # Собираем пары (key, ts) и удаляем лишние с наименьшим ts
+            items = [(k, v.get('ts', 0)) for k, v in _ETAG_HELPER_CACHE.items()]
+            items.sort(key=lambda x: x[1])
+            to_remove = len(_ETAG_HELPER_CACHE) - max_keys
+            for k, _ in items[:to_remove]:
+                _ETAG_HELPER_CACHE.pop(k, None)
+    except Exception:
+        pass
     _etag_metrics_inc(endpoint_key, 'builds', 1)
     # Periodic cleanup of stale cached entries to avoid unbounded growth
     try:
@@ -4822,7 +4670,12 @@ def _team_overview_from_results_snapshot(db: Session, team_name: str) -> dict:
     name = (team_name or '').strip()
     if not name:
         return {'team': {'id': None, 'name': ''}, 'stats': {'matches':0,'wins':0,'draws':0,'losses':0,'goals_for':0,'goals_against':0,'clean_sheets':0,'last5':[]}, 'updated_at': updated_at}
-    norm = name.lower()
+    def _norm(s: str) -> str:
+        try:
+            return (s or '').strip().lower().replace('ё','е')
+        except Exception:
+            return (s or '')
+    norm = _norm(name)
     matches = 0; w=d=l=0; gf=ga=0; cs=0
     last5 = []
     recent_buf = []  # временный список объектов для последних матчей (полные данные)
@@ -4832,8 +4685,8 @@ def _team_overview_from_results_snapshot(db: Session, team_name: str) -> dict:
             a = (m.get('away') or '').strip()
             if not h and not a:
                 continue
-            is_team_home = (h.lower() == norm)
-            is_team_away = (a.lower() == norm)
+            is_team_home = (_norm(h) == norm)
+            is_team_away = (_norm(a) == norm)
             if not (is_team_home or is_team_away):
                 continue
             sh = str(m.get('score_home') or '').strip()
@@ -5762,8 +5615,9 @@ def _build_match_meta(home: str, away: str) -> dict:
         
         db = get_db()
         try:
-            from services.snapshots import get_snapshot
-            snap = get_snapshot(db, 'schedule')
+            # Используем уже инициализированный сервисный алиас со строгой сигнатурой
+            # snapshot_get(db, SnapshotModel, key, logger)
+            snap = _snapshot_get(db, Snapshot, 'schedule', app.logger)
             if not snap or not snap.get('payload'):
                 return {'tour': None, 'date': '', 'time': '', 'datetime': ''}
             
@@ -6354,6 +6208,32 @@ def init_admin_api(app):
     # All admin routes are already decorated with appropriate logging decorators
     return True
 
+
+# If admin API module was imported earlier and flagged for deferred init, initialize it now
+try:
+    if 'ADMIN_API_INIT_REQUIRED' in globals() and globals().get('ADMIN_API_INIT_REQUIRED'):
+        if 'init_admin_routes' in globals():
+            try:
+                # Resolve dependencies safely from globals() to avoid NameError during static analysis
+                _init_fn = globals().get('init_admin_routes')
+                _parse_init = globals().get('parse_and_verify_telegram_init_data')
+                _match_flags = globals().get('MatchFlags')
+                _snapshot_set_fn = globals().get('_snapshot_set')
+                _build_betting_fn = globals().get('_build_betting_tours_payload')
+                _settle_open_bets_fn = globals().get('_settle_open_bets')
+
+                # Only attempt initialization if the essential functions are available
+                if callable(_init_fn) and get_db is not None and 'SessionLocal' in globals():
+                    _init_fn(app, get_db, SessionLocal, _parse_init,
+                             _match_flags, _snapshot_set_fn, _build_betting_fn, _settle_open_bets_fn)
+                    print('[INFO] Admin routes initialized at import time')
+                else:
+                    print('[INFO] Admin routes import-time init skipped: dependencies not available')
+            except Exception as _e:
+                print(f"[WARN] Failed to init admin routes at import time: {_e}")
+except Exception:
+    pass
+
 def start_background_sync():
     global _BG_THREAD
     global _LB_PRECOMP_THREAD
@@ -6392,6 +6272,7 @@ def _build_betting_tours_payload():
     # Build nearest tour with odds, markets, and locks for each match.
     # Также открываем следующий тур заранее, если до его первого матча осталось <= 2 дней.
     # Источник матчей — snapshot 'schedule' (или пусто)
+    # Загружаем текущее расписание из snapshot 'schedule'
     all_tours = []
     if SessionLocal is not None:
         try:
@@ -6399,24 +6280,38 @@ def _build_betting_tours_payload():
             try:
                 snap = _snapshot_get(dbs, Snapshot, 'schedule', app.logger)
                 payload = snap and snap.get('payload')
-                all_tours = payload and payload.get('tours') or []
+                all_tours = (payload and payload.get('tours')) or []
             finally:
                 dbs.close()
         except Exception:
             all_tours = []
+
+    # Ограничиваем окно ближайшими 6 днями (включая сегодня)
     today = datetime.now().date()
+    horizon = today + timedelta(days=6)
+
+    def _parse_date_only(m):
+        # Возвращает дату матча (date part) или None
+        try:
+            if m.get('datetime'):
+                return datetime.fromisoformat(m['datetime']).date()
+            if m.get('date'):
+                return datetime.fromisoformat(m['date']).date()
+        except Exception:
+            pass
+        try:
+            ds = (m.get('date') or '')[:10]
+            if ds:
+                return datetime.fromisoformat(ds).date()
+        except Exception:
+            return None
+        return None
 
     def is_relevant(t):
         for m in t.get('matches', []):
-            try:
-                if m.get('datetime'):
-                    if datetime.fromisoformat(m['datetime']).date() >= today:
-                        return True
-                elif m.get('date'):
-                    if datetime.fromisoformat(m['date']).date() >= today:
-                        return True
-            except Exception:
-                continue
+            d = _parse_date_only(m)
+            if d and (today <= d <= horizon):
+                return True
         return False
 
     tours = [t for t in all_tours if is_relevant(t)]
@@ -6454,30 +6349,9 @@ def _build_betting_tours_payload():
     tours = primary + extra
 
     now_local = datetime.now()
+    # Для запросов флагов статуса матчей переиспользуем одну DB-сессию (снижает нагрузку и предотвращает лишние коннекты)
+    db_flags = get_db() if SessionLocal is not None else None
     for t in tours:
-        # Дедупликация матчей внутри тура по ключу (norm(home)|norm(away)|YYYY-MM-DD)
-        try:
-            seen = set()
-            uniq = []
-            def _norm(s: str) -> str:
-                try:
-                    return (s or '').strip().lower().replace('ё','е')
-                except Exception:
-                    return (s or '')
-            for m in t.get('matches', []) or []:
-                try:
-                    d = (m.get('date') or m.get('datetime') or '')
-                    d = (d or '')[:10]
-                    key = f"{_norm(m.get('home',''))}|{_norm(m.get('away',''))}|{d}"
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    uniq.append(m)
-                except Exception:
-                    uniq.append(m)
-            t['matches'] = uniq
-        except Exception:
-            pass
         # Скрываем матчи, которые уже стартовали, из списка для ставок
         filtered_matches = []
         for m in t.get('matches', []):
@@ -6524,51 +6398,66 @@ def _build_betting_tours_payload():
                             # Учитываем статус только относительно даты/времени именно этого матча,
                             # чтобы не закрывать будущие реванши из-за прошлого статуса тех же команд.
                             match_dt = None
-                            try:
-                                if m.get('datetime'):
-                                    match_dt = datetime.fromisoformat(m['datetime'])
-                                elif m.get('date'):
-                                    dd = datetime.fromisoformat(m['date']).date()
-                                    tm = datetime.strptime((m.get('time') or '00:00') or '00:00', '%H:%M').time()
-                                    match_dt = datetime.combine(dd, tm)
-                            except Exception:
-                                match_dt = None
-                            if match_dt is not None:
-                                if row.status == 'live':
-                                    if match_dt - timedelta(minutes=10) <= now_local < match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                        lock = True
-                                elif row.status == 'finished':
-                                    if now_local >= match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                        lock = True
-                    finally:
-                        db.close()
-                m['lock'] = bool(lock)
-                # date_key для влияния голосования
-                dk = None
-                try:
-                    if m.get('datetime'):
-                        dk = datetime.fromisoformat(m['datetime']).date().isoformat()
-                    elif m.get('date'):
-                        dk = datetime.fromisoformat(m['date']).date().isoformat()
-                except Exception:
+                    if match_dt is None and m.get('date'):
+                        try:
+                            dd = datetime.fromisoformat(m['date']).date()
+                        except Exception:
+                            dd = None
+                        if dd:
+                            tm_raw = (m.get('time') or '').strip()
+                            tm = None
+                            if tm_raw:
+                                for fmt in ('%H:%M:%S','%H:%M'):
+                                    try:
+                                        tm = datetime.strptime(tm_raw, fmt).time(); break
+                                    except Exception:
+                                        continue
+                            match_dt = datetime.combine(dd, tm or datetime.min.time())
+                    if match_dt:
+                        lock = (match_dt - timedelta(minutes=BET_LOCK_AHEAD_MINUTES)) <= now_local
+                    # Флаги live/finished — учитываем только для конкретного матча
+                    if SessionLocal is not None and db_flags is not None:
+                        row = db_flags.query(MatchFlags).filter(MatchFlags.home==m.get('home',''), MatchFlags.away==m.get('away','')).first()
+                        if row and row.status in ('live','finished') and match_dt is not None:
+                            if row.status == 'live':
+                                if match_dt - timedelta(minutes=10) <= now_local < match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                    lock = True
+                            elif row.status == 'finished':
+                                if now_local >= match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                    lock = True
+                    m['lock'] = bool(lock)
+                    # date_key для влияния голосования
                     dk = None
-                m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''), dk)
-                totals = []
-                for ln in (3.5, 4.5, 5.5):
-                    totals.append({'line': ln, 'odds': _compute_totals_odds(m.get('home',''), m.get('away',''), ln)})
-                sp_pen = _compute_specials_odds(m.get('home',''), m.get('away',''), 'penalty')
-                sp_red = _compute_specials_odds(m.get('home',''), m.get('away',''), 'redcard')
-                m['markets'] = {
-                    'totals': totals,
-                    'specials': {
-                        'penalty': { 'available': True, 'odds': sp_pen },
-                        'redcard': { 'available': True, 'odds': sp_red }
+                    try:
+                        if m.get('datetime'):
+                            dk = datetime.fromisoformat(m['datetime']).date().isoformat()
+                        elif m.get('date'):
+                            dk = datetime.fromisoformat(m['date']).date().isoformat()
+                    except Exception:
+                        dk = None
+                    m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''), dk)
+                    totals = []
+                    for ln in (3.5, 4.5, 5.5):
+                        totals.append({'line': ln, 'odds': _compute_totals_odds(m.get('home',''), m.get('away',''), ln)})
+                    sp_pen = _compute_specials_odds(m.get('home',''), m.get('away',''), 'penalty')
+                    sp_red = _compute_specials_odds(m.get('home',''), m.get('away',''), 'redcard')
+                    m['markets'] = {
+                        'totals': totals,
+                        'specials': {
+                            'penalty': { 'available': True, 'odds': sp_pen },
+                            'redcard': { 'available': True, 'odds': sp_red }
+                        }
                     }
-                }
-                # Версия коэффициентов на матч для сверки на клиенте
-                m['odds_version'] = _get_odds_version(m.get('home',''), m.get('away',''))
-            except Exception:
-                m['lock'] = True
+                    # Версия коэффициентов на матч для сверки на клиенте
+                    m['odds_version'] = _get_odds_version(m.get('home',''), m.get('away',''))
+                except Exception:
+                    m['lock'] = True
+    # Конец цикла по турам
+    try:
+        if db_flags:
+            db_flags.close()
+    except Exception:
+        pass
     return { 'tours': tours, 'updated_at': datetime.now(timezone.utc).isoformat() }
 
 def _build_odds_fields(home: str, away: str) -> dict:
@@ -6792,9 +6681,8 @@ def api_admin_fix_results_tours():
     
     db = get_db()
     try:
-        # Получаем текущий снапшот результатов
-        from services.snapshots import get_snapshot, set_snapshot
-        snap = get_snapshot(db, 'results')
+        # Получаем текущий снапшот результатов (через сервисный алиас)
+        snap = _snapshot_get(db, Snapshot, 'results', app.logger)
         if not snap:
             return jsonify({'error': 'Results snapshot not found'}), 404
         
@@ -6824,12 +6712,12 @@ def api_admin_fix_results_tours():
         if fixed_count > 0:
             # Сохраняем обновлённый снапшот
             payload['updated_at'] = datetime.now(timezone.utc).isoformat()
-            set_snapshot(db, 'results', payload)
+            _snapshot_set(db, Snapshot, 'results', payload, app.logger)
             
             # Принудительно обновляем также снапшот расписания для синхронизации
             try:
                 schedule_payload = _build_schedule_payload_from_sheet()
-                set_snapshot(db, 'schedule', schedule_payload)
+                _snapshot_set(db, Snapshot, 'schedule', schedule_payload, app.logger)
             except Exception as e:
                 app.logger.warning(f"Failed to update schedule snapshot: {e}")
             
@@ -7444,10 +7332,7 @@ def api_match_status_set_live():
                 row.score_away = 0
                 row.updated_at = datetime.now(timezone.utc)
                 db.commit()
-                try:
-                    mirror_match_score_to_schedule(home, away, 0, 0)
-                except Exception:
-                    pass
+                # Ранее счёт синхронизировался в лист расписания Google Sheets (удалено)
             # Обновим статус матча как live (MatchFlags)
             try:
                 mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
@@ -7471,6 +7356,7 @@ def api_match_status_set_live():
         return jsonify({'error': 'Не удалось установить live-статус'}), 500
 
 @app.route('/api/match/status/live', methods=['GET'])
+@rate_limit(max_requests=int(os.environ.get('RL_MATCH_STATUS_LIVE_RPM', '12')), time_window=60, per='ip')
 def api_match_status_live():
     """Список live-матчей по расписанию (без ручных флагов)."""
     items = []
@@ -8017,16 +7903,7 @@ def get_user():
                 return jsonify({'error': 'Недействительные данные'}), 401
             user_data = parsed['user']
         if SessionLocal is None:
-            row_num = find_user_row(user_data['id'])
-            sheet = get_user_sheet()
-            if not row_num:
-                new_row = [user_data['id'], user_data.get('first_name', 'User'), user_data.get('username',''), '1000','0','1','0','', '0','', datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()]
-                sheet.append_row(new_row)
-                row = new_row
-            else:
-                row = sheet.row_values(row_num)
-            row = list(row)+['']*(12-len(row))
-            return jsonify({'user_id': _to_int(row[0]), 'display_name': row[1], 'tg_username': row[2], 'credits': _to_int(row[3]), 'xp': _to_int(row[4]), 'level': _to_int(row[5],1), 'consecutive_days': _to_int(row[6]), 'last_checkin_date': row[7], 'badge_tier': _to_int(row[8]), 'created_at': row[10], 'updated_at': row[11]})
+            return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
         try:
             db_user = db.get(User, int(user_data['id']))
@@ -8112,7 +7989,7 @@ def api_user_avatars():
         out = {}
         for r in rows:
             if r.photo_url:
-                out[str(int(r.user_id))] = r.photo_url
+                out[str(int(r.user_id))] = { 'avatar_url': r.photo_url }
         resp = _json_response({'avatars': out})
         resp.headers['Cache-Control'] = 'public, max-age=3600'
         return resp
@@ -8147,11 +8024,7 @@ def api_referral():
             db.close()
         bot_username = os.environ.get('BOT_USERNAME', '').lstrip('@')
         link = f"https://t.me/{bot_username}?start={ref.referral_code}" if bot_username else f"(Укажите BOT_USERNAME в env) Код: {ref.referral_code}"
-        # Зеркалим в Google Sheets (лист referrals)
-        try:
-            mirror_referral_to_sheets(user_id, ref.referral_code, ref.referrer_id, invited_count, (ref.created_at or datetime.now(timezone.utc)).isoformat())
-        except Exception as e:
-            app.logger.warning(f"Mirror referral to sheets failed: {e}")
+        # Ранее зеркалировались рефералы в лист referrals Google Sheets (удалено)
         return _json_response({
             'code': ref.referral_code,
             'referral_link': link,
@@ -8280,16 +8153,7 @@ def update_name():
             return jsonify({'error': 'user_id и new_name обязательны'}), 400
         
         if SessionLocal is None:
-            # Fallback в лист (если нет БД)
-            row_num = find_user_row(user_id)
-            if not row_num:
-                return jsonify({'error': 'Пользователь не найден'}), 404
-            sheet = get_user_sheet()
-            sheet.batch_update([
-                {'range': f'B{row_num}', 'values': [[new_name]]},
-                {'range': f'L{row_num}', 'values': [[datetime.now(timezone.utc).isoformat()]]}
-            ])
-            return jsonify({'status': 'success', 'display_name': new_name})
+            return jsonify({'error': 'БД недоступна'}), 500
 
         db: Session = get_db()
         try:
@@ -8314,11 +8178,7 @@ def update_name():
         finally:
             db.close()
 
-        # Зеркалим в Google Sheets
-        try:
-            mirror_user_to_sheets(db_user)
-        except Exception as e:
-            app.logger.warning(f"Mirror user name to sheets failed: {e}")
+        # Ранее зеркалировались изменения имени в Google Sheets (удалено)
 
         return jsonify({'status': 'success', 'display_name': new_name})
     
@@ -8339,19 +8199,7 @@ def daily_checkin():
         user_id = parsed['user'].get('id')
 
         if SessionLocal is None:
-            # Fallback: старая логика через лист
-            row_num = find_user_row(user_id)
-            if not row_num:
-                return jsonify({'error': 'Пользователь не найден'}), 404
-            sheet = get_user_sheet()
-            row = sheet.row_values(row_num)
-            # Гарантируем длину
-            row = list(row) + [''] * (12 - len(row))
-            user = {
-                'user_id': _to_int(row[0]), 'display_name': row[1], 'tg_username': row[2],
-                'credits': _to_int(row[3]), 'xp': _to_int(row[4]), 'level': _to_int(row[5], 1),
-                'consecutive_days': _to_int(row[6]), 'last_checkin_date': row[7]
-            }
+            return jsonify({'error': 'БД недоступна'}), 500
         else:
             db: Session = get_db()
             try:
@@ -8411,15 +8259,7 @@ def daily_checkin():
             new_level += 1
 
         if SessionLocal is None:
-            # Обновление в Google Sheets (fallback)
-            sheet.batch_update([
-                {'range': f'H{row_num}', 'values': [[today.isoformat()]]},       # last_checkin_date
-                {'range': f'G{row_num}', 'values': [[str(new_consecutive)]]},    # consecutive_days
-                {'range': f'E{row_num}', 'values': [[str(new_xp)]]},             # xp
-                {'range': f'D{row_num}', 'values': [[str(new_credits)]]},        # credits
-                {'range': f'F{row_num}', 'values': [[str(new_level)]]},          # level
-                {'range': f'L{row_num}', 'values': [[datetime.now(timezone.utc).isoformat()]]}  # updated_at
-            ])
+            return jsonify({'error': 'БД недоступна'}), 500
         else:
             # Обновляем в БД
             db: Session = get_db()
@@ -8449,11 +8289,7 @@ def daily_checkin():
                 db.refresh(db_user)
             finally:
                 db.close()
-            # Зеркалим в Google Sheets
-            try:
-                mirror_user_to_sheets(db_user)
-            except Exception as e:
-                app.logger.warning(f"Mirror checkin to sheets failed: {e}")
+            # Ранее зеркалировались изменения прогресса в Google Sheets (удалено)
 
         # Инвалидируем кэш статуса чек-ина в helper
         _ETAG_HELPER_CACHE.pop(f"checkin:{user_id}", None)
@@ -8477,6 +8313,7 @@ def daily_checkin():
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
 @app.route('/api/achievements', methods=['GET','POST'])
+@rate_limit(max_requests=int(os.environ.get('RL_ACHIEVEMENTS_RPM', '6')), time_window=60, per='user')
 def get_achievements():
     """Получает достижения пользователя с поддержкой ETag + SWR.
 
@@ -8484,8 +8321,8 @@ def get_achievements():
       POST: form-data initData=<telegram init data> (старый способ, обратно совместимо)
       GET:  /api/achievements?initData=<urlencoded initData>  или заголовок X-Telegram-Init-Data
 
-    Кэш на 30 сек в памяти; при совпадении If-None-Match возвращается 304.
-    Заголовок Cache-Control: public, max-age=30, stale-while-revalidate=30
+    In-memory кэш на ACH_CACHE_TTL секунд (по умолчанию 300); при совпадении If-None-Match возвращается 304.
+    Заголовок Cache-Control: private, max-age=60, stale-while-revalidate=300
     """
     try:
         global ACHIEVEMENTS_CACHE
@@ -8507,29 +8344,26 @@ def get_achievements():
         now_ts = time.time()
         client_etag = request.headers.get('If-None-Match')
         ce = ACHIEVEMENTS_CACHE.get(cache_key)
-        if ce and (now_ts - ce.get('ts',0) < 30):
+        # Общий TTL для payload достижений (персональных): по умолчанию 300с, настраивается ACH_CACHE_TTL
+        try:
+            _ach_ttl = int(os.environ.get('ACH_CACHE_TTL', '300'))
+        except Exception:
+            _ach_ttl = 300
+        if ce and (now_ts - ce.get('ts',0) < _ach_ttl):
             # Быстрый ответ из кэша / условный 304
             if client_etag and client_etag == ce.get('etag'):
                 resp = flask.make_response('', 304)
                 resp.headers['ETag'] = ce.get('etag')
-                resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+                resp.headers['Cache-Control'] = 'private, max-age=60, stale-while-revalidate=300'
                 return resp
             resp = _json_response(ce['data'])
             resp.headers['ETag'] = ce.get('etag','')
-            resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+            resp.headers['Cache-Control'] = 'private, max-age=60, stale-while-revalidate=300'
             return resp
 
-        # User fetch (DB or Sheets)
+        # User fetch (DB only)
         if SessionLocal is None:
-            row_num = find_user_row(user_id)
-            if not row_num:
-                return jsonify({'error': 'Пользователь не найден'}), 404
-            sheet = get_user_sheet()
-            row = sheet.row_values(row_num)
-            row = list(row) + [''] * (12 - len(row))
-            user = {
-                'user_id': _to_int(row[0]), 'display_name': row[1], 'tg_username': row[2], 'credits': _to_int(row[3]), 'xp': _to_int(row[4]), 'level': _to_int(row[5],1), 'consecutive_days': _to_int(row[6]), 'last_checkin_date': row[7], 'badge_tier': _to_int(row[8])
-            }
+            return jsonify({'error': 'БД недоступна'}), 500
         else:
             db = get_db();
             try:
@@ -8577,7 +8411,13 @@ def get_achievements():
         bet_cache_key = f"bst:{user_id}"  # bet stats
         bet_stats_entry = _ACH_BET_STATS_CACHE.get(bet_cache_key)
         bet_stats = None
-        if bet_stats_entry and (now_ts - bet_stats_entry['ts'] < 120):  # 2 минуты кэширования расчёта ставок
+        # Кэшируем расчёт ставок дольше, чтобы избежать частых тяжёлых запросов
+        _ach_bet_ttl = 300
+        try:
+            _ach_bet_ttl = int(os.environ.get('ACH_BET_STATS_TTL', '300'))
+        except Exception:
+            _ach_bet_ttl = 300
+        if bet_stats_entry and (now_ts - bet_stats_entry['ts'] < _ach_bet_ttl):  # 5 минут по умолчанию
             bet_stats = bet_stats_entry['data']
         else:
             bet_stats = {'total':0,'won':0,'max_win_odds':0.0,'markets_used':set(),'weeks_active':set()}
@@ -8627,31 +8467,67 @@ def get_achievements():
             bet_stats['weeks_active'] = set(bet_stats['weeks_active'])
         betcount_tier=compute_tier(bet_stats['total'], betcount_thresholds); betwins_tier=compute_tier(bet_stats['won'], betwins_thresholds); bigodds_tier=compute_tier(bet_stats['max_win_odds'], bigodds_thresholds); markets_tier=compute_tier(len(bet_stats['markets_used']), markets_thresholds); weeks_tier=compute_tier(len(bet_stats['weeks_active']), weeks_thresholds)
 
-        ach_row, ach = get_user_achievements_row(user_id); updates=[]; now_iso=datetime.now(timezone.utc).isoformat()
-        def upd(cond, rng_val_pairs):
-            if cond:
-                for rng,val in rng_val_pairs: updates.append({'range': rng, 'values': [[val]]})
-        upd(credits_tier>ach['credits_tier'], [(f'B{ach_row}', str(credits_tier)), (f'C{ach_row}', now_iso)])
-        upd(level_tier>ach['level_tier'], [(f'D{ach_row}', str(level_tier)), (f'E{ach_row}', now_iso)])
-        upd(streak_tier>ach['streak_tier'], [(f'F{ach_row}', str(streak_tier)), (f'G{ach_row}', now_iso)])
-        upd(invited_tier>ach.get('invited_tier',0), [(f'H{ach_row}', str(invited_tier)), (f'I{ach_row}', now_iso)])
-        upd(betcount_tier>ach.get('betcount_tier',0), [(f'J{ach_row}', str(betcount_tier)), (f'K{ach_row}', now_iso)])
-        upd(betwins_tier>ach.get('betwins_tier',0), [(f'L{ach_row}', str(betwins_tier)), (f'M{ach_row}', now_iso)])
-        upd(bigodds_tier>ach.get('bigodds_tier',0), [(f'N{ach_row}', str(bigodds_tier)), (f'O{ach_row}', now_iso)])
-        upd(markets_tier>ach.get('markets_tier',0), [(f'P{ach_row}', str(markets_tier)), (f'Q{ach_row}', now_iso)])
-        upd(weeks_tier>ach.get('weeks_tier',0), [(f'R{ach_row}', str(weeks_tier)), (f'S{ach_row}', now_iso)])
-        if updates: get_achievements_sheet().batch_update(updates)
-
-        # Учитываем перманентно достигнутый tier из таблицы достижений (best_*_tier)
-        best_streak_tier = max(int(ach.get('streak_tier', 0) or 0), int(streak_tier or 0))
-        best_credits_tier = max(int(ach.get('credits_tier', 0) or 0), int(credits_tier or 0))
-        best_level_tier = max(int(ach.get('level_tier', 0) or 0), int(level_tier or 0))
-        best_invited_tier = max(int(ach.get('invited_tier', 0) or 0), int(invited_tier or 0))
-        best_betcount_tier = max(int(ach.get('betcount_tier', 0) or 0), int(betcount_tier or 0))
-        best_betwins_tier = max(int(ach.get('betwins_tier', 0) or 0), int(betwins_tier or 0))
-        best_bigodds_tier = max(int(ach.get('bigodds_tier', 0) or 0), int(bigodds_tier or 0))
-        best_markets_tier = max(int(ach.get('markets_tier', 0) or 0), int(markets_tier or 0))
-        best_weeks_tier = max(int(ach.get('weeks_tier', 0) or 0), int(weeks_tier or 0))
+        # Чтение/апсерт перманентных достижений из БД
+        best_streak_tier = best_credits_tier = best_level_tier = 0
+        best_invited_tier = best_betcount_tier = best_betwins_tier = 0
+        best_bigodds_tier = best_markets_tier = best_weeks_tier = 0
+        if SessionLocal is not None:
+            db = get_db()
+            try:
+                ach_row = db.get(UserAchievement, int(user_id))
+                now_dt = datetime.now(timezone.utc)
+                if not ach_row:
+                    ach_row = UserAchievement(user_id=int(user_id))
+                    db.add(ach_row)
+                # Рассчитываем текущие tier'ы
+                cur = {
+                    'streak': int(streak_tier or 0),
+                    'credits': int(credits_tier or 0),
+                    'level': int(level_tier or 0),
+                    'invited': int(invited_tier or 0),
+                    'betcount': int(betcount_tier or 0),
+                    'betwins': int(betwins_tier or 0),
+                    'bigodds': int(bigodds_tier or 0),
+                    'markets': int(markets_tier or 0),
+                    'weeks': int(weeks_tier or 0),
+                }
+                # Сопоставление полей модели
+                mapping = [
+                    ('streak', 'best_streak_tier', 'streak_unlocked_at'),
+                    ('credits', 'best_credits_tier', 'credits_unlocked_at'),
+                    ('level', 'best_level_tier', 'level_unlocked_at'),
+                    ('invited', 'best_invited_tier', 'invited_unlocked_at'),
+                    ('betcount', 'best_betcount_tier', 'betcount_unlocked_at'),
+                    ('betwins', 'best_betwins_tier', 'betwins_unlocked_at'),
+                    ('bigodds', 'best_bigodds_tier', 'bigodds_unlocked_at'),
+                    ('markets', 'best_markets_tier', 'markets_unlocked_at'),
+                    ('weeks', 'best_weeks_tier', 'weeks_unlocked_at'),
+                ]
+                changed = False
+                for key, tier_field, ts_field in mapping:
+                    current = cur[key]
+                    previous = int(getattr(ach_row, tier_field) or 0)
+                    if current > previous:
+                        setattr(ach_row, tier_field, current)
+                        if previous == 0:
+                            # Первая разблокировка — фиксируем дату
+                            setattr(ach_row, ts_field, now_dt)
+                        changed = True
+                if changed:
+                    ach_row.updated_at = now_dt
+                    db.commit()
+                # Присваиваем best_* для формирования ответа
+                best_streak_tier = int(ach_row.best_streak_tier or 0)
+                best_credits_tier = int(ach_row.best_credits_tier or 0)
+                best_level_tier = int(ach_row.best_level_tier or 0)
+                best_invited_tier = int(ach_row.best_invited_tier or 0)
+                best_betcount_tier = int(ach_row.best_betcount_tier or 0)
+                best_betwins_tier = int(ach_row.best_betwins_tier or 0)
+                best_bigodds_tier = int(ach_row.best_bigodds_tier or 0)
+                best_markets_tier = int(ach_row.best_markets_tier or 0)
+                best_weeks_tier = int(ach_row.best_weeks_tier or 0)
+            finally:
+                db.close()
 
         achievements=[]
         def add(group, best_tier, name_map, value, targets, icon_map):
@@ -8713,11 +8589,11 @@ def get_achievements():
         if client_etag and client_etag == etag:
             resp = flask.make_response('', 304)
             resp.headers['ETag'] = etag
-            resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+            resp.headers['Cache-Control'] = 'private, max-age=60, stale-while-revalidate=300'
             return resp
         resp = _json_response({**resp_payload, 'version': etag})
         resp.headers['ETag'] = etag
-        resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=30'
+        resp.headers['Cache-Control'] = 'private, max-age=60, stale-while-revalidate=300'
         return resp
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {str(e)}")
@@ -8968,6 +8844,7 @@ def api_league_table():
         return jsonify({'error': 'Не удалось загрузить таблицу'}), 500
 
 @app.route('/api/schedule', methods=['GET'])
+@rate_limit(max_requests=int(os.environ.get('RL_SCHEDULE_RPM', '12')), time_window=60, per='ip')
 def api_schedule():
     """Расписание (до 3 туров) через etag_json: только snapshot (без чтения Sheets), с match_of_week логикой."""
     def _build():
@@ -8980,7 +8857,11 @@ def api_schedule():
             try:
                 snap = _snapshot_get(db, Snapshot, 'schedule', app.logger)
             finally:
-                db.close()
+                try:
+                    db.close()
+                except Exception:
+                    # transient SSL/rollback errors shouldn't bubble up from builder
+                    pass
             if snap and snap.get('payload'):
                 payload = snap['payload']
                 tours_in_snap = (payload.get('tours') or []) if isinstance(payload, dict) else []
@@ -9002,7 +8883,10 @@ def api_schedule():
                     fm = _snapshot_get(db2, Snapshot, 'feature-match', app.logger) or {}
                     manual = (fm.get('payload') or {}).get('match') or None
                 finally:
-                    db2.close()
+                    try:
+                        db2.close()
+                    except Exception:
+                        pass
             use_manual = False
             if manual and isinstance(manual, dict):
                 mh, ma = manual.get('home'), manual.get('away')
@@ -9028,10 +8912,13 @@ def api_schedule():
                 if SessionLocal is not None:
                     db3 = get_db()
                     try:
-                        bt = _snapshot_get(db3, 'betting-tours')
+                        bt = _snapshot_get(db3, Snapshot, 'betting-tours', app.logger)
                         tours_src = (bt or {}).get('payload', {}).get('tours') or tours_src
                     finally:
-                        db3.close()
+                        try:
+                            db3.close()
+                        except Exception:
+                            pass
                 best = _pick_match_of_week(tours_src)
                 if best:
                     payload = dict(payload)
@@ -9112,8 +8999,9 @@ def api_vote_match():
                             'fields': odds_fields
                         }
                         match_id_str = f"{home}_{away}_{date_key or ''}"
-                        ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=3500)
-                        ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=3500)
+                        # Батчинг 500 мс после голосования
+                        ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=500)
+                        ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=500)
                 except Exception as _e:
                     app.logger.error(f"vote ws error: {_e}")
                 return jsonify({'status': 'ok'})
@@ -9266,6 +9154,7 @@ def api_vote_aggregates_batch():
 
 
 @app.route('/api/betting/tours', methods=['GET'])
+@rate_limit(max_requests=int(os.environ.get('RL_TOURS_RPM', '20')), time_window=60, per='ip')
 def api_betting_tours():
     """Возвращает ближайший тур для ставок, из снапшота БД; при отсутствии — собирает on-demand.
     Для матчей в прошлом блокируем ставки (поле lock: true). Поддерживает ETag/304."""
@@ -9306,34 +9195,123 @@ def api_betting_tours():
                 try:
                     snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
                     if snap and snap.get('payload'):
-                        # Перед отдачей поверх снепшота освежаем коэффициенты и odds_version,
-                        # чтобы клиентский ETag‑fallback всегда видел актуальные значения.
+                        # Поверх снепшота освежаем коэффициенты, вычисляем lock и скрываем начавшиеся матчи.
                         try:
                             payload = snap['payload']
                             tours = payload.get('tours') or []
-                            for t in tours:
-                                matches = t.get('matches') or []
-                                for m in matches:
+                            now_local = datetime.now()
+
+                            def _parse_match_dt(m):
+                                dt = None
+                                try:
+                                    if m.get('datetime'):
+                                        try:
+                                            dt = datetime.fromisoformat(m['datetime'])
+                                        except Exception:
+                                            dt = None
+                                    if dt is None and m.get('date'):
+                                        try:
+                                            dd = datetime.fromisoformat(m['date']).date()
+                                        except Exception:
+                                            dd = None
+                                        if dd:
+                                            tm_raw = (m.get('time') or '').strip()
+                                            tm = None
+                                            if tm_raw:
+                                                for fmt in ('%H:%M:%S','%H:%M'):
+                                                    try:
+                                                        tm = datetime.strptime(tm_raw, fmt).time(); break
+                                                    except Exception:
+                                                        continue
+                                            dt = datetime.combine(dd, tm or datetime.min.time())
+                                except Exception:
+                                    dt = None
+                                return dt
+
+                            def _all_started(matches):
+                                any_match = False
+                                for m in (matches or []):
+                                    any_match = True
+                                    dt = _parse_match_dt(m)
                                     try:
+                                        if dt is not None:
+                                            if dt > now_local:
+                                                return False
+                                        else:
+                                            # если нет точного времени, ориентируемся по дате
+                                            dd = datetime.fromisoformat((m.get('date') or '')[:10]).date() if m.get('date') else None
+                                            if dd and dd >= now_local.date():
+                                                return False
+                                    except Exception:
+                                        return False
+                                return any_match
+
+                            # Возможность учитывать статус матча из таблицы флагов
+                            def _apply_lock(m, dt):
+                                lock = False
+                                if dt is not None:
+                                    lock = (dt - timedelta(minutes=BET_LOCK_AHEAD_MINUTES)) <= now_local
+                                try:
+                                    row = db.query(MatchFlags).filter(
+                                        MatchFlags.home==(m.get('home') or ''),
+                                        MatchFlags.away==(m.get('away') or '')
+                                    ).first()
+                                    if row and row.status in ('live','finished') and dt is not None:
+                                        if row.status == 'live':
+                                            if dt - timedelta(minutes=10) <= now_local < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                                lock = True
+                                        elif row.status == 'finished':
+                                            if now_local >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                                lock = True
+                                except Exception:
+                                    pass
+                                m['lock'] = bool(lock)
+
+                            # Пройдём по турам и матчам: фильтрация начавшихся и обновление odds/lock
+                            for t in tours:
+                                filtered = []
+                                for m in (t.get('matches') or []):
+                                    try:
+                                        dt = _parse_match_dt(m)
+                                        # скрываем начавшиеся
+                                        if dt is not None and dt <= now_local:
+                                            continue
+                                        if dt is None and m.get('date'):
+                                            try:
+                                                dd = datetime.fromisoformat((m.get('date') or '')[:10]).date()
+                                                if dd < now_local.date():
+                                                    continue
+                                            except Exception:
+                                                pass
+                                        # пересчёт коэффициентов и версии
                                         home = (m.get('home') or '').strip()
                                         away = (m.get('away') or '').strip()
-                                        # Дата матча: используем ISO YYYY-MM-DD если доступна
                                         draw = m.get('date') or m.get('datetime') or ''
                                         date_key = str(draw)[:10] if draw else ''
-                                        # Пересчёт коэффициентов и обновление версии
-                                        new_odds = _compute_match_odds(home, away, date_key)
-                                        m['odds'] = new_odds
+                                        m['odds'] = _compute_match_odds(home, away, date_key)
                                         try:
                                             m['odds_version'] = _get_odds_version(home, away)
                                         except Exception:
                                             pass
+                                        # lock
+                                        _apply_lock(m, dt)
+                                        filtered.append(m)
                                     except Exception:
-                                        # Не ломаем выдачу тура при точечных ошибках матча
                                         continue
-                            return payload
+                                t['matches'] = filtered
+
+                            # Если в снапшоте всего 1 тур и все его матчи уже стартовали — перестроим payload целиком
+                            try:
+                                if len(tours) == 1 and _all_started(tours[0].get('matches') or []):
+                                    raise RuntimeError('primary_tour_started')
+                            except RuntimeError:
+                                pass
+                            else:
+                                return payload
+
                         except Exception:
-                            # Если что-то пошло не так — вернём исходный снепшот как есть
-                            return snap['payload']
+                            # Если что-то пошло не так — продолжим к on-demand сборке
+                            pass
                 finally:
                     db.close()
             # 2) On-demand сборка и запись снапшота
@@ -9818,12 +9796,7 @@ def api_match_score_set():
                     pass
             except Exception:
                 pass
-            # Зеркалим счёт в Google Sheets (best-effort), как числовые значения
-            try:
-                if (row.score_home is not None) and (row.score_away is not None):
-                    mirror_match_score_to_schedule(home, away, int(row.score_home), int(row.score_away))
-            except Exception:
-                pass
+            # Ранее счёт зеркалировался в Google Sheets (удалено)
             
             # Логируем успешное изменение счёта
             try:
@@ -9978,7 +9951,7 @@ def _compute_table_agg_base():
         if SessionLocal is not None:
             dbs = get_db()
             try:
-                snap = _snapshot_get(dbs, 'results')
+                snap = _snapshot_get(dbs, Snapshot, 'results', app.logger)
                 payload = snap and snap.get('payload') or {}
                 for m in (payload.get('results') or []):
                     try:
@@ -10002,7 +9975,7 @@ def _compute_table_agg_base():
         if SessionLocal is not None:
             dbsched = get_db()
             try:
-                snap = _snapshot_get(dbsched, 'schedule')
+                snap = _snapshot_get(dbsched, Snapshot, 'schedule', app.logger)
                 payload = snap and snap.get('payload') or {}
                 for t in (payload.get('tours') or []):
                     for mt in (t.get('matches') or []):
@@ -10120,6 +10093,7 @@ def api_league_table_live():
 """_settle_open_bets удалён: логика перенесена в services.betting_settle.settle_open_bets"""
 
 @app.route('/api/results', methods=['GET'])
+@rate_limit(max_requests=int(os.environ.get('RL_RESULTS_RPM', '12')), time_window=60, per='ip')
 def api_results():
     """Результаты (прошедшие матчи) через etag_json: только snapshot (без чтения Sheets)."""
     def _build():
@@ -10134,6 +10108,138 @@ def api_results():
             payload={'results': []}
         return payload
     return etag_json('results', _build, cache_ttl=900, max_age=900, swr=600, core_filter=lambda p: {'results': (p.get('results') or [])[:200]})
+
+# ---------------------------------------------------------------------------
+# Combined summary endpoint: schedule + results + betting tours + leaderboards
+# ---------------------------------------------------------------------------
+@app.route('/api/summary', methods=['GET'])
+@rate_limit(max_requests=int(os.environ.get('RL_SUMMARY_RPM', '6')), time_window=60, per='ip')
+def api_summary():
+    """Возвращает объединённый payload, чтобы сократить количество запросов клиента.
+
+    Параметры:
+      include: csv из schedule,results,tours,leaderboard (по умолчанию все)
+      leaderboard: csv из top-predictors,top-rich,server-leaders,prizes (по умолчанию все)
+    """
+    include_param = (request.args.get('include') or 'schedule,results,tours,leaderboard').lower()
+    include_blocks = {p.strip() for p in include_param.split(',') if p.strip()}
+    lb_param = (request.args.get('leaderboard') or 'top-predictors,top-rich,server-leaders,prizes').lower()
+    lb_blocks = [p.strip() for p in lb_param.split(',') if p.strip()]
+
+    def _build():
+        out = {'updated_at': datetime.now(timezone.utc).isoformat()}
+        # schedule
+        if 'schedule' in include_blocks:
+            try:
+                sch = None
+                if SessionLocal is not None:
+                    db = get_db(); snap=None
+                    try:
+                        snap = _snapshot_get(db, Snapshot, 'schedule', app.logger)
+                    finally:
+                        db.close()
+                    sch = (snap or {}).get('payload') or {'tours': []}
+                else:
+                    sch = {'tours': []}
+            except Exception:
+                sch = {'tours': []}
+            out['schedule'] = sch
+        # results
+        if 'results' in include_blocks:
+            try:
+                res = None
+                if SessionLocal is not None:
+                    db = get_db(); snap=None
+                    try:
+                        snap = _snapshot_get(db, Snapshot, 'results', app.logger)
+                    finally:
+                        db.close()
+                    res = (snap or {}).get('payload') or {'results': []}
+                else:
+                    res = {'results': []}
+            except Exception:
+                res = {'results': []}
+            out['results'] = res
+        # betting tours (payload only core)
+        if 'tours' in include_blocks:
+            try:
+                bt = None
+                if SessionLocal is not None:
+                    db = get_db(); snap=None
+                    try:
+                        snap = _snapshot_get(db, Snapshot, 'betting-tours', app.logger)
+                    finally:
+                        db.close()
+                    bt = (snap or {}).get('payload') or {'tours': []}
+                else:
+                    bt = {'tours': []}
+            except Exception:
+                bt = {'tours': []}
+            out['tours'] = {'tours': bt.get('tours') or []}
+        # leaderboards (prefer precomputed cache_manager)
+        if 'leaderboard' in include_blocks:
+            lbs = {}
+            for name in lb_blocks:
+                try:
+                    data = None
+                    if cache_manager:
+                        # cache namespaces use keys like 'top-predictors', etc.
+                        data = cache_manager.get('leaderboards', name)
+                    if not data and SessionLocal is not None:
+                        # fallback to snapshots
+                        key_map = {
+                            'top-predictors': 'leader-top-predictors',
+                            'top-rich': 'leader-top-rich',
+                            'server-leaders': 'leader-server-leaders',
+                            'prizes': 'leader-prizes'
+                        }
+                        snap_key = key_map.get(name)
+                        if snap_key:
+                            db = get_db(); snap=None
+                            try:
+                                snap = _snapshot_get(db, Snapshot, snap_key, app.logger)
+                            finally:
+                                db.close()
+                            data = (snap or {}).get('payload')
+                    lbs[name] = data or {'items': []}
+                except Exception:
+                    lbs[name] = {'items': []}
+            out['leaderboard'] = lbs
+
+        return out
+
+    def _core(p):
+        core = {}
+        if 'schedule' in include_blocks and isinstance(p.get('schedule'), dict):
+            core['schedule'] = {'tours': (p['schedule'].get('tours') or [])}
+        if 'results' in include_blocks and isinstance(p.get('results'), dict):
+            core['results'] = {'results': (p['results'].get('results') or [])[:200]}
+        if 'tours' in include_blocks and isinstance(p.get('tours'), dict):
+            core['tours'] = {'tours': (p['tours'].get('tours') or [])}
+        if 'leaderboard' in include_blocks and isinstance(p.get('leaderboard'), dict):
+            lbs = {}
+            for k,v in p['leaderboard'].items():
+                if isinstance(v, dict):
+                    if 'items' in v:
+                        lbs[k] = {'items': v.get('items')}
+                    elif 'data' in v:
+                        lbs[k] = {'data': v.get('data')}
+                    else:
+                        lbs[k] = {}
+                else:
+                    lbs[k] = {}
+            core['leaderboard'] = lbs
+        return core
+
+    return etag_json(
+        'summary',
+        _build,
+        cache_ttl=60,
+        max_age=60,
+        swr=120,
+        cache_visibility='public',
+        core_filter=_core
+    )
 
 @app.route('/api/match-details', methods=['GET'])
 def api_match_details():
@@ -10839,6 +10945,16 @@ def api_admin_google_import_schedule():
 def api_admin_google_export_all():
     """Выгрузка актуальных данных из БД в Google Sheets (только админ)."""
     try:
+        from config import Config
+        mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+        if mode != 'enabled':
+            manual_log(
+                action="google_export_all",
+                description="Экспорт в Google Sheets заблокирован в конфигурации (SHEETS_MODE)",
+                result_status='skipped',
+                affected_data={'mode': mode}
+            )
+            return jsonify({'error': 'sheets_disabled', 'details': f'SHEETS_MODE={mode}'}), 403
         # Авторизация выполнена декоратором require_admin; используем g.user
         try:
             user_id = str(getattr(g, 'user', {}).get('id', 'admin'))
@@ -11604,7 +11720,8 @@ def api_streams_upcoming():
         if SessionLocal is not None:
             dbx = get_db()
             try:
-                snap = _snapshot_get(dbx, 'schedule')
+                # Correct signature requires Snapshot model and logger
+                snap = _snapshot_get(dbx, Snapshot, 'schedule', app.logger)
                 payload = snap and snap.get('payload')
                 tours = payload and payload.get('tours') or []
             finally:
@@ -11615,14 +11732,35 @@ def api_streams_upcoming():
             for m in (t.get('matches') or []):
                 try:
                     dt = None
+                    # 1) Поле datetime (возможны варианты: naive, с суффиксом Z, с явным смещением +hh:mm)
                     if m.get('datetime'):
-                        dt = datetime.fromisoformat(str(m['datetime']))
+                        raw = str(m['datetime']).strip()
+                        # поддержка ISO c 'Z'
+                        if raw.endswith('Z'):
+                            raw = raw[:-1] + '+00:00'
+                        try:
+                            parsed = datetime.fromisoformat(raw)
+                        except Exception:
+                            parsed = None
+                        if parsed is not None:
+                            # если aware — приводим к локальному наивному времени (UTC + tz_min)
+                            if getattr(parsed, 'tzinfo', None) is not None:
+                                parsed_utc_naive = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                                dt = parsed_utc_naive + timedelta(minutes=tz_min)
+                            else:
+                                # считаем локальным уже
+                                dt = parsed
+                    # 2) Пара date + time (наивные локальные)
                     elif m.get('date'):
                         d = datetime.fromisoformat(str(m['date'])).date()
+                        tm = None
                         try:
                             tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
                         except Exception:
-                            tm = datetime.min.time()
+                            try:
+                                tm = datetime.strptime((m.get('time') or '00:00:00'), "%H:%M:%S").time()
+                            except Exception:
+                                tm = datetime.min.time()
                         dt = datetime.combine(d, tm)
                     if not dt:
                         continue
@@ -11857,7 +11995,7 @@ def api_streams_get():
     try:
         dbs = get_db()
         try:
-            snap = _snapshot_get(dbs, 'schedule')
+            snap = _snapshot_get(dbs, Snapshot, 'schedule', app.logger)
             payload = snap and snap.get('payload')
             tours = (payload and payload.get('tours')) or []
         finally:
@@ -14692,6 +14830,29 @@ if __name__ == '__main__':
     
     # Initialize admin API with logging
     init_admin_api(app)
+
+    # Initialize and register admin blueprint routes (if available)
+    try:
+        if 'init_admin_routes' in globals():
+            # Resolve optional dependencies safely from globals()
+            try:
+                _init_fn = globals().get('init_admin_routes')
+                _parse_init = globals().get('parse_and_verify_telegram_init_data')
+                _match_flags = globals().get('MatchFlags')
+                _snapshot_set_fn = globals().get('_snapshot_set')
+                _build_betting_fn = globals().get('_build_betting_tours_payload')
+                _settle_open_bets_fn = globals().get('_settle_open_bets')
+
+                if callable(_init_fn) and get_db is not None and 'SessionLocal' in globals():
+                    _init_fn(app, get_db, SessionLocal, _parse_init,
+                             _match_flags, _snapshot_set_fn, _build_betting_fn, _settle_open_bets_fn)
+                    print('[INFO] Admin routes initialized and blueprint registered')
+                else:
+                    print('[INFO] Admin routes init skipped in __main__: dependencies missing')
+            except Exception as _iar_e:
+                print(f"[WARN] init_admin_routes call failed: {_iar_e}")
+    except Exception:
+        pass
     
     try:
         start_background_sync()

@@ -388,12 +388,13 @@
         };
         schedule();
       };
+  const __FRESH_TTL__ = 5 * 60 * 1000; // 5 минут
+  const __isFresh__ = cached && Number.isFinite(cached.ts) && (Date.now() - cached.ts < __FRESH_TTL__) && ((cached?.data?.tours && cached.data.tours.length>0) || (cached?.tours && cached.tours.length>0));
   if (cached && cached.version) {
-        fetchWithETag(cached.version).then((store)=>{ renderTours(store); startOddsPolling(store?.version); }).catch(()=>{}).finally(()=>{ _toursLoading = false; });
+        fetchWithETag(cached.version).then((store)=>{ if(!__isFresh__) renderTours(store); startOddsPolling(store?.version); }).catch(()=>{}).finally(()=>{ _toursLoading = false; });
       } else {
-        fetchWithETag(null).then((store)=>{ renderTours(store); startOddsPolling(store?.version); }).catch(err => {
-          
-          if (!cached) toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
+        fetchWithETag(null).then((store)=>{ if(!__isFresh__) renderTours(store); startOddsPolling(store?.version); }).catch(err => {
+          if (!cached || !__isFresh__) toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
         }).finally(()=>{ _toursLoading = false; });
       }
       if (cached && !(_toursLoading)) { /* уже отрисовали кэш; загрузка в фоне */ }

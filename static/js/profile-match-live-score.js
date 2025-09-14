@@ -2,7 +2,7 @@
 (function(){
   function setup(match, refs){
     const scoreEl = refs.scoreEl; const dtEl = refs.dtEl; const mdPane=refs.mdPane; if(!scoreEl||!dtEl||!mdPane) return {};
-    let scorePoll=null; let adminScoreCtrlsAdded=false;
+    let scorePoll=null; let pollWatch=null; let adminScoreCtrlsAdded=false;
     const isAdmin = (()=>{ try { const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):''; return !!(adminId && currentId && String(adminId)===currentId); } catch(_) { return false; } })();
     const applyScore=(sh,sa)=>{ try { if(sh==null || sa==null) return; scoreEl.textContent=`${Number(sh)} : ${Number(sa)}`; } catch(_){} };
     const fetchScore=async()=>{ try { const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`); const d=await r.json(); if(typeof d?.score_home==='number' && typeof d?.score_away==='number') applyScore(d.score_home,d.score_away); } catch(_){} };
@@ -28,6 +28,16 @@
       } catch(_){} };
     // Live status fetch (server) + admin fallback на локальный live
   { const raw=(match?.datetime||match?.date||''); const dateStr = raw ? String(raw).slice(0,10) : ''; }
+  // Вычисляем WS-топик деталей матча, как в profile-match-advanced.js
+  const __wsTopic = (()=>{ try { const h=(match?.home||'').toLowerCase().trim(); const a=(match?.away||'').toLowerCase().trim(); const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):'')); const d=raw?raw.slice(0,10):''; return `match:${h}__${a}__${d}:details`; } catch(_) { return null; } })();
+  const isWsActive = ()=>{
+    try {
+      if(!window.__WEBSOCKETS_ENABLED__) return false;
+      if(!__wsTopic) return false;
+      const ru = window.realtimeUpdater;
+      return !!(ru && typeof ru.getTopicEnabled==='function' && ru.getTopicEnabled() && typeof ru.hasTopic==='function' && ru.hasTopic(__wsTopic));
+    } catch(_) { return false; }
+  };
   fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent((match?.datetime||match?.date||'').toString().slice(0,10))}`)
       .then(r=>r.json())
       .then(async s=>{
@@ -52,12 +62,24 @@
               }
             } catch(_){}
           }
-          // Запускаем опрос счёта и показываем контролы
-          fetchScore(); if(!scorePoll) scorePoll=setInterval(fetchScore,15000);
+          // Опрос счёта только если нет активной WS-подписки на топик матча
+          const syncPolling = ()=>{
+            try {
+              const needPoll = !isWsActive();
+              if (needPoll) {
+                if (!scorePoll) { fetchScore(); scorePoll = setInterval(fetchScore, 15000); }
+              } else {
+                if (scorePoll) { clearInterval(scorePoll); scorePoll=null; }
+              }
+            } catch(_){}
+          };
+          // Первая синхронизация и периодическая проверка режима каждые 5с
+          syncPolling();
+          if (!pollWatch) pollWatch = setInterval(syncPolling, 5000);
           ensureAdminCtrls();
         }
       }).catch(()=>{});
-    return { cleanup(){ try { if(scorePoll) clearInterval(scorePoll); } catch(_){} try { mdPane.querySelectorAll('.admin-score-ctrls').forEach(n=>n.remove()); } catch(_){} } };
+    return { cleanup(){ try { if(scorePoll) clearInterval(scorePoll); } catch(_){} try { if(pollWatch) clearInterval(pollWatch); } catch(_){} try { mdPane.querySelectorAll('.admin-score-ctrls').forEach(n=>n.remove()); } catch(_){} } };
   }
   window.MatchLiveScore = { setup };
 })();

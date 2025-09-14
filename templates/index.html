@@ -61,9 +61,9 @@
             })();
         </script>
         {% endif %}
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="stylesheet" href="/static/css/splash.css">
-    <link rel="stylesheet" href="/static/css/blb.css">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ static_version }}">
+    <link rel="stylesheet" href="/static/css/splash.css?v={{ static_version }}">
+    <link rel="stylesheet" href="/static/css/blb.css?v={{ static_version }}">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚽</text></svg>">
 </head>
 <body data-admin="{{ admin_user_id }}" class="theme-ufo">
@@ -600,41 +600,41 @@
         </div>
     </div>
 
-    <script src="/static/js/team-utils.js"></script>
-    <script src="/static/js/match-utils.js"></script>
-    <script src="/static/js/animations.js"></script>
-    <script src="/static/js/splash.js"></script>
-    <script src="/static/js/telegram-patch.js"></script>
-    <script src="/static/js/league.js"></script>
+    <script src="/static/js/team-utils.js?v={{ static_version }}"></script>
+    <script src="/static/js/match-utils.js?v={{ static_version }}"></script>
+    <script src="/static/js/animations.js?v={{ static_version }}"></script>
+    <script src="/static/js/splash.js?v={{ static_version }}"></script>
+    <script src="/static/js/telegram-patch.js?v={{ static_version }}"></script>
+    <script src="/static/js/league.js?v={{ static_version }}"></script>
     <!-- Компонент полосы голосования (должен идти после league.js, который экспортирует __VoteAgg и MatchState) -->
-    <script src="/static/js/vote-inline.js"></script>
-    <script src="/static/js/match-details-fetch.js"></script>
-    <script src="/static/js/shop.js"></script>
-    <script src="/static/js/admin.js"></script>
-    <script src="/static/js/etag-fetch.js"></script>
-    <script src="/static/js/xp-utils.js"></script>
-    <script src="/static/js/profile-user.js"></script>
-    <script src="/static/js/profile-achievements.js"></script>
-    <script src="/static/js/profile-checkin.js"></script>
-    <script src="/static/js/profile-live.js"></script>
-    <script src="/static/js/profile-match-roster-events.js"></script>
-    <script src="/static/js/profile-match-advanced.js"></script>
-    <script src="/static/js/profile-match-live-score.js"></script>
-    <script src="/static/js/profile-match-admin.js"></script>
-    <script src="/static/js/profile-match-stats.js"></script>
-    <script src="/static/js/profile-match-specials.js"></script>
-    <script src="/static/js/profile-match-stream.js"></script>
-    <script src="/static/js/profile-referral.js"></script>
-    <script src="/static/js/profile-ads-featured.js"></script>
-    <script src="/static/js/profile-team.js"></script>
-    <script src="/static/js/profile-core.js"></script>
-    <script src="/static/js/profile.js"></script>
-    <script src="/static/js/profile-scorers.js"></script>
-    <script src="/static/js/nav-fallback.js"></script>
-    <script src="/static/js/streams.js"></script>
-    <script src="/static/js/predictions.js"></script>
+    <script src="/static/js/vote-inline.js?v={{ static_version }}"></script>
+    <script src="/static/js/match-details-fetch.js?v={{ static_version }}"></script>
+    <script src="/static/js/shop.js?v={{ static_version }}"></script>
+    <script src="/static/js/admin.js?v={{ static_version }}"></script>
+    <script src="/static/js/etag-fetch.js?v={{ static_version }}"></script>
+    <script src="/static/js/xp-utils.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-user.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-achievements.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-checkin.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-live.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-match-roster-events.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-match-advanced.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-match-live-score.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-match-admin.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-match-stats.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-match-specials.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-match-stream.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-referral.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-ads-featured.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-team.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-core.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile.js?v={{ static_version }}"></script>
+    <script src="/static/js/profile-scorers.js?v={{ static_version }}"></script>
+    <script src="/static/js/nav-fallback.js?v={{ static_version }}"></script>
+    <script src="/static/js/streams.js?v={{ static_version }}"></script>
+    <script src="/static/js/predictions.js?v={{ static_version }}"></script>
     <!-- Real-time обновления через WebSocket -->
-    <script src="/static/js/realtime-updates.js"></script>
+    <script src="/static/js/realtime-updates.js?v={{ static_version }}"></script>
         <script>
         // Fallback навигации: активируется, если основной скрипт не сработал (некоторые мобильные WebView срезают ошибки)
         (function(){

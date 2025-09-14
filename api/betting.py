@@ -11,7 +11,7 @@ betting_bp = Blueprint('betting', __name__, url_prefix='/api/betting')
 def init_betting_routes(app, get_db, SessionLocal, User, Bet, parse_and_verify_telegram_init_data, 
                        _build_betting_tours_payload, _snapshot_get, _snapshot_set, _load_all_tours_from_sheet,
                        BET_MIN_STAKE, BET_MAX_STAKE, BET_DAILY_MAX_STAKE, BET_LOCK_AHEAD_MINUTES,
-                       _compute_1x2_odds, _compute_totals_odds, _compute_specials_odds, mirror_user_to_sheets):
+                       _compute_1x2_odds, _compute_totals_odds, _compute_specials_odds):
     """Initialize betting routes with dependencies"""
     
     @betting_bp.route('/tours', methods=['GET'])
