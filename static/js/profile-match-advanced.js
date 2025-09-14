@@ -68,6 +68,23 @@
   homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; if(streamPane) streamPane.style.display='none'; statsPane.style.display='none';
   // Delegate roster & events rendering
   try { if(window.MatchRostersEvents?.render) { window.MatchRostersEvents.render(match, details, mdPane, { homePane, awayPane }); } } catch(_) {}
+  // WS-first: при обновлении деталей матча (в т.ч. событий) перерисовываем составы/события
+  try {
+    const onDetailsUpdate = (e)=>{
+      try {
+        const d = e?.detail || {};
+        if (!d) return;
+        // В большинстве случаев сервер присылает те же home/away; допускаем частичные патчи без этих полей
+        const same = (!d.home || d.home === match.home) && (!d.away || d.away === match.away);
+        if (!same) return;
+        if (window.MatchRostersEvents?.render) {
+          window.MatchRostersEvents.render(match, d, mdPane, { homePane, awayPane });
+        }
+      } catch(_){}
+    };
+    document.addEventListener('matchDetailsUpdate', onDetailsUpdate);
+    mdPane.__onDetailsUpdate = onDetailsUpdate;
+  } catch(_){}
   // live score + admin inline ctrls delegated
   let liveScoreCtx = null;
   try { if(window.MatchLiveScore?.setup){ liveScoreCtx = window.MatchLiveScore.setup(match,{ scoreEl:score, dtEl:dt, mdPane }); } } catch(_){ }
@@ -192,7 +209,7 @@
         }; btn.addEventListener('click', async()=>{ const ok=await confirmFinish(); if(!ok) return; const tg=window.Telegram?.WebApp||null; btn.disabled=true; const old=btn.textContent; btn.textContent='Завершаю...'; try { const fd=new FormData(); fd.append('initData', tg?.initData||''); fd.append('home', match.home||''); fd.append('away', match.away||''); const r=await fetch('/api/match/settle',{ method:'POST', body:fd }); const d=await r.json().catch(()=>({})); if(!r.ok || d?.error) throw new Error(d?.error||'Ошибка завершения'); try { window.showAlert?.('Матч завершён','success'); } catch(_){} try { if(d && d.total_bets!==undefined){ const msg=`Ставки: всего ${d.total_bets}, открытых до расчёта ${d.open_before}, изменено ${d.changed||0}, выиграло ${d.won||0}, проиграло ${d.lost||0}`; window.showAlert?.(msg,'info'); } } catch(_){} try { const dateStr=(match?.datetime||match?.date||'').toString().slice(0,10); const key=`stream:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${dateStr}`; localStorage.removeItem(key); const sp=document.getElementById('md-pane-stream'); if(sp){ sp.style.display='none'; sp.innerHTML='<div class=\"stream-wrap\"><div class=\"stream-skeleton\">Трансляция недоступна</div></div>'; } } catch(_){} try { finStore[mKey]=true; } catch(_){} await fullRefresh(); try { btn.style.display='none'; const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) statusEl.textContent='Матч завершен'; } catch(_){} } catch(e){ console.error('finish match error', e); try { window.showAlert?.(e?.message||'Ошибка','error'); } catch(_){} } finally { btn.disabled=false; btn.textContent=old; } }); topbar.appendChild(btn); } } catch(_){}
   // finish button delegated
   let adminCtx=null; try { if(window.MatchAdmin?.setup){ adminCtx=window.MatchAdmin.setup(match,{ mdPane }); } } catch(_){}
-  const back=document.getElementById('match-back'); if(back) back.onclick=()=>{ try { if(__topic && window.__WS_TOPIC_SUBS__ && window.realtimeUpdater) window.realtimeUpdater.unsubscribeTopic(__topic); } catch(_){} try { if(mdPane.__detailsPollCancel) mdPane.__detailsPollCancel(); } catch(_){} try { const statsHost=document.getElementById('md-pane-stats'); if(statsHost && statsHost.__statsPollCancel) statsHost.__statsPollCancel(); } catch(_){} homePane.innerHTML=''; awayPane.innerHTML=''; try { if(adminCtx) adminCtx.cleanup(); } catch(_){} try { if(liveScoreCtx) liveScoreCtx.cleanup(); } catch(_){} try { if(window.Streams?.resetOnLeave) window.Streams.resetOnLeave(mdPane); } catch(_){} try { const spLeak=document.getElementById('md-pane-stream'); if(spLeak) spLeak.classList.remove('fs-mode'); } catch(_){} try { document.body.classList.remove('allow-landscape'); } catch(_){} mdPane.style.display='none'; schedulePane.style.display=''; window.scrollTo({ top:0, behavior:'smooth' }); try { document.getElementById('ufo-subtabs').style.display=''; } catch(_){} };
+  const back=document.getElementById('match-back'); if(back) back.onclick=()=>{ try { if(__topic && window.__WS_TOPIC_SUBS__ && window.realtimeUpdater) window.realtimeUpdater.unsubscribeTopic(__topic); } catch(_){} try { if(mdPane.__onDetailsUpdate) document.removeEventListener('matchDetailsUpdate', mdPane.__onDetailsUpdate); } catch(_){} try { if(mdPane.__detailsPollCancel) mdPane.__detailsPollCancel(); } catch(_){} try { const statsHost=document.getElementById('md-pane-stats'); if(statsHost && statsHost.__statsPollCancel) statsHost.__statsPollCancel(); } catch(_){} homePane.innerHTML=''; awayPane.innerHTML=''; try { if(adminCtx) adminCtx.cleanup(); } catch(_){} try { if(liveScoreCtx) liveScoreCtx.cleanup(); } catch(_){} try { if(window.Streams?.resetOnLeave) window.Streams.resetOnLeave(mdPane); } catch(_){} try { const spLeak=document.getElementById('md-pane-stream'); if(spLeak) spLeak.classList.remove('fs-mode'); } catch(_){} try { document.body.classList.remove('allow-landscape'); } catch(_){} mdPane.style.display='none'; schedulePane.style.display=''; window.scrollTo({ top:0, behavior:'smooth' }); try { document.getElementById('ufo-subtabs').style.display=''; } catch(_){} };
   }
   window.MatchAdvanced = { openMatchScreen };
   try { window.openMatchScreen = openMatchScreen; } catch(_) {}

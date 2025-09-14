@@ -48,7 +48,7 @@ class ConfigValidator:
     @staticmethod
     def validate_environment():
         """Проверяет переменные окружения"""
-        required = ['DATABASE_URL', 'GOOGLE_CREDENTIALS_B64']
+        required = ['DATABASE_URL']
         missing = [var for var in required if not os.environ.get(var)]
         return len(missing) == 0, missing
     

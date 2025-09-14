@@ -137,7 +137,7 @@
 - Лидерборды и достижения
     - Серверные эндпоинты (ETag): `app.py` → `/api/leaderboard/*`, `/api/achievements` (legacy `/api/stats-table` → 410 GONE). `goal-assist` использует `etag_json` с core_filter для стабильного ETag (исключает updated_at).
     - Goal+Assist кэш: двухуровневый (in-memory + Redis namespace `leaderboards:goal-assist`, TTL = LEADER_TTL). Инвалидация вызывается при финализации матча (services/match_finalize.py) перед динамическим апдейтом per-team stats. WebSocket нотификация `leader-goal-assist` (reason=invalidate) может использоваться клиентом для ускоренного refetch.
-    - API `/api/achievements`: добавлено поле `best_tier` (наивысший достигнутый уровень), сохранены `all_targets` и `next_target` для клиентского прогресса.
+    - API `/api/achievements`: данные теперь полностью из БД. Перманентные уровни хранятся в таблице `user_achievements` и апдейТятся по принципу «только рост». В ответе присутствует `best_tier` (наивысший достигнутый уровень), а также `all_targets` и `next_target` для клиентского прогресса.
     - Клиентские вызовы: `static/js/profile.js` (leaderboards) и `static/js/profile-achievements.js`
     - Рендер достижений: бейдж (иконка/цвет) определяется по `best_tier`; список «Цели: <all_targets.join('/')>» показывается внутри секции «Подробнее» (скрыт в кратком описании); прогресс остаётся в краткой части как `value/next_target`.
     - Универсальная утилита SWR/ETag: `static/js/etag-fetch.js`
@@ -1119,4 +1119,19 @@ MVP шаги:
 - Снижение WS сообщений/мин на ≥30% при стабильном workload.
 - ETag cache hit ratio > 70% для основных GET.
 - Median generation time payload < 150ms для критичных endpoints.
+
+
+### Новые таблицы (актуализировано)
+
+- `user_achievements` — персистентные достижения пользователя (1:1 к `users`):
+    - best_*_tier: integer (0..3) для групп: streak, credits, level, invited, betcount, betwins, bigodds, markets, weeks
+    - *_unlocked_at: TIMESTAMPTZ — дата первого достижения любого уровня в группе (фиксируется при переходе 0 → 1+)
+    - created_at, updated_at
+    - Первичный ключ: user_id
+
+Алгоритм `/api/achievements`:
+- Вычисляет «текущие» уровни на основании user/ставок/приглашений
+- Делает upsert записи `user_achievements` (создаёт при отсутствии)
+- Если текущий tier > сохранённого best_* — повышает его и, если это первый переход (с 0), проставляет *_unlocked_at
+- В ответе для каждой группы отдаёт `best_tier` и текущий прогресс value/targets
 

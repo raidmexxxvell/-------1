@@ -366,16 +366,23 @@ def get_sheets_manager() -> OptimizedSheetsManager:
     global _sheets_manager
     if _sheets_manager is None:
         import os
-        
+        try:
+            from config import Config
+            mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+        except Exception:
+            mode = 'admin_import_only'
+        if mode == 'disabled':
+            raise RuntimeError('Google Sheets integration is disabled by configuration (SHEETS_MODE=disabled)')
+
         credentials_raw = os.environ.get('GOOGLE_SHEETS_CREDENTIALS', '')
         sheet_id = os.environ.get('SHEET_ID', '')
-        
+
         if not credentials_raw or not sheet_id:
             raise ValueError("Google Sheets credentials or sheet ID not configured")
-            
+
         credentials_data = json.loads(credentials_raw)
         max_qps = float(os.environ.get('SHEETS_MAX_QPS', '8.0'))  # Консервативный лимит
-        
+
         _sheets_manager = OptimizedSheetsManager(credentials_data, sheet_id, max_qps)
         
     return _sheets_manager

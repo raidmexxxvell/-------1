@@ -227,6 +227,24 @@ class RealtimeUpdater {
                     document.dispatchEvent(ev);
                 }
             } catch(_){}
+            // Обновление составов/событий: при изменении событий матча перезагружаем детали и оповещаем слушателей
+            try {
+                if ((payload.entity === 'match_events' || payload.entity === 'match_events_removed') && payload.home && payload.away) {
+                    if (typeof window.fetchMatchDetails === 'function') {
+                        // Быстрый рефетч только деталей открытого матча
+                        window.fetchMatchDetails({ home: payload.home, away: payload.away, forceFresh: true })
+                            .then(store => { try { if (store && (store.data||store.raw)) { const d = store.data || store.raw; this.refreshMatchDetails(d); } } catch(_){} })
+                            .catch(()=>{});
+                    } else {
+                        // Fallback: лёгкий запрос без ETag-утилиты
+                        const params = new URLSearchParams({ home: payload.home, away: payload.away });
+                        fetch(`/api/match-details?${params.toString()}`, { headers: { 'Cache-Control': 'no-store' } })
+                            .then(r => r.ok ? r.json() : Promise.reject(new Error('http '+r.status)))
+                            .then(d => { try { this.refreshMatchDetails(d); } catch(_){} })
+                            .catch(()=>{});
+                    }
+                }
+            } catch(_){}
             // Полный сброс: чистим локальные отметки голосований и восстанавливаем UI
             if (reason === 'full_reset') {
                 // 1) Удаляем локальные ключи голосования

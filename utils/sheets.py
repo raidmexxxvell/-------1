@@ -16,6 +16,14 @@ class SheetsManager:
         self.spreadsheet_id = spreadsheet_id
         self.client = None
         self.spreadsheet = None
+        # Respect global configuration: if Sheets are disabled globally, refuse to init
+        try:
+            from config import Config
+            mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+        except Exception:
+            mode = 'admin_import_only'
+        if mode == 'disabled':
+            raise RuntimeError('Google Sheets integration is disabled by configuration (SHEETS_MODE=disabled)')
         
         if credentials_b64:
             try:
@@ -221,11 +229,4 @@ class DataSyncManager:
             'source': 'sheets'
         }
     
-    def mirror_user_to_sheets(self, user_data: Dict[str, Any]) -> bool:
-        """Mirror user data to Sheets"""
-        try:
-            # Implementation for mirroring user data
-            return True
-        except Exception as e:
-            print(f"[ERROR] Failed to mirror user data: {e}")
-            return False
+    # mirror_user_to_sheets удалён: отказ от записи в Google Sheets

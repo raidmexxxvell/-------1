@@ -1395,10 +1395,7 @@ def api_betting_place():
         # --- КОНЕЦ НОВОГО КОДА ---
         db.refresh(db_user)
         db.refresh(bet)
-        try:
-            mirror_user_to_sheets(db_user)
-        except Exception as e:
-            app.logger.warning(f"Mirror after bet failed: {e}")
+        # Ранее здесь зеркалировались данные пользователя в Google Sheets (удалено)
         def _present_selection(market, sel_val):
             # Для рынка 1x2 возвращаем читабельное представление с названием команды
             if market == '1x2':
@@ -1737,6 +1734,33 @@ class MonthlyCreditBaseline(Base):
     credits_base = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+# Персистентные достижения пользователя (перманентные tier'ы и даты открытия)
+class UserAchievement(Base):
+    __tablename__ = 'user_achievements'
+    user_id = Column(Integer, primary_key=True)
+    # Наивысшие достигнутые уровни (0..3)
+    best_streak_tier = Column(Integer, default=0)
+    best_credits_tier = Column(Integer, default=0)
+    best_level_tier = Column(Integer, default=0)
+    best_invited_tier = Column(Integer, default=0)
+    best_betcount_tier = Column(Integer, default=0)
+    best_betwins_tier = Column(Integer, default=0)
+    best_bigodds_tier = Column(Integer, default=0)
+    best_markets_tier = Column(Integer, default=0)
+    best_weeks_tier = Column(Integer, default=0)
+    # Даты первого достижения уровней
+    streak_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    credits_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    level_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    invited_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    betcount_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    betwins_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    bigodds_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    markets_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    weeks_unlocked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class Snapshot(Base):
     __tablename__ = 'snapshots'
     key = Column(String(64), primary_key=True)
@@ -2002,11 +2026,7 @@ def api_shop_checkout():
                 error=None,
                 extra={'order_id': order.id}
             )
-            # Зеркалирование пользователя в Sheets best-effort
-            try:
-                mirror_user_to_sheets(u)
-            except Exception as e:
-                app.logger.warning(f"Mirror after checkout failed: {e}")
+            # Зеркалирование в Google Sheets удалено
             # Уведомление администратору о новом заказе (best-effort)
             try:
                 admin_id = os.environ.get('ADMIN_USER_ID', '')
@@ -2133,11 +2153,7 @@ def api_admin_order_set_status(order_id: int):
                     refund_amount = int(row.total or 0)
                     u.credits = int(u.credits or 0) + refund_amount
                     u.updated_at = datetime.now(timezone.utc)
-                    # Зеркалим пользователя в Sheets best-effort
-                    try:
-                        mirror_user_to_sheets(u)
-                    except Exception as _e:
-                        app.logger.warning(f"Mirror after refund failed: {_e}")
+                    # Ранее зеркалировались данные пользователя в Google Sheets (удалено)
             if prev != st:
                 row.status = st
                 row.updated_at = datetime.now(timezone.utc)
@@ -3700,6 +3716,12 @@ def _get_doc(sheet_id: str):
 
 def get_user_sheet():
     """Получает лист пользователей из Google Sheets"""
+    # Allow usage only if sheets mode permits mirror/read operations
+    from config import Config
+    mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+    if mode == 'disabled' or mode == 'admin_import_only':
+        # In admin_import_only mode we only allow the admin import endpoint to read the sheet
+        raise RuntimeError('Google Sheets access for user sheet is disabled in current configuration')
     client = get_google_client()
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
@@ -3709,6 +3731,10 @@ def get_user_sheet():
 
 def get_achievements_sheet():
     """Возвращает лист достижений, создаёт при отсутствии."""
+    from config import Config
+    mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+    if mode == 'disabled' or mode == 'admin_import_only':
+        raise RuntimeError('Google Sheets access for achievements is disabled in current configuration')
     client = get_google_client()
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
@@ -3756,6 +3782,10 @@ def get_achievements_sheet():
 
 def get_table_sheet():
     """Возвращает лист таблицы лиги 'ТАБЛИЦА'."""
+    from config import Config
+    mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+    if mode == 'disabled' or mode == 'admin_import_only':
+        raise RuntimeError('Google Sheets access for league table is disabled in current configuration')
     client = get_google_client()
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
@@ -4270,58 +4300,13 @@ def _compute_specials_odds(home: str, away: str, market: str) -> dict:
             return 1.10
     return { 'yes': to_odds(p_yes), 'no': to_odds(p_no) }
 
-def get_referrals_sheet():
-    """Возвращает лист 'referrals', создаёт при отсутствии."""
-    client = get_google_client()
-    sheet_id = os.environ.get('SHEET_ID')
-    if not sheet_id:
-        raise ValueError("SHEET_ID не установлен в переменных окружения")
-    doc = _get_doc(sheet_id)
-    try:
-        ws = doc.worksheet("referrals")
-    except gspread.exceptions.WorksheetNotFound:
-        ws = doc.add_worksheet(title="referrals", rows=1000, cols=6)
-        ws.update(values=[[
-            'user_id', 'referral_code', 'referrer_id', 'invited_count', 'created_at', 'updated_at'
-        ]], range_name='A1:F1')
-    return ws
-
-def mirror_referral_to_sheets(user_id: int, referral_code: str, referrer_id: int|None, invited_count: int, created_at_iso: str|None = None):
-    """Создаёт/обновляет строку в листе referrals."""
-    try:
-        ws = get_referrals_sheet()
-    except Exception as e:
-        app.logger.warning(f"Не удалось получить лист referrals: {e}")
-        return
-    try:
-        cell = ws.find(str(user_id), in_column=1)
-    except Exception:
-        cell = None
-    updated_at = datetime.now(timezone.utc).isoformat()
-    created_at = created_at_iso or updated_at
-    if not cell:
-        try:
-            _metrics_inc('sheet_writes', 1)
-            ws.append_row([
-                str(user_id), referral_code or '', str(referrer_id or ''), str(invited_count or 0), created_at, updated_at
-            ])
-        except Exception as e:
-            app.logger.warning(f"Не удалось добавить referral в лист: {e}")
-    else:
-        row = cell.row
-        try:
-            _metrics_inc('sheet_writes', 1)
-            ws.batch_update([
-                {'range': f'B{row}', 'values': [[referral_code or '']]},
-                {'range': f'C{row}', 'values': [[str(referrer_id or '')]]},
-                {'range': f'D{row}', 'values': [[str(invited_count or 0)]]},
-                {'range': f'F{row}', 'values': [[updated_at]]},
-            ])
-        except Exception as e:
-            app.logger.warning(f"Не удалось обновить referral в листе: {e}")
 
 def get_stats_sheet():
     """Возвращает лист статистики 'СТАТИСТИКА'."""
+    from config import Config
+    mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+    if mode == 'disabled' or mode == 'admin_import_only':
+        raise RuntimeError('Google Sheets access for stats is disabled in current configuration')
     client = get_google_client()
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
@@ -4348,37 +4333,6 @@ def get_rosters_sheet():
     return doc.worksheet("СОСТАВЫ")
 
 # Запись счёта матча в лист "РАСПИСАНИЕ ИГР" в колонки B (home) и D (away)
-def mirror_match_score_to_schedule(home: str, away: str, score_home: int|None, score_away: int|None) -> bool:
-    try:
-        if score_home is None or score_away is None:
-            return False
-        ws = get_schedule_sheet()
-        _metrics_inc('sheet_reads', 1)
-        rows = ws.get_all_values() or []
-        # Ищем первую строку с совпадением home в A и away в E (как в билдере расписания)
-        target_row_idx = None
-        for i, r in enumerate(rows, start=1):
-            a = (r[0] if len(r) > 0 else '').strip()
-            e = (r[4] if len(r) > 4 else '').strip()
-            if a == home and e == away:
-                target_row_idx = i
-                break
-        if target_row_idx is None:
-            return False
-        # Пишем как числа с USER_ENTERED, чтобы не было ведущего апострофа в ячейках
-        rng = f"B{target_row_idx}:D{target_row_idx}"
-        try:
-            # gspread Worksheet.update поддерживает value_input_option
-            ws.update(rng, [[int(score_home), '', int(score_away)]], value_input_option='USER_ENTERED')
-        except Exception:
-            # fallback, если вдруг не поддерживается — обычный update (может оставить строку)
-            ws.update(rng, [[int(score_home), '', int(score_away)]])
-        _metrics_inc('sheet_writes', 1)
-        return True
-    except Exception as e:
-        _metrics_note_rate_limit(e)
-        app.logger.warning(f"Mirror match score to schedule failed: {e}")
-        return False
 
 def get_user_achievements_row(user_id):
     """Читает или инициализирует строку достижений пользователя.
@@ -4492,63 +4446,6 @@ def _thresholds_from_targets(targets):
         return []
 
 # Вспомогательные функции
-def find_user_row(user_id):
-    """Ищет строку пользователя по user_id"""
-    sheet = get_user_sheet()
-    try:
-        cell = sheet.find(str(user_id), in_column=1)
-        return cell.row if cell else None
-    except gspread.exceptions.APIError as e:
-        app.logger.error(f"Ошибка API при поиске пользователя: {e}")
-        return None
-
-def mirror_user_to_sheets(db_user: 'User'):
-    """Создаёт или обновляет запись пользователя в Google Sheets по данным из БД."""
-    try:
-        sheet = get_user_sheet()
-    except Exception as e:
-        app.logger.warning(f"Не удалось получить лист users для зеркалирования: {e}")
-        return
-    row_num = find_user_row(db_user.user_id)
-    # Подготовка значений под формат таблицы
-    last_checkin_str = db_user.last_checkin_date.isoformat() if isinstance(db_user.last_checkin_date, date) else ''
-    created_at = (db_user.created_at or datetime.now(timezone.utc)).isoformat()
-    updated_at = (db_user.updated_at or datetime.now(timezone.utc)).isoformat()
-    if not row_num:
-        new_row = [
-            str(db_user.user_id),
-            db_user.display_name or 'Игрок',
-            db_user.tg_username or '',
-            str(db_user.credits or 0),
-            str(db_user.xp or 0),
-            str(db_user.level or 1),
-            str(db_user.consecutive_days or 0),
-            last_checkin_str,
-            str(db_user.badge_tier or 0),
-            '',  # badge_unlocked_at (не ведём в БД)
-            created_at,
-            updated_at
-        ]
-        try:
-            _metrics_inc('sheet_writes', 1)
-            sheet.append_row(new_row)
-        except Exception as e:
-            app.logger.warning(f"Не удалось добавить пользователя в лист users: {e}")
-    else:
-        try:
-            _metrics_inc('sheet_writes', 1)
-            sheet.batch_update([
-                {'range': f'B{row_num}', 'values': [[db_user.display_name or 'Игрок']]},
-                {'range': f'C{row_num}', 'values': [[db_user.tg_username or '']]},
-                {'range': f'D{row_num}', 'values': [[str(db_user.credits or 0)]]},
-                {'range': f'E{row_num}', 'values': [[str(db_user.xp or 0)]]},
-                {'range': f'F{row_num}', 'values': [[str(db_user.level or 1)]]},
-                {'range': f'G{row_num}', 'values': [[str(db_user.consecutive_days or 0)]]},
-                {'range': f'H{row_num}', 'values': [[last_checkin_str]]},
-                {'range': f'L{row_num}', 'values': [[updated_at]]}
-            ])
-        except Exception as e:
-            app.logger.warning(f"Не удалось обновить пользователя в листе users: {e}")
 
 def _to_int(val, default=0):
     try:
@@ -7553,10 +7450,7 @@ def api_match_status_set_live():
                 row.score_away = 0
                 row.updated_at = datetime.now(timezone.utc)
                 db.commit()
-                try:
-                    mirror_match_score_to_schedule(home, away, 0, 0)
-                except Exception:
-                    pass
+                # Ранее счёт синхронизировался в лист расписания Google Sheets (удалено)
             # Обновим статус матча как live (MatchFlags)
             try:
                 mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
@@ -8127,16 +8021,7 @@ def get_user():
                 return jsonify({'error': 'Недействительные данные'}), 401
             user_data = parsed['user']
         if SessionLocal is None:
-            row_num = find_user_row(user_data['id'])
-            sheet = get_user_sheet()
-            if not row_num:
-                new_row = [user_data['id'], user_data.get('first_name', 'User'), user_data.get('username',''), '1000','0','1','0','', '0','', datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()]
-                sheet.append_row(new_row)
-                row = new_row
-            else:
-                row = sheet.row_values(row_num)
-            row = list(row)+['']*(12-len(row))
-            return jsonify({'user_id': _to_int(row[0]), 'display_name': row[1], 'tg_username': row[2], 'credits': _to_int(row[3]), 'xp': _to_int(row[4]), 'level': _to_int(row[5],1), 'consecutive_days': _to_int(row[6]), 'last_checkin_date': row[7], 'badge_tier': _to_int(row[8]), 'created_at': row[10], 'updated_at': row[11]})
+            return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
         try:
             db_user = db.get(User, int(user_data['id']))
@@ -8257,11 +8142,7 @@ def api_referral():
             db.close()
         bot_username = os.environ.get('BOT_USERNAME', '').lstrip('@')
         link = f"https://t.me/{bot_username}?start={ref.referral_code}" if bot_username else f"(Укажите BOT_USERNAME в env) Код: {ref.referral_code}"
-        # Зеркалим в Google Sheets (лист referrals)
-        try:
-            mirror_referral_to_sheets(user_id, ref.referral_code, ref.referrer_id, invited_count, (ref.created_at or datetime.now(timezone.utc)).isoformat())
-        except Exception as e:
-            app.logger.warning(f"Mirror referral to sheets failed: {e}")
+        # Ранее зеркалировались рефералы в лист referrals Google Sheets (удалено)
         return _json_response({
             'code': ref.referral_code,
             'referral_link': link,
@@ -8390,16 +8271,7 @@ def update_name():
             return jsonify({'error': 'user_id и new_name обязательны'}), 400
         
         if SessionLocal is None:
-            # Fallback в лист (если нет БД)
-            row_num = find_user_row(user_id)
-            if not row_num:
-                return jsonify({'error': 'Пользователь не найден'}), 404
-            sheet = get_user_sheet()
-            sheet.batch_update([
-                {'range': f'B{row_num}', 'values': [[new_name]]},
-                {'range': f'L{row_num}', 'values': [[datetime.now(timezone.utc).isoformat()]]}
-            ])
-            return jsonify({'status': 'success', 'display_name': new_name})
+            return jsonify({'error': 'БД недоступна'}), 500
 
         db: Session = get_db()
         try:
@@ -8424,11 +8296,7 @@ def update_name():
         finally:
             db.close()
 
-        # Зеркалим в Google Sheets
-        try:
-            mirror_user_to_sheets(db_user)
-        except Exception as e:
-            app.logger.warning(f"Mirror user name to sheets failed: {e}")
+        # Ранее зеркалировались изменения имени в Google Sheets (удалено)
 
         return jsonify({'status': 'success', 'display_name': new_name})
     
@@ -8449,19 +8317,7 @@ def daily_checkin():
         user_id = parsed['user'].get('id')
 
         if SessionLocal is None:
-            # Fallback: старая логика через лист
-            row_num = find_user_row(user_id)
-            if not row_num:
-                return jsonify({'error': 'Пользователь не найден'}), 404
-            sheet = get_user_sheet()
-            row = sheet.row_values(row_num)
-            # Гарантируем длину
-            row = list(row) + [''] * (12 - len(row))
-            user = {
-                'user_id': _to_int(row[0]), 'display_name': row[1], 'tg_username': row[2],
-                'credits': _to_int(row[3]), 'xp': _to_int(row[4]), 'level': _to_int(row[5], 1),
-                'consecutive_days': _to_int(row[6]), 'last_checkin_date': row[7]
-            }
+            return jsonify({'error': 'БД недоступна'}), 500
         else:
             db: Session = get_db()
             try:
@@ -8521,15 +8377,7 @@ def daily_checkin():
             new_level += 1
 
         if SessionLocal is None:
-            # Обновление в Google Sheets (fallback)
-            sheet.batch_update([
-                {'range': f'H{row_num}', 'values': [[today.isoformat()]]},       # last_checkin_date
-                {'range': f'G{row_num}', 'values': [[str(new_consecutive)]]},    # consecutive_days
-                {'range': f'E{row_num}', 'values': [[str(new_xp)]]},             # xp
-                {'range': f'D{row_num}', 'values': [[str(new_credits)]]},        # credits
-                {'range': f'F{row_num}', 'values': [[str(new_level)]]},          # level
-                {'range': f'L{row_num}', 'values': [[datetime.now(timezone.utc).isoformat()]]}  # updated_at
-            ])
+            return jsonify({'error': 'БД недоступна'}), 500
         else:
             # Обновляем в БД
             db: Session = get_db()
@@ -8559,11 +8407,7 @@ def daily_checkin():
                 db.refresh(db_user)
             finally:
                 db.close()
-            # Зеркалим в Google Sheets
-            try:
-                mirror_user_to_sheets(db_user)
-            except Exception as e:
-                app.logger.warning(f"Mirror checkin to sheets failed: {e}")
+            # Ранее зеркалировались изменения прогресса в Google Sheets (удалено)
 
         # Инвалидируем кэш статуса чек-ина в helper
         _ETAG_HELPER_CACHE.pop(f"checkin:{user_id}", None)
@@ -8635,17 +8479,9 @@ def get_achievements():
             resp.headers['Cache-Control'] = 'private, max-age=60, stale-while-revalidate=300'
             return resp
 
-        # User fetch (DB or Sheets)
+        # User fetch (DB only)
         if SessionLocal is None:
-            row_num = find_user_row(user_id)
-            if not row_num:
-                return jsonify({'error': 'Пользователь не найден'}), 404
-            sheet = get_user_sheet()
-            row = sheet.row_values(row_num)
-            row = list(row) + [''] * (12 - len(row))
-            user = {
-                'user_id': _to_int(row[0]), 'display_name': row[1], 'tg_username': row[2], 'credits': _to_int(row[3]), 'xp': _to_int(row[4]), 'level': _to_int(row[5],1), 'consecutive_days': _to_int(row[6]), 'last_checkin_date': row[7], 'badge_tier': _to_int(row[8])
-            }
+            return jsonify({'error': 'БД недоступна'}), 500
         else:
             db = get_db();
             try:
@@ -8749,31 +8585,67 @@ def get_achievements():
             bet_stats['weeks_active'] = set(bet_stats['weeks_active'])
         betcount_tier=compute_tier(bet_stats['total'], betcount_thresholds); betwins_tier=compute_tier(bet_stats['won'], betwins_thresholds); bigodds_tier=compute_tier(bet_stats['max_win_odds'], bigodds_thresholds); markets_tier=compute_tier(len(bet_stats['markets_used']), markets_thresholds); weeks_tier=compute_tier(len(bet_stats['weeks_active']), weeks_thresholds)
 
-        ach_row, ach = get_user_achievements_row(user_id); updates=[]; now_iso=datetime.now(timezone.utc).isoformat()
-        def upd(cond, rng_val_pairs):
-            if cond:
-                for rng,val in rng_val_pairs: updates.append({'range': rng, 'values': [[val]]})
-        upd(credits_tier>ach['credits_tier'], [(f'B{ach_row}', str(credits_tier)), (f'C{ach_row}', now_iso)])
-        upd(level_tier>ach['level_tier'], [(f'D{ach_row}', str(level_tier)), (f'E{ach_row}', now_iso)])
-        upd(streak_tier>ach['streak_tier'], [(f'F{ach_row}', str(streak_tier)), (f'G{ach_row}', now_iso)])
-        upd(invited_tier>ach.get('invited_tier',0), [(f'H{ach_row}', str(invited_tier)), (f'I{ach_row}', now_iso)])
-        upd(betcount_tier>ach.get('betcount_tier',0), [(f'J{ach_row}', str(betcount_tier)), (f'K{ach_row}', now_iso)])
-        upd(betwins_tier>ach.get('betwins_tier',0), [(f'L{ach_row}', str(betwins_tier)), (f'M{ach_row}', now_iso)])
-        upd(bigodds_tier>ach.get('bigodds_tier',0), [(f'N{ach_row}', str(bigodds_tier)), (f'O{ach_row}', now_iso)])
-        upd(markets_tier>ach.get('markets_tier',0), [(f'P{ach_row}', str(markets_tier)), (f'Q{ach_row}', now_iso)])
-        upd(weeks_tier>ach.get('weeks_tier',0), [(f'R{ach_row}', str(weeks_tier)), (f'S{ach_row}', now_iso)])
-        if updates: get_achievements_sheet().batch_update(updates)
-
-        # Учитываем перманентно достигнутый tier из таблицы достижений (best_*_tier)
-        best_streak_tier = max(int(ach.get('streak_tier', 0) or 0), int(streak_tier or 0))
-        best_credits_tier = max(int(ach.get('credits_tier', 0) or 0), int(credits_tier or 0))
-        best_level_tier = max(int(ach.get('level_tier', 0) or 0), int(level_tier or 0))
-        best_invited_tier = max(int(ach.get('invited_tier', 0) or 0), int(invited_tier or 0))
-        best_betcount_tier = max(int(ach.get('betcount_tier', 0) or 0), int(betcount_tier or 0))
-        best_betwins_tier = max(int(ach.get('betwins_tier', 0) or 0), int(betwins_tier or 0))
-        best_bigodds_tier = max(int(ach.get('bigodds_tier', 0) or 0), int(bigodds_tier or 0))
-        best_markets_tier = max(int(ach.get('markets_tier', 0) or 0), int(markets_tier or 0))
-        best_weeks_tier = max(int(ach.get('weeks_tier', 0) or 0), int(weeks_tier or 0))
+        # Чтение/апсерт перманентных достижений из БД
+        best_streak_tier = best_credits_tier = best_level_tier = 0
+        best_invited_tier = best_betcount_tier = best_betwins_tier = 0
+        best_bigodds_tier = best_markets_tier = best_weeks_tier = 0
+        if SessionLocal is not None:
+            db = get_db()
+            try:
+                ach_row = db.get(UserAchievement, int(user_id))
+                now_dt = datetime.now(timezone.utc)
+                if not ach_row:
+                    ach_row = UserAchievement(user_id=int(user_id))
+                    db.add(ach_row)
+                # Рассчитываем текущие tier'ы
+                cur = {
+                    'streak': int(streak_tier or 0),
+                    'credits': int(credits_tier or 0),
+                    'level': int(level_tier or 0),
+                    'invited': int(invited_tier or 0),
+                    'betcount': int(betcount_tier or 0),
+                    'betwins': int(betwins_tier or 0),
+                    'bigodds': int(bigodds_tier or 0),
+                    'markets': int(markets_tier or 0),
+                    'weeks': int(weeks_tier or 0),
+                }
+                # Сопоставление полей модели
+                mapping = [
+                    ('streak', 'best_streak_tier', 'streak_unlocked_at'),
+                    ('credits', 'best_credits_tier', 'credits_unlocked_at'),
+                    ('level', 'best_level_tier', 'level_unlocked_at'),
+                    ('invited', 'best_invited_tier', 'invited_unlocked_at'),
+                    ('betcount', 'best_betcount_tier', 'betcount_unlocked_at'),
+                    ('betwins', 'best_betwins_tier', 'betwins_unlocked_at'),
+                    ('bigodds', 'best_bigodds_tier', 'bigodds_unlocked_at'),
+                    ('markets', 'best_markets_tier', 'markets_unlocked_at'),
+                    ('weeks', 'best_weeks_tier', 'weeks_unlocked_at'),
+                ]
+                changed = False
+                for key, tier_field, ts_field in mapping:
+                    current = cur[key]
+                    previous = int(getattr(ach_row, tier_field) or 0)
+                    if current > previous:
+                        setattr(ach_row, tier_field, current)
+                        if previous == 0:
+                            # Первая разблокировка — фиксируем дату
+                            setattr(ach_row, ts_field, now_dt)
+                        changed = True
+                if changed:
+                    ach_row.updated_at = now_dt
+                    db.commit()
+                # Присваиваем best_* для формирования ответа
+                best_streak_tier = int(ach_row.best_streak_tier or 0)
+                best_credits_tier = int(ach_row.best_credits_tier or 0)
+                best_level_tier = int(ach_row.best_level_tier or 0)
+                best_invited_tier = int(ach_row.best_invited_tier or 0)
+                best_betcount_tier = int(ach_row.best_betcount_tier or 0)
+                best_betwins_tier = int(ach_row.best_betwins_tier or 0)
+                best_bigodds_tier = int(ach_row.best_bigodds_tier or 0)
+                best_markets_tier = int(ach_row.best_markets_tier or 0)
+                best_weeks_tier = int(ach_row.best_weeks_tier or 0)
+            finally:
+                db.close()
 
         achievements=[]
         def add(group, best_tier, name_map, value, targets, icon_map):
@@ -10042,12 +9914,7 @@ def api_match_score_set():
                     pass
             except Exception:
                 pass
-            # Зеркалим счёт в Google Sheets (best-effort), как числовые значения
-            try:
-                if (row.score_home is not None) and (row.score_away is not None):
-                    mirror_match_score_to_schedule(home, away, int(row.score_home), int(row.score_away))
-            except Exception:
-                pass
+            # Ранее счёт зеркалировался в Google Sheets (удалено)
             
             # Логируем успешное изменение счёта
             try:
@@ -11124,6 +10991,16 @@ def api_admin_google_import_schedule():
 def api_admin_google_export_all():
     """Выгрузка актуальных данных из БД в Google Sheets (только админ)."""
     try:
+        from config import Config
+        mode = getattr(Config, 'SHEETS_MODE', 'admin_import_only')
+        if mode != 'enabled':
+            manual_log(
+                action="google_export_all",
+                description="Экспорт в Google Sheets заблокирован в конфигурации (SHEETS_MODE)",
+                result_status='skipped',
+                affected_data={'mode': mode}
+            )
+            return jsonify({'error': 'sheets_disabled', 'details': f'SHEETS_MODE={mode}'}), 403
         # Авторизация выполнена декоратором require_admin; используем g.user
         try:
             user_id = str(getattr(g, 'user', {}).get('id', 'admin'))

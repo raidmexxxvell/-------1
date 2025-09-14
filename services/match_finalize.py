@@ -143,11 +143,7 @@ def finalize_match_core(
                             etag_cache.pop(k, None)
                 except Exception:
                     pass
-            # Зеркало в Google Sheets (best-effort)
-            try:
-                mirror_score(home, away, int(score_h), int(score_a))
-            except Exception:
-                pass
+            # Ранее здесь зеркалировался счёт в Google Sheets (удалено)
     except Exception as e:
         try:
             logger.warning(f"finalize: results upsert failed {home} vs {away}: {e}")

@@ -16,6 +16,11 @@ class Config:
     # Google Sheets settings
     GOOGLE_CREDENTIALS_B64 = os.environ.get('GOOGLE_CREDENTIALS_B64', '')
     SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID', '')
+    # SHEETS_MODE:
+    #   - 'disabled' : completely disable any Sheets usage
+    #   - 'admin_import_only' : allow only admin import of schedule via dashboard (default)
+    #   - 'enabled' : full Sheets support (legacy behaviour)
+    SHEETS_MODE = os.environ.get('SHEETS_MODE', 'admin_import_only')
     
     # Telegram settings
     BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
@@ -74,14 +79,22 @@ class Config:
     def validate(cls) -> tuple[bool, list[str]]:
         """Validates required configuration"""
         required_vars = [
-            'DATABASE_URL',
-            'GOOGLE_CREDENTIALS_B64'
+            'DATABASE_URL'
         ]
         
         missing = []
         for var in required_vars:
             if not getattr(cls, var, None):
                 missing.append(var)
+
+        # If Sheets are enabled for any use, require credentials
+        try:
+            mode = getattr(cls, 'SHEETS_MODE', os.environ.get('SHEETS_MODE', 'admin_import_only'))
+        except Exception:
+            mode = 'admin_import_only'
+        if mode != 'disabled':
+            if not (getattr(cls, 'GOOGLE_CREDENTIALS_B64', '') or getattr(cls, 'SPREADSHEET_ID', '')):
+                missing.append('GOOGLE_CREDENTIALS_B64 or SPREADSHEET_ID')
         
         return len(missing) == 0, missing
     
