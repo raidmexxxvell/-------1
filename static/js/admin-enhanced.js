@@ -183,7 +183,8 @@
       const res = await fetch(`/api/admin/teams/${teamId}/roster`);
       const data = await res.json();
       if(!res.ok || data.error) throw new Error(data.error||'Ошибка загрузки состава');
-      const list = data.roster || [];
+      // API возвращает players (динамические team_stats_<id>), поддержим также старый ключ roster на всякий случай
+      const list = data.players || data.roster || [];
       list.forEach((p, idx)=>{
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -192,8 +193,8 @@
           <td>${p.last_name||''}</td>
           <td>${p.goals ?? 0}</td>
           <td>${p.assists ?? 0}</td>
-          <td>${p.yellow ?? 0}</td>
-          <td>${p.red ?? 0}</td>`;
+          <td>${(p.yellow_cards ?? p.yellow) ?? 0}</td>
+          <td>${(p.red_cards ?? p.red) ?? 0}</td>`;
         tbody.appendChild(tr);
       });
       if(status){ status.textContent = list.length? '' : 'Состав пуст'; if(!list.length) status.className='status-text'; }
@@ -373,6 +374,55 @@
     // Fill seasons picker initially (if exists)
     try { loadSeasonsIntoPicker(true); } catch(_) {}
 
+    // Logs: refresh button
+    const logsRefreshBtn = document.getElementById('admin-logs-refresh');
+    if (logsRefreshBtn) {
+      logsRefreshBtn.addEventListener('click', () => loadAdminLogs(1));
+    }
+
+    // Logs: clear filters button
+    const logsClearBtn = document.getElementById('admin-logs-clear-filters');
+    if (logsClearBtn) {
+      logsClearBtn.addEventListener('click', () => {
+        const actionEl = document.getElementById('logs-action-filter');
+        const statusEl = document.getElementById('logs-status-filter');
+        if (actionEl) actionEl.value = '';
+        if (statusEl) statusEl.value = '';
+        // выключаем автообновление метрик, если включено
+        const chk = document.getElementById('metrics-autorefresh');
+        if (chk && chk.checked) { chk.checked = false; }
+        // скрыть контролы метрик, перейти в обычный режим логов
+        toggleMetricsControls(false);
+        loadAdminLogs(1);
+      });
+    }
+
+    // Logs: live filter reactions
+    const actionFilter = document.getElementById('logs-action-filter');
+    if (actionFilter) {
+      actionFilter.addEventListener('input', debounce(() => loadAdminLogs(1), 400));
+    }
+    const statusFilter = document.getElementById('logs-status-filter');
+    if (statusFilter) {
+      statusFilter.addEventListener('change', () => loadAdminLogs(1));
+    }
+
+    // Logs: pagination controls
+    const prevBtn = document.getElementById('logs-prev-page');
+    if (prevBtn) {
+      prevBtn.addEventListener('click', () => {
+        const page = Math.max(1, (window.adminLogsCurrentPage || 1) - 1);
+        loadAdminLogs(page);
+      });
+    }
+    const nextBtn = document.getElementById('logs-next-page');
+    if (nextBtn) {
+      nextBtn.addEventListener('click', () => {
+        const total = window.adminLogsTotalPages || 1;
+        const page = Math.min(total, (window.adminLogsCurrentPage || 1) + 1);
+        loadAdminLogs(page);
+      });
+    }
   }
 
   function createMatchElement(match) {
