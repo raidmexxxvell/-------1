@@ -583,9 +583,12 @@
   const hImg = document.createElement('img'); hImg.className='logo'; hImg.alt = m.home || ''; hImg.setAttribute('data-team-name', m.home || ''); try { hImg.loading='lazy'; hImg.decoding='async'; } catch(_) {} loadTeamLogo(hImg, m.home || '');
         const hName = document.createElement('div'); hName.className='team-name'; hName.setAttribute('data-team-name', m.home || ''); hName.textContent = withTeamCount(m.home || '');
         home.append(hImg, hName);
-        const score = document.createElement('div'); score.className='score';
-        const sH = (m.score_home || '').toString().trim(); const sA = (m.score_away || '').toString().trim();
-        score.textContent = (sH && sA) ? `${sH} : ${sA}` : '— : —';
+  const score = document.createElement('div'); score.className='score';
+  const hasSh = (m.score_home !== undefined && m.score_home !== null && m.score_home !== '');
+  const hasSa = (m.score_away !== undefined && m.score_away !== null && m.score_away !== '');
+  const sH = hasSh ? String(m.score_home) : '';
+  const sA = hasSa ? String(m.score_away) : '';
+  score.textContent = (hasSh && hasSa) ? `${sH} : ${sA}` : '— : —';
         const away = document.createElement('div'); away.className='team away';
   const aImg = document.createElement('img'); aImg.className='logo'; aImg.alt = m.away || ''; aImg.setAttribute('data-team-name', m.away || ''); try { aImg.loading='lazy'; aImg.decoding='async'; } catch(_) {} loadTeamLogo(aImg, m.away || '');
         const aName = document.createElement('div'); aName.className='team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');
