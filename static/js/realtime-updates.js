@@ -220,6 +220,13 @@ class RealtimeUpdater {
         try {
             if (!payload || typeof payload !== 'object') return;
             const reason = payload.reason || payload.change_type || '';
+            // Точечный триггер обновления статистики матча по WS (без ожидания polling)
+            try {
+                if (payload.entity === 'match_stats' && payload.home && payload.away) {
+                    const ev = new CustomEvent('matchStatsRefresh', { detail: { home: payload.home, away: payload.away } });
+                    document.dispatchEvent(ev);
+                }
+            } catch(_){}
             // Полный сброс: чистим локальные отметки голосований и восстанавливаем UI
             if (reason === 'full_reset') {
                 // 1) Удаляем локальные ключи голосования
