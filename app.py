@@ -1172,7 +1172,7 @@ def _pseudo_user_id() -> int:
 @rate_limit(max_requests=5, time_window=60)  # 5 ставок за минуту
 @validate_input(
     initData={'type':'string','required':True,'min_length':1},
-    tour={'type':'string','required':True,'min_length':1},
+    tour={'type':'string','required':False,'min_length':1},
     home={'type':'team_name','required':True},
     away={'type':'team_name','required':True},
     market={'type':'string','required':True,'min_length':1},
@@ -1240,6 +1240,17 @@ def api_betting_place():
                 dbx.close()
         except Exception:
             tours = []
+    # Если клиент не передал tour, попробуем найти его по расписанию
+    if tour is None:
+        try:
+            for t in tours:
+                for m in t.get('matches', []) or []:
+                    if (m.get('home') == home and m.get('away') == away):
+                        if t.get('tour') is not None:
+                            tour = int(t.get('tour'))
+                        raise StopIteration
+        except StopIteration:
+            pass
     match_dt = None
     found = False
     for t in tours:
@@ -9346,7 +9357,13 @@ def api_betting_tours():
                             except RuntimeError:
                                 pass
                             else:
-                                return payload
+                                # Не возвращаем пустые туры: если после фильтрации нет ни одного матча — перестраиваем on-demand
+                                try:
+                                    has_any = any((t.get('matches') or []) for t in tours)
+                                except Exception:
+                                    has_any = False
+                                if has_any:
+                                    return payload
 
                         except Exception:
                             # Если что-то пошло не так — продолжим к on-demand сборке
