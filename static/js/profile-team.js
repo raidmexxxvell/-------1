@@ -28,6 +28,46 @@
     return { data, headerUpdatedAt };
   }
 
+  async function fetchRoster(teamName){
+    const key = `team:roster:${(teamName||'').toLowerCase()}`;
+    // In-memory cache для мгновенного повторного показа
+    window.__teamRosterCache = window.__teamRosterCache || {};
+    const cached = window.__teamRosterCache[key];
+    const startFetch = (window.fetchEtag||((u)=>fetch(u).then(r=>r.json().then(j=>({data:j})))))(
+      `/api/team/roster`, {
+        cacheKey: key,
+        swrMs: 60_000,
+        params: { name: teamName }
+      }
+    );
+    const p = startFetch.then(({data})=>{
+      if(data && !data.error){ window.__teamRosterCache[key] = { ts: Date.now(), data }; }
+      return data;
+    });
+    return cached ? Promise.resolve(cached.data) : p;
+  }
+
+  function renderRoster(host, payload){
+    if(!host) return;
+    host.innerHTML='';
+    const list = Array.isArray(payload?.players)? payload.players: [];
+    if(!list.length){ host.innerHTML = '<div style="padding:12px; color: var(--gray);">Состав пуст</div>'; return; }
+    const table = document.createElement('table'); table.className='team-roster-table'; table.style.width='100%'; table.style.borderCollapse='collapse';
+    const thead=document.createElement('thead'); const trh=document.createElement('tr');
+    const headers=['Игрок','Голы','Пасы','ЖК','КК'];
+    headers.forEach(h=>{ const th=document.createElement('th'); th.textContent=h; th.style.padding='6px 8px'; th.style.fontWeight='600'; th.style.fontSize='12px'; th.style.textAlign='left'; th.style.background='var(--surface-alt,rgba(255,255,255,0.05))'; th.style.borderBottom='1px solid rgba(255,255,255,0.15)'; trh.appendChild(th); });
+    thead.appendChild(trh); table.appendChild(thead);
+    const tbody=document.createElement('tbody');
+    list.forEach(p=>{
+      const tr=document.createElement('tr'); tr.style.borderBottom='1px solid rgba(255,255,255,0.07)';
+      const full = `${p.first_name||''} ${p.last_name||''}`.trim();
+      const cells=[full, p.goals??0, p.assists??0, (p.yellow_cards??0), (p.red_cards??0)];
+      cells.forEach((c,i)=>{ const td=document.createElement('td'); td.style.padding='6px 8px'; td.style.fontSize='12px'; td.style.textAlign = i===0?'left':'center'; td.textContent=c; tr.appendChild(td); });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody); host.appendChild(table);
+  }
+
   function renderOverview(host, payload){
     if (!host) return;
     host.innerHTML = '';
@@ -308,7 +348,20 @@
         const rs = document.getElementById('team-pane-roster');
         if (key === 'overview'){ ov.style.display=''; mt.style.display='none'; rs.style.display='none'; }
         else if (key === 'matches'){ ov.style.display='none'; mt.style.display=''; rs.style.display='none'; }
-        else { ov.style.display='none'; mt.style.display='none'; rs.style.display=''; }
+        else {
+          ov.style.display='none'; mt.style.display='none'; rs.style.display='';
+          // Lazy load roster один раз
+          if(!rs.getAttribute('data-loaded')){
+            rs.innerHTML = '<div style="padding:12px; color: var(--gray);">Загружаю состав...</div>';
+            const teamName = (document.getElementById('team-name')||{}).textContent || '';
+            fetchRoster(teamName).then(data=>{
+              if(data && !data.error){ renderRoster(rs, data); rs.setAttribute('data-loaded','1'); }
+              else rs.innerHTML = '<div style="padding:12px; color: var(--danger);">Не удалось загрузить</div>';
+              // SWR refresh параллельно (второй вызов fetchRoster отдаст cache сразу)
+              setTimeout(()=>{ fetchRoster(teamName).then(fresh=>{ if(fresh && !fresh.error) renderRoster(rs,fresh); }); }, 10);
+            }).catch(()=>{ rs.innerHTML = '<div style="padding:12px; color: var(--danger);">Ошибка загрузки</div>'; });
+          }
+        }
       });
     });
   }

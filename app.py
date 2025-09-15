@@ -7251,6 +7251,95 @@ def api_admin_team_roster(team_id):
     finally:
         db.close()
 
+# ---------------- Public Team Roster (aggregated stats) -----------------
+@app.route('/api/team/roster', methods=['GET'])
+def api_team_roster_public():
+    """Публичный состав команды с накопленной статистикой (аналог admin roster, но без авторизации).
+    Query params: ?id=123 | ?name=Команда
+    Ответ кэшируется через etag_json: ключ "team-roster:{id|name_lower}".
+    Поля players: first_name,last_name,goals,assists,yellow_cards,red_cards,matches_played,goal_actions,last_updated.
+    Если БД недоступна (SessionLocal is None) возвращаем 503.
+    """
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 503
+
+    raw_id = (request.args.get('id') or '').strip()
+    raw_name = (request.args.get('name') or '').strip()
+
+    def _build():
+        db = get_db()
+        try:
+            from database.database_models import Team
+            team = None
+            if raw_id and raw_id.isdigit():
+                team = db.query(Team).filter(Team.id==int(raw_id), Team.is_active==True).first()
+            if not team and raw_name:
+                team = db.query(Team).filter(func.lower(Team.name)==func.lower(raw_name), Team.is_active==True).first()
+            if not team:
+                return {'error':'Team not found'}
+            # ensure dynamic stats table exists + init
+            try:
+                _ensure_team_stats_table(team.id, db.get_bind())
+                _init_team_stats_if_empty(team.id, team.name, db)
+            except Exception as e:
+                app.logger.error(f"Public roster ensure/init failed team_id={team.id}: {e}")
+                return {'error':'Failed to init team stats'}
+            players = _fetch_team_stats(team.id, db)
+            # updated_at для etag: берем максимальный last_updated игроков
+            upd = None
+            try:
+                for p in players:
+                    lu = p.get('last_updated')
+                    if lu and (not upd or str(lu) > str(upd)):
+                        upd = lu
+            except Exception:
+                pass
+            return {
+                'team': {'id': team.id, 'name': team.name},
+                'players': players,
+                'total': len(players),
+                'updated_at': upd
+            }
+        finally:
+            try: db.close()
+            except Exception: pass
+
+    # core_filter исключает updated_at чтобы ETag зависел только от набора игроков и их статистики
+    def _core_filter(payload):
+        if not payload or 'players' not in payload:
+            return payload
+        try:
+            return {
+                'team': payload.get('team'),
+                'players': [
+                    {
+                        'id': p.get('id'),
+                        'first_name': p.get('first_name'),
+                        'last_name': p.get('last_name'),
+                        'goals': p.get('goals'),
+                        'assists': p.get('assists'),
+                        'yellow_cards': p.get('yellow_cards'),
+                        'red_cards': p.get('red_cards'),
+                        'matches_played': p.get('matches_played'),
+                        'goal_actions': p.get('goal_actions')
+                    } for p in (payload.get('players') or [])
+                ],
+                'total': payload.get('total')
+            }
+        except Exception:
+            return payload
+
+    # Определяем ключ (если нет id, используем нормализованное имя)
+    cache_key = None
+    if raw_id and raw_id.isdigit():
+        cache_key = f"team-roster:id:{raw_id}"
+    elif raw_name:
+        cache_key = f"team-roster:name:{raw_name.lower()}"
+    else:
+        return jsonify({'error':'Missing id or name'}), 400
+
+    return etag_json(cache_key, _build, cache_ttl=120, max_age=120, swr=300, core_filter=_core_filter, cache_visibility='public')
+
 @app.route('/api/match/status/get', methods=['GET'])
 def api_match_status_get():
     """Авто: scheduled/soon/live/finished по времени начала матча.

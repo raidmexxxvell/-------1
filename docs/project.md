@@ -527,6 +527,7 @@ class Tournament(Base):
     - goals / assists / yellow_cards / red_cards из событий матча
     - UPSERT через `ON CONFLICT(player_id)` (наращивание счётчиков)
 - Попытка сопоставить `player_id` выполняется через поиск в `team_roster` по (team, lower(player)); если не найдено — теперь автоматически ДОБАВЛЯЕМ запись в `team_roster` (раньше: hash fallback; УСТРАНЕНО) и используем реальный id.
+- Публичный эндпоинт `/api/team/roster?name=<team>` (или `?id=<id>`) — read-only состав для публичной страницы команды. Кэш: `etag_json` (ключ `team-roster:name:<lower>` / `team-roster:id:<id>`, `max-age=120, stale-while-revalidate=300`). ETag ядро исключает `updated_at` (минимум лишних пересборок). Ответ: `{team, players:[{first_name,last_name,goals,assists,yellow_cards,red_cards,matches_played,goal_actions,last_updated}], total}`. Клиент (вкладка «Состав») lazy-load + in-memory cache `window.__teamRosterCache`.
 - Плюсы подхода: изоляция обновлений, отсутствие изменения глобальной схемы; Минусы: усложнённая аналитика (множественные таблицы) — запланировано перепроектирование при переходе к нормализованным `players`
 - Цель: уменьшить размер `app.py`, подготовить почву для внедрения метрик (latency, failures) и повторного использования снапшот‑логики в будущих модулях (e.g. leaderboard precompute или новостные дайджесты).
 - Изменений в API контракте и схемах БД нет. Идемпотентные флаги `lineup_counted` и транзакционные границы сохранены.
