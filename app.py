@@ -6496,9 +6496,19 @@ def _build_betting_tours_payload():
 def _build_odds_fields(home: str, away: str) -> dict:
     """Формирует компактный snapshot коэффициентов/рынков для одного матча.
     Используется для отправки частичных обновлений через WebSocket (entity='odds').
+
+    ВАЖНО: учитывает влияние голосований, пытаясь определить date_key матча
+    через _get_match_datetime (если доступно).
     """
     try:
-        dk = None  # date_key для влияния голосования, если потребуется — вычислим по match meta
+        # Пытаемся определить дату матча, чтобы учесть голосования при расчёте odds
+        dk = None
+        try:
+            dt = _get_match_datetime(home, away)
+            if dt:
+                dk = dt.date().isoformat()
+        except Exception:
+            dk = None
         odds_main = _compute_match_odds(home, away, dk)
         totals = []
         for ln in (3.5, 4.5, 5.5):
@@ -9020,21 +9030,29 @@ def api_vote_match():
                 # --- НОВОЕ: после успешного голоса — пересчёт и WS оповещение коэффициентов ---
                 try:
                     ws_manager = current_app.config.get('websocket_manager')
+                    inv = globals().get('invalidator')
+                    # bump версии коэффициентов (голос влияет на odds)
+                    new_ver = _bump_odds_version(home, away)
+                    # Полный снэпшот рынков (1x2, totals, specials)
+                    odds_fields = _build_odds_fields(home, away) or {}
+                    odds_fields['odds_version'] = new_ver
+                    payload = {
+                        'entity': 'odds',
+                        'id': { 'home': home, 'away': away, 'date': (date_key or '') },
+                        'fields': odds_fields
+                    }
+                    match_id_str = f"{home}_{away}_{date_key or ''}"
+                    # Локальная доставка через WS (если доступно)
                     if ws_manager:
-                        # bump версии коэффициентов (голос влияет на odds)
-                        new_ver = _bump_odds_version(home, away)
-                        # Полный снэпшот рынков (1x2, totals, specials)
-                        odds_fields = _build_odds_fields(home, away) or {}
-                        odds_fields['odds_version'] = new_ver
-                        payload = {
-                            'entity': 'odds',
-                            'id': { 'home': home, 'away': away, 'date': (date_key or '') },
-                            'fields': odds_fields
-                        }
-                        match_id_str = f"{home}_{away}_{date_key or ''}"
-                        # Батчинг 500 мс после голосования
                         ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=500)
                         ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=500)
+                    # Меж-инстансовая доставка через Redis topic канал (best-effort)
+                    if inv:
+                        try:
+                            inv.publish_topic(f"match_odds_{match_id_str}", 'data_patch', payload, priority=0)
+                            inv.publish_topic('predictions_page', 'data_patch', payload, priority=0)
+                        except Exception:
+                            pass
                 except Exception as _e:
                     app.logger.error(f"vote ws error: {_e}")
                 return jsonify({'status': 'ok'})
