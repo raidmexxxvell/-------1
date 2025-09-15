@@ -7381,58 +7381,29 @@ def api_match_status_get():
             pass
         return resp
     if not dt:
-        # Fallback на ручной флаг, если расписания нет, но только если флаг относится к актуальному матчу (по времени)
+        # Fallback на явный статус из основной таблицы matches, если нет расписания
         if SessionLocal is not None:
             try:
                 db = get_db()
                 try:
-                    mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
-                    if mf and mf.status in ('live','finished'):
-                        try:
-                            anchor = (mf.live_started_at or mf.updated_at)
-                            if anchor is not None:
-                                # Приводим к локальному времени тем же смещением tz_m (если aware — учитываем смещение)
-                                local_anchor = anchor + timedelta(minutes=tz_m) if getattr(anchor, 'tzinfo', None) is not None else anchor
-                                # Используем целевую дату: из параметра date (если задан) иначе сегодня по локальному смещению
-                                try:
-                                    target_date_local = datetime.fromisoformat(date_key).date() if date_key else (datetime.now() + timedelta(minutes=tz_m)).date()
-                                except Exception:
-                                    target_date_local = (datetime.now() + timedelta(minutes=tz_m)).date()
-                                # Считаем релевантным, если совпадает локальная дата или якорь вблизи текущего времени (±130 мин)
-                                if (local_anchor.date() == target_date_local) or (abs(((datetime.now() + timedelta(minutes=tz_m)) - local_anchor).total_seconds()) <= 130*60):
-                                    return _nostore({'status': mf.status, 'soon': False, 'live_started_at': (mf.live_started_at or datetime.now(timezone.utc)).isoformat() if mf.status=='live' else ''})
-                        except Exception:
-                            pass
+                    from utils.match_status import get_match_status_by_names
+                    st = get_match_status_by_names(db, home, away)
+                    if st in ('live','finished'):
+                        return _nostore({'status': st, 'soon': False, 'live_started_at': '' if st!='live' else (datetime.now(timezone.utc)).isoformat()})
                 finally:
                     db.close()
             except Exception:
                 pass
         return _nostore({'status':'scheduled', 'soon': False, 'live_started_at': ''})
-    # Приоритет ручного флага 'finished' только если он относится к ЭТОМУ матчу (по дате)
+    # Приоритет явного статуса 'finished' из matches, если он установлен для найденной пары
     if SessionLocal is not None:
         try:
             db = get_db()
             try:
-                mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
-                if mf and mf.status == 'finished':
-                    try:
-                        # Сопоставляем дату обновления/старта live с датой матча в локальном времени (МСК)
-                        anchor = (mf.live_started_at or mf.updated_at)
-                        if anchor is not None:
-                            # Приводим к локальному времени тем же смещением tz_m
-                            local_anchor = anchor + timedelta(minutes=tz_m) if getattr(anchor, 'tzinfo', None) is not None else anchor
-                            same_match_day = (local_anchor.date() == dt.date())
-                            # Дополнительно сверяемся с параметром date, если он задан
-                            if not same_match_day and request.args.get('date'):
-                                try:
-                                    same_match_day = (local_anchor.date() == datetime.fromisoformat(request.args.get('date')).date())
-                                except Exception:
-                                    same_match_day = False
-                            if same_match_day:
-                                return _nostore({'status':'finished', 'soon': False, 'live_started_at': ''})
-                    except Exception:
-                        # Если не удалось сопоставить — игнорируем старые флаги
-                        pass
+                from utils.match_status import get_match_status_by_names
+                st = get_match_status_by_names(db, home, away)
+                if st == 'finished':
+                    return _nostore({'status':'finished', 'soon': False, 'live_started_at': ''})
             finally:
                 db.close()
         except Exception:
@@ -7451,29 +7422,15 @@ def api_match_status_get():
         live_started_at = dt.isoformat()
     if status is not None:
         return _nostore({'status': status, 'soon': bool(soon), 'live_started_at': live_started_at})
-    # Если dt есть, но мы не попали в окна — проверим ручной флаг на live, относящийся к ЭТОМУ матчу
+    # Если dt есть, но мы не попали в окна — проверим явный статус live в matches для этой пары
     if SessionLocal is not None:
         try:
             db = get_db()
             try:
-                mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
-                if mf and mf.status == 'live':
-                    ok = False
-                    try:
-                        la = mf.live_started_at
-                        if la is not None:
-                            local_la = la + timedelta(minutes=tz_m) if getattr(la, 'tzinfo', None) is not None else la
-                            # Допускаем совпадение даты или попадание в разумное окно вокруг матча
-                            if local_la.date() == dt.date():
-                                ok = True
-                            else:
-                                # Fallback: если сейчас вблизи dt (±2ч10м), то тоже принимаем live
-                                if abs((now - dt).total_seconds()) <= (130*60):
-                                    ok = True
-                    except Exception:
-                        ok = False
-                    if ok:
-                        return _nostore({'status':'live', 'soon': False, 'live_started_at': (mf.live_started_at or datetime.now(timezone.utc)).isoformat()})
+                from utils.match_status import get_match_status_by_names
+                st = get_match_status_by_names(db, home, away)
+                if st == 'live':
+                    return _nostore({'status':'live', 'soon': False, 'live_started_at': dt.isoformat()})
             finally:
                 db.close()
         except Exception:
@@ -7510,21 +7467,15 @@ def api_match_status_set_live():
                 row.updated_at = datetime.now(timezone.utc)
                 db.commit()
                 # Ранее счёт синхронизировался в лист расписания Google Sheets (удалено)
-            # Обновим статус матча как live (MatchFlags)
+            # Обновим статус матча как live в основной таблице matches (+зеркало в MatchFlags на переходный период)
             try:
-                mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
-                now = datetime.now(timezone.utc)
-                if not mf:
-                    mf = MatchFlags(home=home, away=away, status='live', live_started_at=now, updated_at=now)
-                    db.add(mf)
-                else:
-                    mf.status = 'live'
-                    if not mf.live_started_at:
-                        mf.live_started_at = now
-                    mf.updated_at = now
-                db.commit()
-            except Exception:
-                pass
+                from utils.match_status import set_match_status_by_names
+                ok, err = set_match_status_by_names(db, home, away, 'live', mirror_to_flags=True)
+                if not ok and err:
+                    app.logger.warning(f"set-live: failed to set matches.status: {err}")
+            except Exception as _e:
+                try: app.logger.warning(f"set-live: helper error: {_e}")
+                except Exception: pass
             return _json_response({'ok': True, 'status': 'ok', 'score_home': row.score_home, 'score_away': row.score_away})
         finally:
             db.close()
@@ -7571,19 +7522,14 @@ def api_match_status_live():
                         continue
                     if dtm <= now < dtm + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
                         items.append({ 'home': m.get('home',''), 'away': m.get('away',''), 'live_started_at': dtm.isoformat() })
-            # Дополнительно включаем матчи, помеченные как live в таблице MatchFlags
+            # Дополнительно включаем матчи, помеченные как live в основной таблице matches
             try:
-                live_flags = db.query(MatchFlags).filter(MatchFlags.status == 'live').all()
-                # Индекс для уникальности по паре команд
+                from utils.match_status import list_live_matches
                 seen = {(it.get('home',''), it.get('away','')) for it in items}
-                for lf in live_flags:
-                    key = (lf.home or '', lf.away or '')
+                for h, a, live_iso in list_live_matches(db):
+                    key = (h or '', a or '')
                     if key not in seen:
-                        items.append({
-                            'home': key[0],
-                            'away': key[1],
-                            'live_started_at': (lf.live_started_at or datetime.now(timezone.utc)).isoformat()
-                        })
+                        items.append({'home': key[0], 'away': key[1], 'live_started_at': live_iso or (datetime.now(timezone.utc)).isoformat()})
                         seen.add(key)
             except Exception:
                 pass
@@ -9431,25 +9377,40 @@ def api_betting_tours():
                                         return False
                                 return any_match
 
-                            # Возможность учитывать статус матча из таблицы флагов
+                            # Возможность учитывать статус матча из основной таблицы (приоритет) и флагов (переходный период)
                             def _apply_lock(m, dt):
                                 lock = False
                                 if dt is not None:
                                     lock = (dt - timedelta(minutes=BET_LOCK_AHEAD_MINUTES)) <= now_local
+                                # New: read matches.status
                                 try:
-                                    row = db.query(MatchFlags).filter(
-                                        MatchFlags.home==(m.get('home') or ''),
-                                        MatchFlags.away==(m.get('away') or '')
-                                    ).first()
-                                    if row and row.status in ('live','finished') and dt is not None:
-                                        if row.status == 'live':
-                                            if dt - timedelta(minutes=10) <= now_local < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                                lock = True
-                                        elif row.status == 'finished':
-                                            if now_local >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                                lock = True
+                                    from utils.match_status import get_match_status_by_names
+                                    st = get_match_status_by_names(db, (m.get('home') or ''), (m.get('away') or ''))
                                 except Exception:
-                                    pass
+                                    st = None
+                                if st in ('live','finished') and dt is not None:
+                                    if st == 'live':
+                                        if dt - timedelta(minutes=10) <= now_local < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                            lock = True
+                                    elif st == 'finished':
+                                        if now_local >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                            lock = True
+                                # Legacy fallback: MatchFlags during transition
+                                if st is None:
+                                    try:
+                                        row = db.query(MatchFlags).filter(
+                                            MatchFlags.home==(m.get('home') or ''),
+                                            MatchFlags.away==(m.get('away') or '')
+                                        ).first()
+                                        if row and row.status in ('live','finished') and dt is not None:
+                                            if row.status == 'live':
+                                                if dt - timedelta(minutes=10) <= now_local < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                                    lock = True
+                                            elif row.status == 'finished':
+                                                if now_local >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                                    lock = True
+                                    except Exception:
+                                        pass
                                 m['lock'] = bool(lock)
 
                             # Пройдём по турам и матчам: фильтрация начавшихся и обновление odds/lock
@@ -14780,8 +14741,17 @@ def api_match_settle():
             except Exception as fin_err:  # noqa: F841
                 try: app.logger.error(f"finalize after settle failed: {fin_err}")
                 except Exception: pass
-            # Помечаем матч как завершённый (MatchFlags.status='finished') чтобы UI перестал считать его live по окну времени
+            # Помечаем матч как завершённый: сначала основная таблица matches.status, затем (временно) MatchFlags
             try:
+                try:
+                    from utils.match_status import set_match_status_by_names
+                    ok, err = set_match_status_by_names(db, home, away, 'finished', mirror_to_flags=True)
+                    if not ok and err:
+                        app.logger.warning(f"settle: failed to set matches.status finished: {err}")
+                except Exception as _e:
+                    try: app.logger.warning(f"settle: helper error: {_e}")
+                    except Exception: pass
+                # Legacy mirror (kept for compatibility during transition)
                 mf = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
                 now_utc = datetime.now(timezone.utc)
                 if not mf:

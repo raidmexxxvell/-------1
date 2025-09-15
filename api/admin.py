@@ -88,17 +88,24 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
 
             db = get_db()
             try:
-                row = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
-                old_status = row.status if row else 'not_exists'
-                affected_entities['old_status'] = old_status
-                
-                if not row:
-                    row = MatchFlags(home=home, away=away, status=status)
-                    db.add(row)
-                else:
-                    row.status = status
-                    row.updated_at = datetime.now(timezone.utc)
-                db.commit()
+                # Determine old_status from primary table if possible (for audit)
+                old_status = 'unknown'
+                try:
+                    from utils.match_status import get_match_status_by_names
+                    cur = get_match_status_by_names(db, home, away)
+                    if cur:
+                        old_status = cur
+                except Exception:
+                    pass
+                # Primary source of truth: update matches.status
+                try:
+                    from utils.match_status import set_match_status_by_names
+                    ok, err = set_match_status_by_names(db, home, away, status, mirror_to_flags=True)
+                    affected_entities['matches_status_set'] = bool(ok)
+                    if not ok:
+                        affected_entities['matches_status_error'] = err
+                except Exception as he:
+                    affected_entities['matches_status_error'] = str(he)
 
                 # Обновляем снапшот betting-tours при изменении статуса
                 try:
@@ -133,6 +140,7 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                         if match_obj:
                             if match_obj.status != 'finished':
                                 match_obj.status = 'finished'
+                                match_obj.updated_at = datetime.now(timezone.utc)
                                 affected_entities['match_status_updated'] = True
                             # Здесь идет остальная логика...
                                 # чтобы перенести в расширенную модель как итоговый
