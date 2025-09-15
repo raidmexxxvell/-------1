@@ -1252,7 +1252,6 @@ def api_betting_place():
         except StopIteration:
             pass
     match_dt = None
-    match_date_key = None  # YYYY-MM-DD для влияния голосов, даже если время неизвестно
     found = False
     for t in tours:
         if tour is not None and t.get('tour') != tour:
@@ -1263,10 +1262,6 @@ def api_betting_place():
                 try:
                     if m.get('datetime'):
                         match_dt = datetime.fromisoformat(m['datetime'])
-                        try:
-                            match_date_key = match_dt.date().isoformat()
-                        except Exception:
-                            match_date_key = (str(m.get('datetime')) or '')[:10]
                     else:
                         d = None; tm = None
                         if m.get('date'):
@@ -1274,11 +1269,6 @@ def api_betting_place():
                                 d = datetime.fromisoformat(str(m['date'])[:10]).date()
                             except Exception:
                                 d = None
-                            try:
-                                # даже если времени нет, запоминаем дату для date_key голосов
-                                match_date_key = (str(m['date']) or '')[:10]
-                            except Exception:
-                                match_date_key = (str(m.get('date')) or '')[:10]
                         if m.get('time'):
                             ts = str(m['time']).strip()
                             # поддержка HH:MM и HH:MM:SS
@@ -1296,9 +1286,7 @@ def api_betting_place():
             break
     if not found:
         return jsonify({'error': 'Матч не найден'}), 404
-
     if match_dt:
-        tzmin = 0
         try:
             tzmin = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
         except Exception:
@@ -1335,17 +1323,13 @@ def api_betting_place():
             return jsonify({'error': 'Недостаточно кредитов'}), 400
         # коэффициенты на момент ставки
         if market == '1x2':
-            # Вычислим date_key для влияния голосований:
-            # 1) если известна точная дата/время — берём её
-            # 2) иначе используем сохранённый match_date_key из расписания (дата без времени)
+            # вычислим date_key из известной даты матча (если есть)
             dk = None
             try:
                 if match_dt:
-                    dk = match_dt.date().isoformat()
-                elif match_date_key:
-                    dk = match_date_key
+                    dk = (match_dt.date().isoformat())
             except Exception:
-                dk = match_date_key or None
+                dk = None
             odds_map = _compute_match_odds(home, away, dk)
             k = odds_map.get(sel) or 2.00
             selection_to_store = sel
