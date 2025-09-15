@@ -44,6 +44,27 @@
               }
             } catch(_){}
           });
+
+          // Обновляет коэффициенты и рынки на уже отрендеренных карточках на основе ответа /api/betting/tours
+          function updateOddsUIFromStore(store) {
+            try {
+              const tours = store?.data?.tours || store?.tours || [];
+              if (!Array.isArray(tours) || tours.length === 0) return;
+              const map = new Map();
+              tours.forEach(t => (t.matches||[]).forEach(m => {
+                const matchDate = (m.date || m.datetime || '').slice(0,10);
+                const id = `${m.home}_${m.away}_${matchDate}`;
+                map.set(id, { odds: (m.odds||{}), markets: (m.markets||{}) });
+              }));
+              const cards = toursEl.querySelectorAll('.pred-tours-container .match-card[data-match-id]');
+              cards.forEach(card => {
+                const id = card.getAttribute('data-match-id');
+                const entry = map.get(id);
+                if (!entry) return;
+                updateCardOddsUI(card, entry.odds || {}, entry.markets || {});
+              });
+            } catch(_) {}
+          }
         }
         // 3) Спецрынки
         if (markets && markets.specials) {
@@ -315,80 +336,7 @@
         let cancelled = false, busy = false, timer = null;
         let lastVersion = initialVersion || (cached && cached.version) || null;
         wrap.__oddsPollCancel = () => { cancelled = true; try { if (timer) clearTimeout(timer); } catch(_){} };
-        const applyOddsFromStore = (store) => {
-          try {
-            const tours = store?.data?.tours || store?.tours || [];
-            if (!Array.isArray(tours) || tours.length === 0) return;
-            const map = new Map();
-            tours.forEach(t => (t.matches||[]).forEach(m => {
-              const matchDate = (m.date || m.datetime || '').slice(0,10);
-              const id = `${m.home}_${m.away}_${matchDate}`;
-              map.set(id, { odds: (m.odds||{}), markets: (m.markets||{}) });
-            }));
-            const cards = toursEl.querySelectorAll('.pred-tours-container .match-card[data-match-id]');
-            cards.forEach(card => {
-              const id = card.getAttribute('data-match-id');
-              const entry = map.get(id);
-              if (!entry) return;
-              const odds = entry.odds || {};
-              const markets = entry.markets || {};
-              // 1) П1/Х/П2
-              const buttons = card.querySelectorAll('.bet-btn[data-bet-key]');
-              buttons.forEach(btn => {
-                const key = btn.dataset.betKey;
-                const label = { home: 'П1', draw: 'Х', away: 'П2' }[key];
-                if (label && odds[key] != null) {
-                  const newText = `${label} (${Number(odds[key]).toFixed(2)})`;
-                  if (btn.textContent !== newText) {
-                    btn.textContent = newText;
-                    btn.classList.add('updated');
-                    setTimeout(() => btn.classList.remove('updated'), 500);
-                  }
-                }
-              });
-              // 2) Тоталы
-              if (markets.totals && Array.isArray(markets.totals)) {
-                markets.totals.forEach(row => {
-                  try {
-                    const line = String(row.line);
-                    const over = Number(row.odds?.over);
-                    const under = Number(row.odds?.under);
-                    const overBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="over"][data-line="${line}"]`);
-                    const underBtn = card.querySelector(`.bet-btn[data-market="totals"][data-side="under"][data-line="${line}"]`);
-                    if (overBtn && !Number.isNaN(over)) {
-                      const txt = `Больше (${over.toFixed(2)})`;
-                      if (overBtn.textContent !== txt) { overBtn.textContent = txt; overBtn.classList.add('updated'); setTimeout(()=>overBtn.classList.remove('updated'), 500); }
-                    }
-                    if (underBtn && !Number.isNaN(under)) {
-                      const txt = `Меньше (${under.toFixed(2)})`;
-                      if (underBtn.textContent !== txt) { underBtn.textContent = txt; underBtn.classList.add('updated'); setTimeout(()=>underBtn.classList.remove('updated'), 500); }
-                    }
-                  } catch(_){}
-                });
-              }
-              // 3) Спецрынки
-              if (markets.specials) {
-                const sp = markets.specials;
-                const updYN = (mk) => {
-                  const o = sp[mk]?.odds || null;
-                  if (!o) return;
-                  const yesBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="yes"]`);
-                  const noBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="no"]`);
-                  if (yesBtn && o.yes != null) {
-                    const txt = `Да (${Number(o.yes).toFixed(2)})`;
-                    if (yesBtn.textContent !== txt) { yesBtn.textContent = txt; yesBtn.classList.add('updated'); setTimeout(()=>yesBtn.classList.remove('updated'), 500); }
-                  }
-                  if (noBtn && o.no != null) {
-                    const txt = `Нет (${Number(o.no).toFixed(2)})`;
-                    if (noBtn.textContent !== txt) { noBtn.textContent = txt; noBtn.classList.add('updated'); setTimeout(()=>noBtn.classList.remove('updated'), 500); }
-                  }
-                };
-                updYN('penalty');
-                updYN('redcard');
-              }
-            });
-          } catch(_) {}
-        };
+        // Применяем данные стора к UI
   const schedule = () => { if (cancelled) return; const base=3500, jitter=1200; timer = setTimeout(loop, base + Math.floor(Math.random()*jitter)); };
         const loop = async () => {
           if (cancelled) return;
@@ -398,9 +346,11 @@
           busy = true;
           try {
             const store = await fetchWithETag(lastVersion).catch(()=>null);
-            if (store && store.version && store.version !== lastVersion) {
-              lastVersion = store.version;
-              applyOddsFromStore(store);
+            if (store) {
+              const changed = store.version && store.version !== lastVersion;
+              if (changed) lastVersion = store.version;
+              // Даже при неизменном ETag обновим UI — покрывает кейс свежего кэша без коэффициентов
+              updateOddsUIFromStore(store);
             }
           } finally { busy = false; schedule(); }
         };
@@ -409,9 +359,9 @@
   const __FRESH_TTL__ = 5 * 60 * 1000; // 5 минут
   const __isFresh__ = cached && Number.isFinite(cached.ts) && (Date.now() - cached.ts < __FRESH_TTL__) && ((cached?.data?.tours && cached.data.tours.length>0) || (cached?.tours && cached.tours.length>0));
   if (cached && cached.version) {
-        fetchWithETag(cached.version).then((store)=>{ if(!__isFresh__) renderTours(store); startOddsPolling(store?.version); }).catch(()=>{}).finally(()=>{ _toursLoading = false; });
+        fetchWithETag(cached.version).then((store)=>{ if(!__isFresh__) { renderTours(store); } else { updateOddsUIFromStore(store); } startOddsPolling(store?.version); }).catch(()=>{}).finally(()=>{ _toursLoading = false; });
       } else {
-        fetchWithETag(null).then((store)=>{ if(!__isFresh__) renderTours(store); startOddsPolling(store?.version); }).catch(err => {
+        fetchWithETag(null).then((store)=>{ if(!__isFresh__) { renderTours(store); } else { updateOddsUIFromStore(store); } startOddsPolling(store?.version); }).catch(err => {
           if (!cached || !__isFresh__) toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
         }).finally(()=>{ _toursLoading = false; });
       }

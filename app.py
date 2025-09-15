@@ -1350,6 +1350,51 @@ def api_betting_place():
             k = odds_map.get(sel) or 2.00
             selection_to_store = sel
             market_to_store = '1x2'
+
+            # Debug-лог для админа: какие голоса учлись при ставке
+            try:
+                from flask import g
+                admin_logger = getattr(g, 'admin_logger', None)
+                admin_id_env = os.environ.get('ADMIN_USER_ID')
+                admin_id = int(admin_id_env) if (admin_id_env and admin_id_env.isdigit()) else None
+                if admin_logger and admin_id:
+                    votes_payload = None
+                    if dk and SessionLocal is not None:
+                        try:
+                            dbv = get_db()
+                            try:
+                                rows = dbv.query(MatchVote.choice, func.count(MatchVote.id)).filter(
+                                    MatchVote.home==home, MatchVote.away==away, MatchVote.date_key==dk
+                                ).group_by(MatchVote.choice).all()
+                            finally:
+                                dbv.close()
+                            agg = {'home':0,'draw':0,'away':0}
+                            for c, cnt in rows:
+                                key = str(c).lower()
+                                if key in agg:
+                                    agg[key] = int(cnt)
+                            total = agg['home'] + agg['draw'] + agg['away']
+                            votes_payload = {**agg, 'total': total}
+                        except Exception:
+                            votes_payload = None
+                    admin_logger.log_action(
+                        admin_id=admin_id,
+                        action='betting_place_debug',
+                        description='Диагностика ставки: влияние голосов/коэффициентов',
+                        endpoint='POST /api/betting/place',
+                        request_data=None,
+                        result_status='success',
+                        result_message=None,
+                        affected_entities={
+                            'home': home,
+                            'away': away,
+                            'date_key_used': (dk or ''),
+                            'votes_seen': votes_payload
+                        },
+                        execution_time_ms=None
+                    )
+            except Exception:
+                pass
         elif market == 'totals':
             # totals: поддерживаем over/under по линиям, при этом короткий код для старой схемы (VARCHAR(8))
             try:
