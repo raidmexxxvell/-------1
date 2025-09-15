@@ -47,11 +47,29 @@
     if (_pending.has(key)) return _pending.get(key);
     const candidates = [];
     if (norm){
-      // Пробуем вариант с приставкой "фк" (если исходное имя не начиналось с фк, добавим префикс)
-      if (!norm.startsWith('фк')) candidates.push(LOGO_BASE + encodeURIComponent('фк' + norm + '.png'));
-      // Затем — основной нормализованный вариант
+      // 1) вариант с приставкой "фк" (если исходное имя не начиналось с фк)
+      if (!norm.startsWith('фк')) {
+        candidates.push(LOGO_BASE + encodeURIComponent('фк' + norm + '.png'));
+        candidates.push(LOGO_BASE + encodeURIComponent('фк' + norm + '.webp'));
+      }
+      // 2) основной нормализованный
       candidates.push(LOGO_BASE + encodeURIComponent(norm + '.png'));
+      candidates.push(LOGO_BASE + encodeURIComponent(norm + '.webp'));
+      // 3) нормализованный с дефисами (иногда имена в ассетах могут быть с дефисом между словами)
+      try { if (norm.includes('')) { const dashed = norm.replace(/\s+/g,'-'); if (dashed && dashed!==norm){ candidates.push(LOGO_BASE + encodeURIComponent(dashed + '.png')); candidates.push(LOGO_BASE + encodeURIComponent(dashed + '.webp')); } } } catch(_){ }
     }
+    // 4) сырой оригинал (с пробелами → подчеркивания) — если ассет назван вручную
+    if (name){
+      const rawBase = name.toLowerCase().replace(/ё/g,'е').trim();
+      const rawUnderscore = rawBase.replace(/\s+/g,'_');
+      const rawCollapsed = rawBase.replace(/\s+/g,'');
+      ['png','webp'].forEach(ext => {
+        candidates.push(LOGO_BASE + encodeURIComponent(rawBase + '.' + ext));
+        candidates.push(LOGO_BASE + encodeURIComponent(rawUnderscore + '.' + ext));
+        candidates.push(LOGO_BASE + encodeURIComponent(rawCollapsed + '.' + ext));
+      });
+    }
+    // 5) fallback default
     candidates.push(LOGO_BASE + 'default.png');
     // Уникализируем
     const uniq = [];
