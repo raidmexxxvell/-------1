@@ -266,7 +266,25 @@
       // Валидация/обновление по сети с ETag
       const fetchWithETag = (etag) => fetch('/api/betting/tours', { headers: etag ? { 'If-None-Match': etag } : {} })
         .then(async r => {
-          if (r.status === 304 && cached) return cached;
+          if (r.status === 304 && cached) {
+            // Если кэш есть, но в нём отсутствуют коэффициенты/рынки — форсируем полный рефетч
+            try {
+              const tours = cached?.data?.tours || cached?.tours || [];
+              const hasOdds = tours.some(t => (t.matches||[]).some(m => m?.odds && Object.keys(m.odds).length));
+              const hasMarkets = tours.some(t => (t.matches||[]).some(m => m?.markets && (m.markets.totals?.length || m.markets.specials)));
+              if (!hasOdds || !hasMarkets) {
+                const r2 = await fetch('/api/betting/tours');
+                const data2 = await r2.json().catch(()=>null);
+                if (data2) {
+                  const version2 = data2.version || r2.headers.get('ETag') || null;
+                  const store2 = { data: data2, version: version2, ts: Date.now() };
+                  writeCache(store2);
+                  return store2;
+                }
+              }
+            } catch(_) {}
+            return cached;
+          }
           const data = await r.json();
           const version = data.version || r.headers.get('ETag') || null;
           const store = { data, version, ts: Date.now() };

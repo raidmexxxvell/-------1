@@ -9315,6 +9315,23 @@ def api_betting_tours():
                                             m['odds_version'] = _get_odds_version(home, away)
                                         except Exception:
                                             pass
+                                        # Гарантируем наличие рынков (тоталы и спецы), как в on-demand билдере
+                                        try:
+                                            totals = []
+                                            for ln in (3.5, 4.5, 5.5):
+                                                totals.append({'line': ln, 'odds': _compute_totals_odds(home, away, ln)})
+                                            sp_pen = _compute_specials_odds(home, away, 'penalty')
+                                            sp_red = _compute_specials_odds(home, away, 'redcard')
+                                            m['markets'] = {
+                                                'totals': totals,
+                                                'specials': {
+                                                    'penalty': { 'available': True, 'odds': sp_pen },
+                                                    'redcard': { 'available': True, 'odds': sp_red }
+                                                }
+                                            }
+                                        except Exception:
+                                            # Если по какой-то причине рынки не рассчитались — не блокируем выдачу
+                                            pass
                                         # lock
                                         _apply_lock(m, dt)
                                         filtered.append(m)
