@@ -600,11 +600,41 @@
         </div>
     </div>
 
-    <!-- Centralized Store (phase 1: no bundler) -->
-    <script src="/static/js/store/core.js?v={{ static_version }}"></script>
-    <script src="/static/js/store/app.js?v={{ static_version }}"></script>
-    <script src="/static/js/store/user.js?v={{ static_version }}"></script>
-    <script src="/static/js/store/ui.js?v={{ static_version }}"></script>
+    <!-- Centralized Store (phase 1: dist-first with legacy fallback) -->
+    <script>
+    (function(){
+        var v='{{ static_version }}';
+        var distBase='/static/js/dist/store/';
+        var legacyBase='/static/js/store/';
+
+        // Load scripts sequentially to guarantee order: core -> app -> user -> ui
+        function loadOne(base, name, onDone, onFail){
+            var s=document.createElement('script');
+            s.defer=true; // non-blocking but keep DOM order execution
+            s.src=base+name+'?v='+v;
+            s.onload=function(){ try { onDone && onDone(); } catch(_){} };
+            s.onerror=function(){ try { onFail && onFail(); } catch(_){} };
+            document.head.appendChild(s);
+        }
+        function loadSeq(names, idx, onComplete){
+            if (idx >= names.length) { onComplete && onComplete(); return; }
+            var name = names[idx];
+            // try dist first; on error, fallback to legacy for this file
+            loadOne(distBase, name, function(){ loadSeq(names, idx+1, onComplete); }, function(){
+                loadOne(legacyBase, name, function(){ loadSeq(names, idx+1, onComplete); }, function(){ loadSeq(names, idx+1, onComplete); });
+            });
+        }
+
+        var baseFiles=['core.js','app.js','user.js','ui.js'];
+        loadSeq(baseFiles, 0, function(){
+            // After base stores are ready, try to load additional slices from dist (optional)
+            var extra=['realtime.js','league.js','matches.js','odds.js','predictions.js','shop.js','profile.js'];
+            extra.forEach(function(n){
+                var s=document.createElement('script'); s.defer=true; s.src=distBase+n+'?v='+v; s.onerror=function(){}; document.head.appendChild(s);
+            });
+        });
+    })();
+    </script>
 
     <script src="/static/js/team-utils.js?v={{ static_version }}"></script>
     <script src="/static/js/match-utils.js?v={{ static_version }}"></script>

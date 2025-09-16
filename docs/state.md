@@ -11,6 +11,9 @@
   - `static/js/store/user.js` — срез user: `id`, `name`, `role`, `flags` (persist, TTL=7d).
   - `static/js/store/ui.js` — срез ui: `activeTab`, `theme`, `modals` (частично persist, TTL=14d).
 - Подключение в шаблон: `templates/index.html` (подключены до остальных скриптов).
+ - Подключение в шаблон: `templates/index.html` использует стратегию dist-first:
+   - последовательно загружаются базовые срезы (`dist/store/core.js`, `app.js`, `user.js`, `ui.js`) с пофайловым fallback на `static/js/store/*.js`;
+   - затем опционально подхватываются дополнительные срезы из `dist/store/` (realtime, league, matches, odds, predictions, shop, profile) без ошибок, если их пока нет.
 
 ## Публичный API
 
