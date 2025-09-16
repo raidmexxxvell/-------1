@@ -132,6 +132,58 @@
       const FRESH_TTL = 5 * 60 * 1000; // 5 минут
       const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
       const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
+      const hasAnyOddsMarkets = (store) => {
+        try {
+          const tours = store?.data?.tours || store?.tours || [];
+          if (!Array.isArray(tours)) return false;
+          let hasOdds = false, hasMarkets = false;
+          tours.forEach(t => (t.matches||[]).forEach(m => {
+            if (m?.odds && Object.keys(m.odds).length) hasOdds = true;
+            if (m?.markets && (Array.isArray(m.markets.totals) && m.markets.totals.length || m.markets.specials)) hasMarkets = true;
+          }));
+          return hasOdds && hasMarkets;
+        } catch(_) { return false; }
+      };
+      const indexMatches = (store) => {
+        const map = new Map();
+        try {
+          const tours = store?.data?.tours || store?.tours || [];
+          tours.forEach(t => (t.matches||[]).forEach(m => {
+            const d = (m.date || m.datetime || '').slice(0,10);
+            map.set(`${m.home}_${m.away}_${d}`, m);
+          }));
+        } catch(_) {}
+        return map;
+      };
+      const mergeOddsMarkets = (oldStore, newStore) => {
+        try {
+          if (!oldStore) return newStore;
+          const oldMap = indexMatches(oldStore);
+          const ns = JSON.parse(JSON.stringify(newStore));
+          const tours = ns?.data?.tours || ns?.tours || [];
+          tours.forEach(t => (t.matches||[]).forEach(m => {
+            try {
+              const d = (m.date || m.datetime || '').slice(0,10);
+              const key = `${m.home}_${m.away}_${d}`;
+              const prev = oldMap.get(key);
+              if (!prev) return;
+              // Если в новом нет odds/markets — подмешиваем из старого
+              if (!m.odds && prev.odds) m.odds = prev.odds;
+              if (!m.markets && prev.markets) m.markets = prev.markets;
+              // Если есть, но пусто — тоже дополним
+              if (m.odds && prev.odds && Object.keys(m.odds).length === 0) m.odds = prev.odds;
+              if (m.markets && prev.markets) {
+                const mt = m.markets.totals; const pm = prev.markets;
+                if (!(Array.isArray(mt) && mt.length) && Array.isArray(pm.totals) && pm.totals.length) {
+                  m.markets.totals = pm.totals;
+                }
+                if (!m.markets.specials && pm.specials) m.markets.specials = pm.specials;
+              }
+            } catch(_) {}
+          }));
+          return ns;
+        } catch(_) { return newStore; }
+      };
 
       // --- DRY helpers вынесены выше ---
 
@@ -280,6 +332,8 @@
       const cached = readCache();
       if (cached) {
         renderTours(cached);
+        // Немедленно применим коэффициенты из кэша (убирает эффект «пустых» кнопок)
+        try { updateOddsUIFromStore(cached); } catch(_) {}
       } else {
         toursEl.innerHTML = '<div class="schedule-loading">Загрузка матчей...</div>';
       }
@@ -298,7 +352,9 @@
                 const data2 = await r2.json().catch(()=>null);
                 if (data2) {
                   const version2 = data2.version || r2.headers.get('ETag') || null;
-                  const store2 = { data: data2, version: version2, ts: Date.now() };
+                  let store2 = { data: data2, version: version2, ts: Date.now() };
+                  // Сольём с кэшем, чтобы не потерять имеющиеся odds/markets
+                  store2 = mergeOddsMarkets(cached, store2);
                   writeCache(store2);
                   return store2;
                 }
@@ -308,12 +364,14 @@
           }
           const data = await r.json();
           const version = data.version || r.headers.get('ETag') || null;
-          const store = { data, version, ts: Date.now() };
+          let store = { data, version, ts: Date.now() };
           // не перезатираем кэш пустыми турами, если ранее были валидные
           const incoming = Array.isArray(data?.tours) ? data.tours : Array.isArray(data?.data?.tours) ? data.data.tours : [];
           const cachedTours = Array.isArray(cached?.data?.tours) ? cached.data.tours : [];
-          const shouldWrite = incoming.length > 0 || !cached || cachedTours.length === 0;
-          if (shouldWrite) writeCache(store);
+          // Мержим с кэшем для сохранения имеющихся коэффициентов
+          if (cached) store = mergeOddsMarkets(cached, store);
+          const writeable = incoming.length > 0 && (hasAnyOddsMarkets(store) || !cached || cachedTours.length === 0);
+          if (writeable) writeCache(store);
           return store;
         });
 
@@ -359,9 +417,9 @@
   const __FRESH_TTL__ = 5 * 60 * 1000; // 5 минут
   const __isFresh__ = cached && Number.isFinite(cached.ts) && (Date.now() - cached.ts < __FRESH_TTL__) && ((cached?.data?.tours && cached.data.tours.length>0) || (cached?.tours && cached.tours.length>0));
   if (cached && cached.version) {
-        fetchWithETag(cached.version).then((store)=>{ if(!__isFresh__) { renderTours(store); } else { updateOddsUIFromStore(store); } startOddsPolling(store?.version); }).catch(()=>{}).finally(()=>{ _toursLoading = false; });
+        fetchWithETag(cached.version).then((store)=>{ if(!__isFresh__) { renderTours(store); } updateOddsUIFromStore(store); startOddsPolling(store?.version); }).catch(()=>{}).finally(()=>{ _toursLoading = false; });
       } else {
-        fetchWithETag(null).then((store)=>{ if(!__isFresh__) { renderTours(store); } else { updateOddsUIFromStore(store); } startOddsPolling(store?.version); }).catch(err => {
+        fetchWithETag(null).then((store)=>{ if(!__isFresh__) { renderTours(store); } updateOddsUIFromStore(store); startOddsPolling(store?.version); }).catch(err => {
           if (!cached || !__isFresh__) toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
         }).finally(()=>{ _toursLoading = false; });
       }
