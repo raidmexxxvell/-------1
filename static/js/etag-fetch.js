@@ -36,6 +36,8 @@
       headers = {},
       params = null,
       forceRevalidate = false,
+      onSuccess = null,
+      onStale = null,
     } = options;
     if(!cacheKey) throw new Error('fetchEtag: cacheKey required');
 
@@ -56,7 +58,9 @@
 
     // Быстрый возврат свежих данных (SWR) — сеть не идём
     if (isFresh && !forceRevalidate){
-      return Promise.resolve({ data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw });
+      const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
+      try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
+      return Promise.resolve(result);
     }
 
     // Сформировать заголовки (conditional запрос если есть ETag)
@@ -68,12 +72,16 @@
         const headerUpdatedAt = res.headers ? res.headers.get('X-Updated-At') : null;
         if (res.status === 304 && cached){
           // Ничего не изменилось — возвращаем кэш и время обновления из заголовка
-          return { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw, headerUpdatedAt };
+          const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw, headerUpdatedAt };
+          try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
+          return result;
         }
         let json = null;
         try { json = await res.json(); } catch(e){
           if (cached){
-            return { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw, headerUpdatedAt };
+            const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw, headerUpdatedAt };
+            try { if (typeof onStale === 'function') onStale(result); } catch(_) {}
+            return result;
           }
           throw e;
         }
@@ -81,12 +89,16 @@
         let data = null;
         try { data = extract(json); } catch(e){ data = json; }
         try { localStorage.setItem(storeKey, JSON.stringify({ etag, ts: Date.now(), data, raw: json })); } catch(_) {}
-        return { data, etag, fromCache: false, updated: true, raw: json, headerUpdatedAt };
+        const result = { data, etag, fromCache: false, updated: true, raw: json, headerUpdatedAt };
+        try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
+        return result;
       })
       .catch(err => {
         console.warn('fetchEtag error', err);
         if (cached){
-          return { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
+          const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
+          try { if (typeof onStale === 'function') onStale(result); } catch(_) {}
+          return result;
         }
         throw err;
       });

@@ -67,6 +67,7 @@ class RealtimeUpdater {
             
             this.isConnected = true;
             this.reconnectAttempts = 0;
+        try { window.RealtimeStore && window.RealtimeStore.set({ connected: true }); } catch(_){}
             
             // Уведомляем сервер о подключении пользователя
             const initData = window.Telegram?.WebApp?.initData;
@@ -95,6 +96,7 @@ class RealtimeUpdater {
     this.socket.on('disconnect', (reason) => {
             
             this.isConnected = false;
+            try { window.RealtimeStore && window.RealtimeStore.set({ connected: false }); } catch(_){}
             
             if (reason === 'io server disconnect') {
                 // Сервер принудительно отключил - переподключаемся
@@ -105,6 +107,7 @@ class RealtimeUpdater {
         this.socket.on('connect_error', (error) => {
             
             this.isConnected = false;
+            try { window.RealtimeStore && window.RealtimeStore.update(s => { s.connected = false; s.reconnects = (s.reconnects||0)+1; }); } catch(_){}
             this.scheduleReconnect();
         });
         
@@ -579,6 +582,7 @@ class RealtimeUpdater {
             if(this.socket && this.isConnected && !this.subscribedTopics.has(topic)){
                 this.socket.emit('subscribe', { topic });
                 this.subscribedTopics.add(topic);
+                try { window.RealtimeStore && window.RealtimeStore.update(s => { if (!Array.isArray(s.topics)) s.topics = []; if (!s.topics.includes(topic)) s.topics.push(topic); }); } catch(_){}
             }
         } catch(_) {}
     }
@@ -590,6 +594,7 @@ class RealtimeUpdater {
             try { window.__PENDING_WS_TOPICS__?.delete?.(topic); } catch(_) {}
             if(!this.topicEnabled) return;
             if(this.socket && this.isConnected){ this.socket.emit('unsubscribe', { topic }); }
+            try { window.RealtimeStore && window.RealtimeStore.update(s => { s.topics = (s.topics||[]).filter(t => t!==topic); }); } catch(_){}
         } catch(_) {}
     }
 
