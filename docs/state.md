@@ -61,11 +61,18 @@
 
 - odds (no persist)
   - state: `{ map: Record<string, { value: number; version: number; lastUpdated: number }> }`
-  - обновляется из: etag-fetch + WS патчи (схема версионирования обязательна)
+  - ключи: `"<matchId>|1x2|home|draw|away"`, `"<matchId>|totals|over|<line>"`, `"<matchId>|totals|under|<line>"`, `"<matchId>|penalty|yes|no"`, `"<matchId>|redcard|yes|no"`
+  - `<matchId>` формируется как `home_away_YYYY-MM-DD`
+  - обновляется из: etag-fetch (предикшены) + WS патчи (схема версионирования обязательна)
 
 - predictions (no persist)
   - state: `{ items: PredictionItem[]; myVotes: Record<string, any>; ttl: number|null }`
+  - items: массив карточек доступных рынков по матчам (`{ id, matchId, market: 'available', options: [...] }`)
   - обновляется из: etag-fetch (списки), локально: кэш myVotes с TTL (перезапрос по истечении)
+
+Интеграция ETag/WS → Store (сводка):
+- predictions.js теперь при загрузке `/api/betting/tours` обновляет OddsStore и PredictionsStore
+- realtime-updates.js диспатчит `bettingOddsUpdate` для мгновенного обновления UI; последующая интеграция в OddsStore возможна (под фича-флаг)
 
 - shop (persist)
   - state: `{ cart: ShopCartItem[]; orders: ShopOrder[]; ttl: number|null }`

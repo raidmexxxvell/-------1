@@ -8,6 +8,70 @@
     const toursEl = document.getElementById('pred-tours');
     const myBetsEl = document.getElementById('my-bets');
 
+    // --- STORE ADAPTERS: Odds/Predictions (no-op if TS store not compiled) ---
+    function flattenAndUpdateOddsStoreForMatch(matchId, m, versionHint) {
+      try {
+        if (!window.OddsStore || !window.OddsStore.update) return;
+        const now = Date.now();
+        const v = (versionHint != null ? Number(versionHint) : (m?.odds_version != null ? Number(m.odds_version) : 0)) || 0;
+        const apply = (key, val) => {
+          if (val == null || Number.isNaN(Number(val))) return;
+          window.OddsStore.update(s => {
+            if (!s.map) s.map = {};
+            s.map[key] = { value: Number(val), version: v, lastUpdated: now };
+          });
+        };
+        // 1x2
+        if (m && m.odds) {
+          if (m.odds.home != null) apply(`${matchId}|1x2|home`, m.odds.home);
+          if (m.odds.draw != null) apply(`${matchId}|1x2|draw`, m.odds.draw);
+          if (m.odds.away != null) apply(`${matchId}|1x2|away`, m.odds.away);
+        }
+        // Totals
+        const totals = m?.markets?.totals;
+        if (Array.isArray(totals)) {
+          totals.forEach(row => {
+            const line = (row && (row.line != null)) ? String(row.line) : null;
+            if (!line) return;
+            const over = row?.odds?.over; const under = row?.odds?.under;
+            if (over != null) apply(`${matchId}|totals|over|${line}`, over);
+            if (under != null) apply(`${matchId}|totals|under|${line}`, under);
+          });
+        }
+        // Specials
+        const sp = m?.markets?.specials;
+        if (sp && sp.penalty && sp.penalty.odds) {
+          const o = sp.penalty.odds; if (o.yes != null) apply(`${matchId}|penalty|yes`, o.yes); if (o.no != null) apply(`${matchId}|penalty|no`, o.no);
+        }
+        if (sp && sp.redcard && sp.redcard.odds) {
+          const o = sp.redcard.odds; if (o.yes != null) apply(`${matchId}|redcard|yes`, o.yes); if (o.no != null) apply(`${matchId}|redcard|no`, o.no);
+        }
+      } catch(_) {}
+    }
+    function updateStoresFromTours(store) {
+      try {
+        const ds = store?.data || store || {};
+        const tours = Array.isArray(ds.tours) ? ds.tours : [];
+        const version = store?.version || ds?.version || null;
+        if (!tours.length) return;
+        const items = [];
+        tours.forEach(t => (t.matches||[]).forEach(m => {
+          const d = (m.date || m.datetime || '').slice(0,10);
+          const matchId = `${m.home}_${m.away}_${d}`;
+          // Odds store
+          flattenAndUpdateOddsStoreForMatch(matchId, m, version);
+          // Predictions list (light descriptor)
+          const has12 = !!(m?.odds && (m.odds.home!=null || m.odds.draw!=null || m.odds.away!=null));
+          const totals = Array.isArray(m?.markets?.totals) ? m.markets.totals.map(r=>r?.line).filter(l=>l!=null) : [];
+          const specials = m?.markets?.specials ? Object.keys(m.markets.specials) : [];
+          items.push({ id: matchId, matchId, market: 'available', options: [ has12?'1x2':null, totals.length?`totals(${totals.length})`:null, specials.length?`specials(${specials.length})`:null ].filter(Boolean) });
+        }));
+        if (window.PredictionsStore && window.PredictionsStore.set) {
+          window.PredictionsStore.set({ items });
+        }
+      } catch(_) {}
+    }
+
     // Вынесено в общий скоуп: вспомогательные функции, используемые и рендером, и глобальным обработчиком событий
     function setTextAnimated(btn, newText) {
       if (!btn || btn.textContent === newText) return;
@@ -334,6 +398,8 @@
         renderTours(cached);
         // Немедленно применим коэффициенты из кэша (убирает эффект «пустых» кнопок)
         try { updateOddsUIFromStore(cached); } catch(_) {}
+        // Обновим централизованный стор коэффициентов/предсказаний
+        try { updateStoresFromTours(cached); } catch(_) {}
       } else {
         toursEl.innerHTML = '<div class="schedule-loading">Загрузка матчей...</div>';
       }
@@ -360,6 +426,7 @@
                 }
               }
             } catch(_) {}
+            try { updateStoresFromTours(cached); } catch(_) {}
             return cached;
           }
           const data = await r.json();
@@ -372,6 +439,7 @@
           if (cached) store = mergeOddsMarkets(cached, store);
           const writeable = incoming.length > 0 && (hasAnyOddsMarkets(store) || !cached || cachedTours.length === 0);
           if (writeable) writeCache(store);
+          try { updateStoresFromTours(store); } catch(_) {}
           return store;
         });
 
@@ -409,6 +477,8 @@
               if (changed) lastVersion = store.version;
               // Даже при неизменном ETag обновим UI — покрывает кейс свежего кэша без коэффициентов
               updateOddsUIFromStore(store);
+              // И стор коэффициентов/предсказаний
+              try { updateStoresFromTours(store); } catch(_) {}
             }
           } finally { busy = false; schedule(); }
         };
@@ -634,6 +704,10 @@
       const odds = fields.odds || {};
       const markets = fields.markets || {};
       updateCardOddsUI(card, odds, markets);
+      // Обновляем централизованный стор (реалтайм)
+      try {
+        flattenAndUpdateOddsStoreForMatch(matchId, { odds, markets }, detail.odds_version);
+      } catch(_) {}
       // Синхронизируем локальный кэш betting:tours
       try {
         const CACHE_KEY = 'betting:tours';

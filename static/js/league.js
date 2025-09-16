@@ -621,7 +621,11 @@
           }
         })
         .catch(() => {
-          window.fetchEtag('/api/league-table', { cacheKey: 'league:table', swrMs: 5000, extract: j=>j })
+          window.fetchEtag('/api/league-table', { cacheKey: 'league:table', swrMs: 5000, extract: j=>j, onSuccess: (res)=>{
+            try {
+              if (window.LeagueStore) window.LeagueStore.update(s => { s.table = Array.isArray(res.data) ? res.data : []; });
+            } catch(_){}
+          } })
         .then(({ data, headerUpdatedAt }) => {
           try { renderLeagueTable(table, updatedText, data); } catch(_) {}
           if (updatedText && headerUpdatedAt) {
@@ -661,7 +665,15 @@
         }
       } catch(_) {}
       // Фолбэк: обычная загрузка через ETag
-      window.fetchEtag('/api/schedule', { cacheKey: 'league:schedule', swrMs: 8000, extract: j=> (j?.data||j) })
+      window.fetchEtag('/api/schedule', { cacheKey: 'league:schedule', swrMs: 8000, extract: j=> (j?.data||j), onSuccess: (res)=>{
+        try {
+          if (window.LeagueStore) window.LeagueStore.update(s => {
+            s.schedule.tours = Array.isArray(res.data?.tours) ? res.data.tours : (Array.isArray(res.data) ? res.data : []);
+            s.schedule.lastUpdated = Date.now();
+            s.schedule.etag = res.etag || s.schedule.etag || null;
+          });
+        } catch(_){}
+      } })
         .then(({ data }) => { try { renderSchedule(pane, data); } catch(_) {} })
         .catch(()=>{});
     } catch(_) {}
