@@ -21,7 +21,7 @@ services:
         fi
       fi;
       if command -v node >/dev/null 2>&1; then
-        npx --yes typescript@5.6.3 -p tsconfig.json || true;
+        npx --yes --package typescript@5.6.3 tsc -p tsconfig.json || true;
       else
         echo 'Skipping TS compile: Node not available';
       fi

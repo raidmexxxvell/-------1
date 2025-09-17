@@ -606,11 +606,14 @@
         var v='{{ static_version }}';
         var distBase='/static/js/dist/store/';
         var legacyBase='/static/js/store/';
+        // Detect ES module support (modern browsers)
+        var supportsModule = (function(){ try { var s=document.createElement('script'); return 'noModule' in s; } catch(_) { return false; } })();
 
         // Load scripts sequentially to guarantee order: core -> app -> user -> ui
         function loadOne(base, name, onDone, onFail){
             var s=document.createElement('script');
             s.defer=true; // non-blocking but keep DOM order execution
+            if (base===distBase && supportsModule) s.type='module';
             s.src=base+name+'?v='+v;
             s.onload=function(){ try { onDone && onDone(); } catch(_){} };
             s.onerror=function(){ try { onFail && onFail(); } catch(_){} };
@@ -619,19 +622,25 @@
         function loadSeq(names, idx, onComplete){
             if (idx >= names.length) { onComplete && onComplete(); return; }
             var name = names[idx];
-            // try dist first; on error, fallback to legacy for this file
-            loadOne(distBase, name, function(){ loadSeq(names, idx+1, onComplete); }, function(){
+            // If modules are supported, try dist first; otherwise load legacy directly
+            if (supportsModule) {
+                loadOne(distBase, name, function(){ loadSeq(names, idx+1, onComplete); }, function(){
+                    loadOne(legacyBase, name, function(){ loadSeq(names, idx+1, onComplete); }, function(){ loadSeq(names, idx+1, onComplete); });
+                });
+            } else {
                 loadOne(legacyBase, name, function(){ loadSeq(names, idx+1, onComplete); }, function(){ loadSeq(names, idx+1, onComplete); });
-            });
+            }
         }
 
         var baseFiles=['core.js','app.js','user.js','ui.js'];
         loadSeq(baseFiles, 0, function(){
             // After base stores are ready, try to load additional slices from dist (optional)
-            var extra=['realtime.js','league.js','matches.js','odds.js','predictions.js','shop.js','profile.js'];
-            extra.forEach(function(n){
-                var s=document.createElement('script'); s.defer=true; s.src=distBase+n+'?v='+v; s.onerror=function(){}; document.head.appendChild(s);
-            });
+            if (supportsModule) {
+                var extra=['realtime.js','league.js','matches.js','odds.js','predictions.js','shop.js','profile.js'];
+                extra.forEach(function(n){
+                    var s=document.createElement('script'); s.defer=true; s.type='module'; s.src=distBase+n+'?v='+v; s.onerror=function(){}; document.head.appendChild(s);
+                });
+            }
         });
     })();
     </script>
