@@ -6,6 +6,8 @@ import type { StoreApi } from './core';
 declare global {
   interface Window {
     LeagueStore?: StoreApi<LeagueState>;
+    PredictionsStore?: StoreApi<PredictionsState>;
+    OddsStore?: StoreApi<OddsState>;
   }
 }
 
@@ -22,6 +24,44 @@ declare global {
       try {
         const tours = Array.isArray(data?.tours) ? data.tours : (data || []);
         window.LeagueStore.update(s => { s.schedule.tours = tours; s.schedule.lastUpdated = Date.now(); s.schedule.etag = etag ?? null; });
+      } catch(_) {}
+    }
+
+    // Map: league table
+    if (cacheKey === 'league:table' && window.LeagueStore){
+      try {
+        const table = Array.isArray(data) ? data : (data?.table || []);
+        window.LeagueStore.update(s => { s.table = table; });
+      } catch(_) {}
+    }
+
+    // Map: league stats
+    if (cacheKey === 'league:stats' && window.LeagueStore){
+      try {
+        const stats = Array.isArray(data) ? data : (data?.stats || []);
+        window.LeagueStore.update(s => { s.stats = stats; });
+      } catch(_) {}
+    }
+
+    // Map: predictions list (+ optional odds versions)
+    if (cacheKey === 'predictions:list'){
+      try {
+        if (window.PredictionsStore){
+          const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
+          window.PredictionsStore.update(s => { s.items = items; s.ttl = Date.now() + 5*60*1000; });
+        }
+        // Optional: map basic odds versions if present in payload
+        if (window.OddsStore && data && Array.isArray(data.odds)){
+          const arr = data.odds as any[];
+          window.OddsStore.update(s => {
+            for (const o of arr){
+              const key = o?.key || o?.id || null; if (!key) continue;
+              const version = typeof o?.version === 'number' ? o.version : (typeof o?.odds_version === 'number' ? o.odds_version : 0);
+              const value = typeof o?.value === 'number' ? o.value : (typeof o?.odds === 'number' ? o.odds : 0);
+              s.map[key] = { value, version, lastUpdated: Date.now() };
+            }
+          });
+        }
       } catch(_) {}
     }
   };
