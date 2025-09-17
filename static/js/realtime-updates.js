@@ -125,6 +125,7 @@ class RealtimeUpdater {
         // Компактные патчи данных
         this.socket.on('data_patch', (patch) => {
             this.handleDataPatch(patch);
+            __wsEmit('ws:data_patch', patch || {});
         });
 
         // Топиковые уведомления (например, глобальный full_reset)
@@ -346,7 +347,9 @@ class RealtimeUpdater {
                 // Пробрасываем событие вниз по UI
                 // Чтобы не конфликтовали ключи 'home' (команда) и 'home' (кэф), помещаем кэфы в под-объект odds,
                 // а названия команд передаём как homeTeam/awayTeam.
-                this.refreshBettingOdds({ homeTeam: home, awayTeam: away, date, odds_version: incomingV, odds: { ...(fields || {}) } });
+                const payload = { homeTeam: home, awayTeam: away, date, odds_version: incomingV, odds: { ...(fields || {}) } };
+                this.refreshBettingOdds(payload);
+                __wsEmit('ws:odds', payload);
                 return;
             }
             // по умолчанию — общий refresh

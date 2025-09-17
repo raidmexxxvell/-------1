@@ -83,6 +83,8 @@
  - realtime (store) будет получать события соединения/подписок и отражать их в состоянии (`connected`, `topics`, `reconnects`) для дальнейших подписок UI (этап 1. адаптеры интеграции)
  - ETag адаптер: `etag-fetch.js` теперь дополнительно эмитит `window`-события `etag:success`/`etag:stale` с detail `{ cacheKey, data, etag, fromCache, updated, raw }` — это не меняет текущий API, но даёт единый канал для маппинга в стор.
  - Первый слушатель: `static/js/store/etl_listeners.ts` (dist) подписывается на `etag:success` и обновляет `LeagueStore.schedule` для `cacheKey = "league:schedule"`. Подключается опционально после базовых срезов.
+ - WS событийная шина: `realtime-updates.js` эмитит `ws:connected`, `ws:disconnected`, `ws:topic_update`, `ws:data_patch`, `ws:odds` (detail — полезная нагрузка события).
+ - WS слушатель: `static/js/store/ws_listeners.ts` (dist) обновляет `RealtimeStore` по событиям соединения/топиков и маппит `ws:odds` в `OddsStore` с защитой от устаревших версий.
 
 - shop (persist)
   - state: `{ cart: ShopCartItem[]; orders: ShopOrder[]; ttl: number|null }`
