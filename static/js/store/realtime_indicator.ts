@@ -9,20 +9,32 @@ declare global { interface Window { RealtimeStore?: StoreApi<RTState>; } }
   const ensure = () => {
     const root = document.body || document.documentElement;
     if (!root) return null;
-    let el = document.querySelector('.rt-conn-indicator') as HTMLElement | null;
-    if (!el) {
-      el = document.createElement('div');
-      el.className = 'rt-conn-indicator rt-bad';
-      el.setAttribute('role', 'status');
-      el.setAttribute('aria-live', 'polite');
-      el.setAttribute('aria-label', 'Realtime disconnected');
-      root.appendChild(el);
+    let ws = document.querySelector('.rt-conn-indicator') as HTMLElement | null;
+    if (!ws) {
+      ws = document.createElement('div');
+      ws.className = 'rt-conn-indicator rt-bad';
+      ws.setAttribute('role', 'status');
+      ws.setAttribute('aria-live', 'polite');
+      ws.setAttribute('aria-label', 'Realtime disconnected');
+      root.appendChild(ws);
     }
-    return el;
+    // secondary dot to reflect Store availability
+    let st = document.querySelector('.rt-store-indicator') as HTMLElement | null;
+    if (!st) {
+      st = document.createElement('div');
+      st.className = 'rt-conn-indicator rt-store-indicator';
+      st.style.right = '22px';
+      st.setAttribute('title', 'Store status');
+      st.setAttribute('aria-label', 'Store unavailable');
+      root.appendChild(st);
+    }
+    return { ws, st };
   };
 
-  const el = ensure();
-  if (!el) return;
+  const nodes = ensure();
+  if (!nodes) return;
+  const el = nodes.ws;
+  const storeEl = nodes.st;
 
   const apply = (connected: boolean) => {
     el.classList.toggle('rt-ok', connected);
@@ -42,4 +54,15 @@ declare global { interface Window { RealtimeStore?: StoreApi<RTState>; } }
   // Also react to ws:* in legacy path
   window.addEventListener('ws:connected', () => apply(true));
   window.addEventListener('ws:disconnected', () => apply(false));
+
+  // Store availability indicator (blue when store exists, black when not)
+  const applyStore = () => {
+    const ok = !!(window as any).Store && !!(window as any).Store._stores;
+    if (!storeEl) return;
+    storeEl.classList.toggle('rt-ok', ok);
+    storeEl.classList.toggle('rt-bad', !ok);
+    storeEl.setAttribute('aria-label', ok ? 'Store available' : 'Store unavailable');
+  };
+  applyStore();
+  try { setInterval(applyStore, 4000); } catch {}
 })();

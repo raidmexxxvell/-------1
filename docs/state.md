@@ -107,3 +107,10 @@
 - Файл стилей: `static/css/realtime-indicator.css`
 - Модуль: `static/js/store/realtime_indicator.ts` (подключается как `dist/store/realtime_indicator.js`)
 - Поведение: маленькая точка в правом нижнем углу, цветом показывает состояние WS (серый — оффлайн, зелёный — онлайн). Не мешает UI, доступен для screen readers (`role="status"`, `aria-live="polite"`). Синхронизируется как со `RealtimeStore.connected`, так и напрямую с событиями `ws:connected/ws:disconnected` в средах без стора.
+
+## Подписка UI деталей матча на MatchesStore (feature-flag)
+
+- Модуль: `static/js/store/match_ui_bindings.ts` (подключается как `dist/store/match_ui_bindings.js`)
+- Включение: поставьте в `localStorage` ключ `feature:match_ui_store` = `1`
+- Что делает: когда открыт экран деталей матча (`#ufo-match-details`), модуль подписывается на `MatchesStore` и обновляет счёт в `#md-score` по изменениям из WS/ETag.
+- Поиск текущего матча: по текстам в `#md-home-name`/`#md-away-name` сопоставляет записи из `MatchesStore.map` и выбирает последнюю по `lastUpdated`.
