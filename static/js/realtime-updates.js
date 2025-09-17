@@ -3,6 +3,10 @@
  * Минимизирует количество polling запросов к серверу
  */
 
+function __wsEmit(name, detail){
+    try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch(_) {}
+}
+
 class RealtimeUpdater {
     constructor() {
         this.socket = null;
@@ -67,7 +71,8 @@ class RealtimeUpdater {
             
             this.isConnected = true;
             this.reconnectAttempts = 0;
-        try { window.RealtimeStore && window.RealtimeStore.set({ connected: true }); } catch(_){}
+    try { window.RealtimeStore && window.RealtimeStore.set({ connected: true }); } catch(_){}
+    __wsEmit('ws:connected', { reconnects: this.reconnectAttempts });
             
             // Уведомляем сервер о подключении пользователя
             const initData = window.Telegram?.WebApp?.initData;
@@ -97,6 +102,7 @@ class RealtimeUpdater {
             
             this.isConnected = false;
             try { window.RealtimeStore && window.RealtimeStore.set({ connected: false }); } catch(_){}
+            __wsEmit('ws:disconnected', { reason: reason || '' });
             
             if (reason === 'io server disconnect') {
                 // Сервер принудительно отключил - переподключаемся
@@ -124,6 +130,7 @@ class RealtimeUpdater {
         // Топиковые уведомления (например, глобальный full_reset)
         this.socket.on('topic_update', (payload) => {
             this.handleTopicUpdate(payload);
+            __wsEmit('ws:topic_update', payload || {});
         });
 
         // Событие завершения матча (содержит optional results_block для мгновенного UX)
