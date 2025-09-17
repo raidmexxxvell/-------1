@@ -112,5 +112,6 @@
 
 - Модуль: `static/js/store/match_ui_bindings.ts` (подключается как `dist/store/match_ui_bindings.js`)
 - Включение: поставьте в `localStorage` ключ `feature:match_ui_store` = `1`
-- Что делает: когда открыт экран деталей матча (`#ufo-match-details`), модуль подписывается на `MatchesStore` и обновляет счёт в `#md-score` по изменениям из WS/ETag.
+- Что делает: когда открыт экран деталей матча (`#ufo-match-details`), модуль подписывается на `MatchesStore` и обновляет счёт в `#md-score` по изменениям из WS/ETag. События и статистика остаются под управлением текущих модулей (`profile-match-roster-events.js`, `profile-match-stats.js`) и уже обновляются мгновенно через WS (без дублирования/перерендера в сто́р-биндингах).
+- Быстрое включение на Render без консоли: добавьте к URL параметр `?ff=1` или `?feature:match_ui_store=1` (в том числе в hash). Для отключения: `?ff=0`.
 - Поиск текущего матча: по текстам в `#md-home-name`/`#md-away-name` сопоставляет записи из `MatchesStore.map` и выбирает последнюю по `lastUpdated`.

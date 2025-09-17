@@ -635,6 +635,15 @@
 
         var baseFiles=['core.js','app.js','user.js','ui.js'];
         loadSeq(baseFiles, 0, function(){
+            // Lightweight URL-based feature-flag toggles for QA (no console required)
+            try {
+                var q = location.search || '';
+                var h = location.hash || '';
+                var enable = /(?:[?&]|#)(?:ff|feature:match_ui_store)=1\b/.test(q) || /(?:[?&]|#)(?:ff|feature:match_ui_store)=1\b/.test(h);
+                var disable = /(?:[?&]|#)(?:ff|feature:match_ui_store)=0\b/.test(q) || /(?:[?&]|#)(?:ff|feature:match_ui_store)=0\b/.test(h);
+                if (enable) { try { localStorage.setItem('feature:match_ui_store','1'); } catch(_){} }
+                if (disable) { try { localStorage.removeItem('feature:match_ui_store'); } catch(_){} }
+            } catch(_){}
             // After base stores are ready, try to load additional slices from dist (optional)
             if (supportsModule) {
                 var extra=['realtime.js','league.js','matches.js','odds.js','predictions.js','shop.js','profile.js','etl_listeners.js','ws_listeners.js','realtime_indicator.js','match_ui_bindings.js'];
