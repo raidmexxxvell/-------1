@@ -636,7 +636,7 @@
         loadSeq(baseFiles, 0, function(){
             // After base stores are ready, try to load additional slices from dist (optional)
             if (supportsModule) {
-                var extra=['realtime.js','league.js','matches.js','odds.js','predictions.js','shop.js','profile.js'];
+                var extra=['realtime.js','league.js','matches.js','odds.js','predictions.js','shop.js','profile.js','etl_listeners.js'];
                 extra.forEach(function(n){
                     var s=document.createElement('script'); s.defer=true; s.type='module'; s.src=distBase+n+'?v='+v; s.onerror=function(){}; document.head.appendChild(s);
                 });

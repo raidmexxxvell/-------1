@@ -11,9 +11,13 @@
   - `static/js/store/user.js` — срез user: `id`, `name`, `role`, `flags` (persist, TTL=7d).
   - `static/js/store/ui.js` — срез ui: `activeTab`, `theme`, `modals` (частично persist, TTL=14d).
  - Подключение в шаблон: `templates/index.html` использует стратегию dist-first:
-   - последовательно загружаются базовые срезы (`dist/store/core.js`, `app.js`, `user.js`, `ui.js`) с пофайловым fallback на `static/js/store/*.js`;
-   - затем опционально подхватываются дополнительные срезы из `dist/store/` (realtime, league, matches, odds, predictions, shop, profile) без ошибок, если их пока нет.
- - Сборка TypeScript: на этапе Render build выполняется попытка `npx tsc -p tsconfig.json` при наличии Node; если Node недоступен, приложение продолжает работать на legacy JS, а dist будет пустым (fallback сохранится).
+   - если браузер поддерживает ES‑модули (feature-detect), базовые срезы (`dist/store/core.js`, `app.js`, `user.js`, `ui.js`) подключаются как модули (`type="module"`);
+   - если модулей нет или конкретный файл dist не загрузился — пофайловый fallback на `static/js/store/*.js` (legacy);
+   - дополнительные срезы (`realtime`, `league`, `matches`, `odds`, `predictions`, `shop`, `profile`) подхватываются из `dist/store/` только при поддержке модулей (их отсутствие не критично).
+ - Сборка TypeScript: на этапе Render build выполняется `npx tsc -p tsconfig.json`. При отсутствии Node в окружении он устанавливается локально в build и затем запускается `tsc`. Если dist по какой-то причине не собран — приложение продолжает работать на legacy JS (fallback сохранится).
+
+Проверка:
+- В современных браузерах в DevTools → Network должны быть запросы к `/static/js/dist/store/*.js` (тип: module). В средах без модулей эти запросы отсутствуют — это означает, что активен fallback и это нормальное поведение.
 
 ## Публичный API
 
@@ -77,6 +81,8 @@
 - predictions.js теперь при загрузке `/api/betting/tours` обновляет OddsStore и PredictionsStore
 - realtime-updates.js диспатчит `bettingOddsUpdate` для мгновенного обновления UI; последующая интеграция в OddsStore возможна (под фича-флаг)
  - realtime (store) будет получать события соединения/подписок и отражать их в состоянии (`connected`, `topics`, `reconnects`) для дальнейших подписок UI (этап 1. адаптеры интеграции)
+ - ETag адаптер: `etag-fetch.js` теперь дополнительно эмитит `window`-события `etag:success`/`etag:stale` с detail `{ cacheKey, data, etag, fromCache, updated, raw }` — это не меняет текущий API, но даёт единый канал для маппинга в стор.
+ - Первый слушатель: `static/js/store/etl_listeners.ts` (dist) подписывается на `etag:success` и обновляет `LeagueStore.schedule` для `cacheKey = "league:schedule"`. Подключается опционально после базовых срезов.
 
 - shop (persist)
   - state: `{ cart: ShopCartItem[]; orders: ShopOrder[]; ttl: number|null }`

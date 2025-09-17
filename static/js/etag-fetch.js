@@ -51,6 +51,9 @@
       } catch(_) { /* ignore */ }
     }
     const storeKey = cacheKey; // без префиксов (уже используется в коде проекта)
+    function emit(name, detail){
+      try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch(_) {}
+    }
     const now = Date.now();
     let cached = null;
     try { cached = safeParse(localStorage.getItem(storeKey)); } catch(_) {}
@@ -60,6 +63,7 @@
     if (isFresh && !forceRevalidate){
       const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
       try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
+      emit('etag:success', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
       return Promise.resolve(result);
     }
 
@@ -74,6 +78,7 @@
           // Ничего не изменилось — возвращаем кэш и время обновления из заголовка
           const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw, headerUpdatedAt };
           try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
+          emit('etag:success', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
           return result;
         }
         let json = null;
@@ -91,6 +96,7 @@
         try { localStorage.setItem(storeKey, JSON.stringify({ etag, ts: Date.now(), data, raw: json })); } catch(_) {}
         const result = { data, etag, fromCache: false, updated: true, raw: json, headerUpdatedAt };
         try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
+        emit('etag:success', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
         return result;
       })
       .catch(err => {
@@ -98,6 +104,7 @@
         if (cached){
           const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
           try { if (typeof onStale === 'function') onStale(result); } catch(_) {}
+          emit('etag:stale', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
           return result;
         }
         throw err;
