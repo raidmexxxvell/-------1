@@ -85,6 +85,7 @@
  - Первый слушатель: `static/js/store/etl_listeners.ts` (dist) подписывается на `etag:success` и обновляет `LeagueStore.schedule` для `cacheKey = "league:schedule"`. Подключается опционально после базовых срезов.
  - WS событийная шина: `realtime-updates.js` эмитит `ws:connected`, `ws:disconnected`, `ws:topic_update`, `ws:data_patch`, `ws:odds` (detail — полезная нагрузка события).
  - WS слушатель: `static/js/store/ws_listeners.ts` (dist) обновляет `RealtimeStore` по событиям соединения/топиков и маппит `ws:odds` в `OddsStore` с защитой от устаревших версий.
+ - WS слушатель: `static/js/store/ws_listeners.ts` (dist) обновляет `RealtimeStore` по событиям соединения/топиков, маппит `ws:odds` в `OddsStore` (с защитой от устаревших версий) и аккуратно переносит `ws:data_patch` по сущностям `match`/`match_events` в `MatchesStore` (обновление счёта и пополнение списка событий без дублей).
 
 - shop (persist)
   - state: `{ cart: ShopCartItem[]; orders: ShopOrder[]; ttl: number|null }`
@@ -100,3 +101,9 @@
   - обновляется из: realtime-updates.js (события соединения/подписки)
 
 Примечание: конкретные типы `MatchInfo`, `MatchScore`, `PredictionItem`, `Achievement`, `ShopCartItem`, `ShopOrder` — заданы в соответствующих `.ts` и могут уточняться по мере интеграции с API.
+
+## Лёгкий индикатор realtime-соединения
+
+- Файл стилей: `static/css/realtime-indicator.css`
+- Модуль: `static/js/store/realtime_indicator.ts` (подключается как `dist/store/realtime_indicator.js`)
+- Поведение: маленькая точка в правом нижнем углу, цветом показывает состояние WS (серый — оффлайн, зелёный — онлайн). Не мешает UI, доступен для screen readers (`role="status"`, `aria-live="polite"`). Синхронизируется как со `RealtimeStore.connected`, так и напрямую с событиями `ws:connected/ws:disconnected` в средах без стора.

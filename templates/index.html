@@ -64,6 +64,7 @@
     <link rel="stylesheet" href="/static/css/style.css?v={{ static_version }}">
     <link rel="stylesheet" href="/static/css/splash.css?v={{ static_version }}">
     <link rel="stylesheet" href="/static/css/blb.css?v={{ static_version }}">
+    <link rel="stylesheet" href="/static/css/realtime-indicator.css?v={{ static_version }}">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚽</text></svg>">
 </head>
 <body data-admin="{{ admin_user_id }}" class="theme-ufo">
@@ -636,7 +637,7 @@
         loadSeq(baseFiles, 0, function(){
             // After base stores are ready, try to load additional slices from dist (optional)
             if (supportsModule) {
-                var extra=['realtime.js','league.js','matches.js','odds.js','predictions.js','shop.js','profile.js','etl_listeners.js','ws_listeners.js'];
+                var extra=['realtime.js','league.js','matches.js','odds.js','predictions.js','shop.js','profile.js','etl_listeners.js','ws_listeners.js','realtime_indicator.js'];
                 extra.forEach(function(n){
                     var s=document.createElement('script'); s.defer=true; s.type='module'; s.src=distBase+n+'?v='+v; s.onerror=function(){}; document.head.appendChild(s);
                 });

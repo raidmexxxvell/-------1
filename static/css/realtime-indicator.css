@@ -1,0 +1,6 @@
+/* Lightweight realtime connection dot, non-invasive */
+.rt-conn-indicator{position:fixed;bottom:8px;right:8px;width:10px;height:10px;border-radius:50%;background:#9aa0a6;opacity:.7;z-index:2147483000;box-shadow:0 0 0 2px rgba(0,0,0,.1)}
+.rt-conn-indicator.rt-ok{background:#34a853}
+.rt-conn-indicator.rt-bad{background:#9aa0a6}
+.rt-conn-indicator:hover{opacity:1}
+.rt-conn-indicator[aria-label]{outline:0}
