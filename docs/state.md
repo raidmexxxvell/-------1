@@ -10,10 +10,10 @@
   - `static/js/store/app.js` — срез app: `ready`, `startedAt` (не персистится).
   - `static/js/store/user.js` — срез user: `id`, `name`, `role`, `flags` (persist, TTL=7d).
   - `static/js/store/ui.js` — срез ui: `activeTab`, `theme`, `modals` (частично persist, TTL=14d).
-- Подключение в шаблон: `templates/index.html` (подключены до остальных скриптов).
  - Подключение в шаблон: `templates/index.html` использует стратегию dist-first:
    - последовательно загружаются базовые срезы (`dist/store/core.js`, `app.js`, `user.js`, `ui.js`) с пофайловым fallback на `static/js/store/*.js`;
    - затем опционально подхватываются дополнительные срезы из `dist/store/` (realtime, league, matches, odds, predictions, shop, profile) без ошибок, если их пока нет.
+ - Сборка TypeScript: на этапе Render build выполняется попытка `npx tsc -p tsconfig.json` при наличии Node; если Node недоступен, приложение продолжает работать на legacy JS, а dist будет пустым (fallback сохранится).
 
 ## Публичный API
 
@@ -76,6 +76,7 @@
 Интеграция ETag/WS → Store (сводка):
 - predictions.js теперь при загрузке `/api/betting/tours` обновляет OddsStore и PredictionsStore
 - realtime-updates.js диспатчит `bettingOddsUpdate` для мгновенного обновления UI; последующая интеграция в OddsStore возможна (под фича-флаг)
+ - realtime (store) будет получать события соединения/подписок и отражать их в состоянии (`connected`, `topics`, `reconnects`) для дальнейших подписок UI (этап 1. адаптеры интеграции)
 
 - shop (persist)
   - state: `{ cart: ShopCartItem[]; orders: ShopOrder[]; ttl: number|null }`

@@ -5,7 +5,27 @@ services:
     env: python
     pythonVersion: 3.12
     plan: free
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    buildCommand: >-
+      pip install --upgrade pip && pip install -r requirements.txt &&
+      sh -c "
+      if command -v node >/dev/null 2>&1; then
+        echo 'Node found:'; node -v;
+      else
+        echo 'Installing Node.js (v20) locally for build...';
+        NODE_DIR=\"$HOME/.cache/node\"; mkdir -p \"$NODE_DIR\";
+        curl -fsSL https://nodejs.org/dist/v20.17.0/node-v20.17.0-linux-x64.tar.xz -o \"$NODE_DIR/node.tar.xz\" || true;
+        if [ -f \"$NODE_DIR/node.tar.xz\" ]; then
+          tar -xJf \"$NODE_DIR/node.tar.xz\" -C \"$NODE_DIR\" --strip-components=1 || true;
+          export PATH=\"$NODE_DIR/bin:$PATH\";
+          echo 'Node installed:'; node -v || true;
+        fi
+      fi;
+      if command -v node >/dev/null 2>&1; then
+        npx --yes typescript@5.6.3 -p tsconfig.json || true;
+      else
+        echo 'Skipping TS compile: Node not available';
+      fi
+      "
     startCommand: gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 -b 0.0.0.0:$PORT wsgi:app
     healthCheckPath: /ping
     autoDeploy: true
