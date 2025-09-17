@@ -99,12 +99,28 @@ declare global {
         if (!incoming.length) return;
         window.MatchesStore.update(s => {
           const cur = s.map[key] || { info: { id: key, home, away, date }, score: null, events: [], lastUpdated: null };
-          // простая слияние: добавляем новые события в конец, избегая дублей по (t,kind)
-          const seen = new Set(cur.events.map(ev => `${ev.t}|${ev.kind}`));
+          // простая слияние: добавляем новые события в конец, избегая дублей по (t,kind,team)
+          const seen = new Set(cur.events.map(ev => `${ev.t}|${ev.kind}|${ev.team||ev.teamName||ev.side||''}`));
           for (const ev of incoming) {
-            const sig = `${ev.t}|${ev.kind}`;
+            const sig = `${ev.t}|${ev.kind}|${ev.team||ev.teamName||ev.side||''}`;
             if (!seen.has(sig)) { cur.events.push(ev); seen.add(sig); }
           }
+          cur.lastUpdated = Date.now();
+          s.map[key] = cur;
+        });
+      }
+
+      // optional: match_stats patch
+      if (p.entity === 'match_stats') {
+        const id = p.id || {}; const fields = p.fields || {};
+        const home = id.home || p.home || fields.home || '';
+        const away = id.away || p.away || fields.away || '';
+        const date = id.date || p.date || '';
+        if (!home || !away) return;
+        const key = `${home}_${away}_${date||''}`;
+        window.MatchesStore.update(s => {
+          const cur = s.map[key] || { info: { id: key, home, away, date }, score: null, events: [], lastUpdated: null } as any;
+          cur.stats = Object.assign({}, cur.stats || {}, fields?.stats || fields || {});
           cur.lastUpdated = Date.now();
           s.map[key] = cur;
         });

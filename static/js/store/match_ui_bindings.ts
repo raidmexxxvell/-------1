@@ -3,7 +3,9 @@ import type { StoreApi } from './core';
 // Minimal types aligned with matches.ts (kept local to avoid tight coupling)
 type MatchInfo = { home: string; away: string; date?: string };
 type MatchScore = { home: number; away: number };
-type MatchEntry = { info?: MatchInfo | null; score?: MatchScore | null; lastUpdated?: number | null };
+type MatchEvent = { t?: number; kind?: string; team?: string; side?: 'home'|'away'; teamName?: string };
+type MatchStats = { home?: Record<string, any>; away?: Record<string, any>; [k: string]: any };
+type MatchEntry = { info?: MatchInfo | null; score?: MatchScore | null; events?: MatchEvent[]; stats?: MatchStats | null; lastUpdated?: number | null };
 type MatchesState = { map: Record<string, MatchEntry> };
 
 
@@ -17,6 +19,8 @@ type MatchesState = { map: Record<string, MatchEntry> };
   const detailsEl = () => document.getElementById('ufo-match-details') as HTMLElement | null;
   const nameEl = (id: string) => document.getElementById(id) as HTMLElement | null;
   const bodyEl = () => (detailsEl()?.querySelector('.modal-body') as HTMLElement | null) || detailsEl();
+  const paneHome = () => document.getElementById('md-pane-home') as HTMLElement | null;
+  const paneAway = () => document.getElementById('md-pane-away') as HTMLElement | null;
 
   function getVisible(el: HTMLElement | null): boolean {
     return !!el && el.style.display !== 'none';
@@ -111,6 +115,39 @@ type MatchesState = { map: Record<string, MatchEntry> };
     }
   }
 
+  function ensureStatsContainers(){
+    const home = paneHome(); const away = paneAway();
+    if (home && !home.querySelector('#md-stats-home')) {
+      const box = document.createElement('div'); box.id='md-stats-home'; box.style.marginTop='8px'; box.style.opacity='.95';
+      const title=document.createElement('div'); title.textContent='Статистика — Команда 1'; title.style.fontWeight='800'; title.style.fontSize='13px'; title.style.margin='6px 0';
+      const list=document.createElement('ul'); list.style.listStyle='none'; list.style.margin='0'; list.style.padding='0'; list.id='md-stats-home-list';
+      box.append(title,list); home.appendChild(box);
+    }
+    if (away && !away.querySelector('#md-stats-away')) {
+      const box = document.createElement('div'); box.id='md-stats-away'; box.style.marginTop='8px'; box.style.opacity='.95';
+      const title=document.createElement('div'); title.textContent='Статистика — Команда 2'; title.style.fontWeight='800'; title.style.fontSize='13px'; title.style.margin='6px 0';
+      const list=document.createElement('ul'); list.style.listStyle='none'; list.style.margin='0'; list.style.padding='0'; list.id='md-stats-away-list';
+      box.append(title,list); away.appendChild(box);
+    }
+  }
+
+  function renderStats(stats?: MatchStats | null){
+    ensureStatsContainers();
+    const homeList = document.getElementById('md-stats-home-list');
+    const awayList = document.getElementById('md-stats-away-list');
+    if (homeList) homeList.innerHTML=''; if (awayList) awayList.innerHTML='';
+    const renderList = (list: HTMLElement|null, obj?: Record<string, any>) => {
+      if (!list || !obj) return;
+      for (const [k,v] of Object.entries(obj)){
+        const li=document.createElement('li'); li.style.display='flex'; li.style.justifyContent='space-between'; li.style.padding='2px 0';
+        const left=document.createElement('span'); left.textContent=k;
+        const right=document.createElement('strong'); right.textContent=String(v);
+        li.append(left,right); list.appendChild(li);
+      }
+    };
+    renderList(homeList, stats?.home); renderList(awayList, stats?.away);
+  }
+
   function applyFromState(state: MatchesState): void {
     const panel = detailsEl();
     if (!getVisible(panel)) return;
@@ -120,6 +157,8 @@ type MatchesState = { map: Record<string, MatchEntry> };
     renderScore(entry?.score || null);
     // events (best-effort)
     try { renderEvents((entry as any)?.events || []); } catch {}
+    // stats (admin changes reflect instantly via WS match_stats)
+    try { renderStats(entry?.stats || null); } catch {}
   }
 
   // Initial apply and subscribe
