@@ -153,6 +153,18 @@
   function editTeam(teamId) { openTeamModal(teamId); }
 
   async function deleteTeam(teamId, name) {
+    // Проверка feature flag для опасной операции
+    if (window.AdminFeatureFlags && !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:team_delete')) {
+      const enable = window.AdminFeatureFlags.enableDangerousOperation(
+        'feature:admin:team_delete',
+        'Удаление команды из системы'
+      );
+      if (!enable) {
+        showToast('Операция заблокирована feature flag: feature:admin:team_delete', 'warning');
+        return;
+      }
+    }
+
     if (!confirm(`Удалить команду "${name}"?`)) return;
     try {
       const res = await fetch(`/api/admin/teams/${teamId}`, {

@@ -67,6 +67,22 @@
       }
     });
     if (btnFullReset) btnFullReset.addEventListener('click', async () => {
+      // Проверка feature flag для опасной операции
+      if (window.AdminFeatureFlags && !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:season_reset')) {
+        const enable = window.AdminFeatureFlags.enableDangerousOperation(
+          'feature:admin:season_reset',
+          'Полный сброс сезона (удаление всех временных данных)'
+        );
+        if (!enable) {
+          try {
+            window.showAlert?.('Операция заблокирована feature flag', 'warning');
+          } catch(_) {
+            alert('Операция заблокирована feature flag: feature:admin:season_reset');
+          }
+          return;
+        }
+      }
+
       try {
         const ok = confirm('Полный сброс данных за сезон 25-26? Это удалит временные данные (снимки, ставки, заказы, стримы, комментарии). Пользователи и логи останутся.');
         if (!ok) return;
@@ -151,6 +167,22 @@
         const tdDel = document.createElement('td');
         const btnDel = document.createElement('button'); btnDel.className='details-btn'; btnDel.textContent='✖';
         btnDel.addEventListener('click', async () => {
+          // Проверка feature flag для опасной операции
+          if (window.AdminFeatureFlags && !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:order_delete')) {
+            const enable = window.AdminFeatureFlags.enableDangerousOperation(
+              'feature:admin:order_delete',
+              'Удаление заказа (необратимое действие)'
+            );
+            if (!enable) {
+              try {
+                window.showAlert?.('Операция заблокирована feature flag', 'warning');
+              } catch(_) {
+                alert('Операция заблокирована feature flag: feature:admin:order_delete');
+              }
+              return;
+            }
+          }
+
           try {
             if (!confirm('Удалить заказ?')) return;
             btnDel.disabled = true;

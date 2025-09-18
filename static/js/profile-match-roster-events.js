@@ -15,7 +15,47 @@
       if(isMulti){ // селект 0-9 для гол/ассист
         const box=document.createElement('div'); box.style.display='flex'; box.style.gap='6px'; box.style.alignItems='center'; box.style.justifyContent='center'; const sel=document.createElement('select'); for(let i=0;i<=9;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=String(i); sel.appendChild(o); } sel.value=String(count);
         const icon=document.createElement('img'); icon.style.width='18px'; icon.style.height='18px'; icon.style.objectFit='contain'; icon.style.opacity=count>0?'1':'0.25'; const srcHint=(type==='assist')?'/static/img/icons/assist.png':'/static/img/icons/goal.png'; const candidates=[vUrl(srcHint), vUrl('/static/img/icons/placeholder.png'), vUrl('/static/img/placeholderlogo.png')]; let ic=0; const nextI=()=>{ if(ic>=candidates.length)return; icon.onerror=()=>{ ic++; nextI(); }; icon.src=candidates[ic]; }; nextI();
-        const applyDelta=async(delta)=>{ if(delta===0) return; const abs=Math.abs(delta); for(let k=0;k<abs;k++){ const fd=new FormData(); fd.append('initData', tg?.initData||''); fd.append('home',match.home||''); fd.append('away',match.away||''); fd.append('team',side); fd.append('player',player||''); fd.append('type',type); const url= delta>0? '/api/match/events/add':'/api/match/events/remove'; try { const r=await fetch(url,{method:'POST', body:fd}); const d=await r.json(); if(d?.error){ window.showAlert?.(d.error,'error'); break; } } catch(e){ console.error('events delta',e); window.showAlert?.('Ошибка сохранения','error'); break; } }
+        const applyDelta=async(delta)=>{ 
+            if(delta===0) return; 
+            const abs=Math.abs(delta); 
+            for(let k=0;k<abs;k++){ 
+                // Проверка feature flag для удаления событий
+                if (delta < 0 && window.AdminFeatureFlags && !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:event_remove')) {
+                    const enable = window.AdminFeatureFlags.enableDangerousOperation(
+                        'feature:admin:event_remove',
+                        'Удаление событий матча (необратимое действие)'
+                    );
+                    if (!enable) {
+                        try {
+                            window.showAlert?.('Операция заблокирована feature flag', 'warning');
+                        } catch(_) {
+                            alert('Операция заблокирована feature flag: feature:admin:event_remove');
+                        }
+                        return;
+                    }
+                }
+                
+                const fd=new FormData(); 
+                fd.append('initData', tg?.initData||''); 
+                fd.append('home',match.home||''); 
+                fd.append('away',match.away||''); 
+                fd.append('team',side); 
+                fd.append('player',player||''); 
+                fd.append('type',type); 
+                const url= delta>0? '/api/match/events/add':'/api/match/events/remove'; 
+                try { 
+                    const r=await fetch(url,{method:'POST', body:fd}); 
+                    const d=await r.json(); 
+                    if(d?.error){ 
+                        window.showAlert?.(d.error,'error'); 
+                        break; 
+                    } 
+                } catch(e){ 
+                    console.error('events delta',e); 
+                    window.showAlert?.('Ошибка сохранения','error'); 
+                    break; 
+                } 
+            }
         };
         sel.addEventListener('change',async()=>{ try { const desired=parseInt(sel.value,10)||0; const current=getCount(key,type); if(desired===current) return; sel.disabled=true; await applyDelta(desired-current); // обновляем локально
           if(!evIdx.has(key)) evIdx.set(key,{goal:0,assist:0,yellow:0,red:0}); evIdx.get(key)[type]=desired; icon.style.opacity= desired>0? '1':'0.25'; highlightRow(trRef,key);
