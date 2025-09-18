@@ -288,3 +288,129 @@ localStorage.setItem('feature:profile_store', '1');
 - Реактивные обновления UI
 
 Это завершает задачу **Profile унификации** согласно roadmap этап 5.
+
+---
+
+## Leaderboard Store (НОВОЕ)
+
+Централизованное управление данными лидерборда с автоматическим polling и prefetch.
+
+### Состояние
+
+```typescript
+interface LeaderboardState {
+  // Прогнозисты (топ по винрейту)
+  predictors: {
+    items: LeaderboardPredictorItem[];
+    lastUpdated: number | null;
+    etag?: string | null;
+  };
+  
+  // Богатство (топ по кредитам)  
+  rich: {
+    items: LeaderboardRichItem[];
+    lastUpdated: number | null;
+    etag?: string | null;
+  };
+  
+  // Сервер (топ игроков)
+  server: {
+    items: LeaderboardServerItem[];
+    lastUpdated: number | null;
+    etag?: string | null;
+  };
+  
+  // Призы
+  prizes: {
+    items: LeaderboardPrizeItem[];
+    lastUpdated: number | null;
+    etag?: string | null;
+  };
+  
+  // Управление состоянием
+  activeTab: 'predictors' | 'rich' | 'server' | 'prizes';
+  isPolling: boolean;
+  lastGlobalUpdate: number | null;
+}
+```
+
+### Персистенция
+
+- **Без персистенции** — данные лидерборда всегда свежие
+- **Кэширование в памяти** с TTL 60 секунд
+- **ETag поддержка** для минимизации трафика
+
+### Ключевые возможности
+
+1. **Типизированные данные лидерборда**:
+   - `LeaderboardPredictorItem` — прогнозисты (винрейт, ставки)
+   - `LeaderboardRichItem` — богатство (кредиты)
+   - `LeaderboardServerItem` — топ игроков (очки, матчи)
+   - `LeaderboardPrizeItem` — призы (период, победитель, сумма)
+
+2. **Автоматическое кэширование**:
+   - `updatePredictors()`, `updateRich()`, `updateServer()`, `updatePrizes()`
+   - Автоматическая нумерация рангов (rank)
+   - ETag-версионирование для эффективных обновлений
+
+3. **Умный polling**:
+   - Обновление только активной вкладки каждые 60 секунд
+   - Приостановка при скрытии страницы (`document.hidden`)
+   - Джиттер для распределения нагрузки на сервер
+
+4. **Prefetch неактивных вкладок**:
+   - Фоновая загрузка `rich`, `server`, `prizes` для быстрого переключения
+   - Проверка актуальности данных перед загрузкой
+
+5. **Управление состоянием UI**:
+   - `setActiveTab()` — переключение между вкладками лидерборда
+   - `setPollingState()` — контроль статуса автообновления
+   - `isDataFresh()` — проверка актуальности данных
+
+### Feature flag активация
+
+```javascript
+localStorage.setItem('feature:leaderboard_store', '1');
+```
+
+При включении флага подключаются адаптеры:
+- `leaderboard_adapter.js` — интеграция с `loadLBPredictors()` и рендерингом
+- `leaderboard_polling_adapter.js` — умное автообновление с джиттером
+
+### Адаптеры интеграции
+
+#### 1. Main Adapter
+- Переопределяет `window.loadLBPredictors()`, `loadLBRich()`, `loadLBServer()`, `loadLBPrizes()`
+- Реактивное обновление UI при изменениях в сторе
+- Сохранение совместимости с параметрами `{ forceRevalidate, skipIfNotUpdated }`
+- Автоматический рендеринг таблиц с правильными CSS-классами рангов
+
+#### 2. Polling Adapter
+- Автоматический polling активной вкладки каждые 60 секунд + джиттер
+- Отслеживание переключения вкладок через DOM события
+- Prefetch неактивных вкладок для мгновенного переключения
+- Приостановка polling при скрытии страницы
+
+### Интеграция с существующим кодом
+
+- **Полная совместимость** с логикой лидерборда в `profile.js`
+- **Сохранение функций** `ensureLeaderboardInit()`, polling таймеров
+- **Реактивный UI** через подписки на стор
+- **Умное кэширование** с проверкой актуальности
+
+### Логика ДО/ПОСЛЕ
+
+**ДО (без стора)**:
+- Каждая вкладка лидерборда имела собственную логику загрузки в `profile.js`
+- Polling и prefetch управлялись через глобальные переменные
+- Дублирование кода рендеринга для каждого типа лидерборда
+- Нет централизованного кэширования состояния
+
+**ПОСЛЕ (со стором)**:
+- Единый источник истины в `LeaderboardStore`
+- Централизованный polling с умным управлением видимостью
+- Типизированные данные с автоматической нумерацией рангов
+- Реактивное обновление UI через подписки на стор
+- Prefetch с проверкой актуальности данных
+
+Это добавляет **Leaderboard унификацию** как расширение roadmap этап 5.
