@@ -390,6 +390,16 @@
         } else {
           toursEl.appendChild(container);
           toursEl.dataset.hasContent = '1';
+          
+          // Принудительная загрузка коэффициентов сразу после рендеринга
+          setTimeout(() => {
+            try {
+              // Обновляем UI коэффициентами из кэша
+              updateOddsUIFromStore(data);
+              // Синхронизируем централизованный стор
+              updateStoresFromTours(data);
+            } catch(_) {}
+          }, 50);
         }
       };
 
@@ -487,9 +497,21 @@
   const __FRESH_TTL__ = 5 * 60 * 1000; // 5 минут
   const __isFresh__ = cached && Number.isFinite(cached.ts) && (Date.now() - cached.ts < __FRESH_TTL__) && ((cached?.data?.tours && cached.data.tours.length>0) || (cached?.tours && cached.tours.length>0));
   if (cached && cached.version) {
-        fetchWithETag(cached.version).then((store)=>{ if(!__isFresh__) { renderTours(store); } updateOddsUIFromStore(store); startOddsPolling(store?.version); }).catch(()=>{}).finally(()=>{ _toursLoading = false; });
+        fetchWithETag(cached.version).then((store)=>{ 
+          if(!__isFresh__) { renderTours(store); } 
+          updateOddsUIFromStore(store); 
+          startOddsPolling(store?.version);
+          // Дополнительное обновление коэффициентов через небольшую задержку
+          setTimeout(() => updateOddsUIFromStore(store), 200);
+        }).catch(()=>{}).finally(()=>{ _toursLoading = false; });
       } else {
-        fetchWithETag(null).then((store)=>{ if(!__isFresh__) { renderTours(store); } updateOddsUIFromStore(store); startOddsPolling(store?.version); }).catch(err => {
+        fetchWithETag(null).then((store)=>{ 
+          if(!__isFresh__) { renderTours(store); } 
+          updateOddsUIFromStore(store); 
+          startOddsPolling(store?.version);
+          // Дополнительное обновление коэффициентов через небольшую задержку
+          setTimeout(() => updateOddsUIFromStore(store), 200);
+        }).catch(err => {
           if (!cached || !__isFresh__) toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
         }).finally(()=>{ _toursLoading = false; });
       }
@@ -677,11 +699,42 @@
   const formatDateTime = (d,t) => (window.MatchUtils? window.MatchUtils.formatDateTime(d,t): (d||'') );
   const isLiveNow = (m) => (window.MatchUtils? window.MatchUtils.isLiveNow(m): false);
 
-    // Автозагрузка при входе во вкладку
+    // Автозагрузка при входе во вкладку (каждый раз, не только первый)
     document.addEventListener('click', (e) => {
       const item = e.target.closest('.nav-item[data-tab="predictions"]');
-      if (item) { loadTours(); }
-    }, { once: true });
+      if (item) { 
+        // Загружаем коэффициенты сразу при переходе на вкладку
+        setTimeout(() => loadTours(), 100);
+      }
+    });
+
+    // Автозагрузка коэффициентов при показе вкладки predictions
+    const checkAndLoadOnVisible = () => {
+      const predTab = document.querySelector('.nav-item[data-tab="predictions"]');
+      const isPredActive = predTab && predTab.classList.contains('active');
+      if (isPredActive && wrap && !wrap.hidden) {
+        loadTours();
+      }
+    };
+
+    // Наблюдатель за изменением видимости вкладки
+    const observer = new MutationObserver(() => {
+      checkAndLoadOnVisible();
+    });
+
+    // Следим за изменениями класса active у вкладок
+    document.querySelectorAll('.nav-item').forEach(item => {
+      observer.observe(item, { attributes: true, attributeFilter: ['class'] });
+    });
+
+    // Периодическое обновление коэффициентов (каждые 30 сек) если вкладка активна
+    setInterval(() => {
+      const predTab = document.querySelector('.nav-item[data-tab="predictions"]');
+      const isPredActive = predTab && predTab.classList.contains('active');
+      if (isPredActive && wrap && !wrap.hidden) {
+        loadTours();
+      }
+    }, 30000);
 
     // --- НОВЫЙ КОД: Обработчик обновлений коэффициентов от WebSocket ---
     document.addEventListener('bettingOddsUpdate', (e) => {
