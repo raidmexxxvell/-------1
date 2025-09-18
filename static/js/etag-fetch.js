@@ -52,7 +52,13 @@
     }
     const storeKey = cacheKey; // без префиксов (уже используется в коде проекта)
     function emit(name, detail){
-      try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch(_) {}
+      try { 
+        window.dispatchEvent(new CustomEvent(name, { detail })); 
+        // Debug logging for cache events in dev mode
+        if (window.StoreDebugger?.enabled) {
+          console.log(`📡 ETag Event: ${name}`, detail);
+        }
+      } catch(_) {}
     }
     const now = Date.now();
     let cached = null;
@@ -64,6 +70,7 @@
       const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
       try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
       emit('etag:success', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
+      emit('etag:cache_hit', { cacheKey: storeKey, url: normalizeKey(finalUrl), age: now - (cached.ts||0) });
       return Promise.resolve(result);
     }
 
@@ -79,6 +86,7 @@
           const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw, headerUpdatedAt };
           try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
           emit('etag:success', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
+          emit('etag:not_modified', { cacheKey: storeKey, url: normalizeKey(finalUrl), etag: cached.etag });
           return result;
         }
         let json = null;
@@ -97,10 +105,12 @@
         const result = { data, etag, fromCache: false, updated: true, raw: json, headerUpdatedAt };
         try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
         emit('etag:success', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
+        emit('etag:cache_miss', { cacheKey: storeKey, url: normalizeKey(finalUrl), etag });
         return result;
       })
       .catch(err => {
         console.warn('fetchEtag error', err);
+        emit('etag:error', { cacheKey: storeKey, url: normalizeKey(finalUrl), error: err.message || 'Network error' });
         if (cached){
           const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
           try { if (typeof onStale === 'function') onStale(result); } catch(_) {}
@@ -110,6 +120,49 @@
         throw err;
       });
   }
+
+  // Global cache management utilities
+  window.fetchEtagUtils = {
+    clearCache: function(pattern) {
+      if (!localStorage) return 0;
+      let count = 0;
+      const keys = Object.keys(localStorage);
+      for (const key of keys) {
+        if (!pattern || key.includes(pattern)) {
+          try { localStorage.removeItem(key); count++; } catch(_) {}
+        }
+      }
+      console.log(`🗑️ Cleared ${count} cache entries${pattern ? ` matching "${pattern}"` : ''}`);
+      return count;
+    },
+    
+    getCacheStats: function() {
+      if (!localStorage) return { total: 0, etag: 0, size: 0 };
+      const keys = Object.keys(localStorage);
+      let etagCount = 0, totalSize = 0;
+      
+      for (const key of keys) {
+        try {
+          const value = localStorage.getItem(key);
+          if (value) {
+            totalSize += value.length;
+            // Heuristic: ETag cache entries usually have 'etag' property
+            if (value.includes('"etag"') || key.includes(':')) etagCount++;
+          }
+        } catch(_) {}
+      }
+      
+      return {
+        total: keys.length,
+        etag: etagCount,
+        size: Math.round(totalSize / 1024) // KB
+      };
+    },
+    
+    invalidateByPrefix: function(prefix) {
+      return this.clearCache(prefix);
+    }
+  };
 
   window.fetchEtag = fetchEtag;
 })();

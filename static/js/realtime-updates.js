@@ -11,11 +11,19 @@ class RealtimeUpdater {
     constructor() {
         this.socket = null;
         this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
+        this.maxReconnectAttempts = 8;  // increased from 5
         this.reconnectDelay = 1000;
+        this.maxReconnectDelay = 30000; // 30 sec max
+        this.jitterFactor = 0.3;        // 30% random jitter
         this.isConnected = false;
         this.callbacks = new Map();
         this.debug = localStorage.getItem('websocket_debug') === 'true';
+        // Heartbeat config
+        this.heartbeatInterval = null;
+        this.heartbeatTimeout = null;
+        this.pingInterval = 25000;      // 25 sec ping
+        this.pongTimeout = 5000;        // 5 sec pong wait
+        this.lastPongTime = 0;
     // Версионность коэффициентов по матчу: key = "home|away" → int
     this.oddsVersions = new Map();
     // Очередь тем для подписки до момента connect
@@ -71,6 +79,7 @@ class RealtimeUpdater {
             
             this.isConnected = true;
             this.reconnectAttempts = 0;
+            this.setupHeartbeat();
     try { window.RealtimeStore && window.RealtimeStore.set({ connected: true }); } catch(_){}
     __wsEmit('ws:connected', { reconnects: this.reconnectAttempts });
             
@@ -101,6 +110,7 @@ class RealtimeUpdater {
     this.socket.on('disconnect', (reason) => {
             
             this.isConnected = false;
+            this.clearHeartbeat();
             try { window.RealtimeStore && window.RealtimeStore.set({ connected: false }); } catch(_){}
             __wsEmit('ws:disconnected', { reason: reason || '' });
             
@@ -113,6 +123,7 @@ class RealtimeUpdater {
         this.socket.on('connect_error', (error) => {
             
             this.isConnected = false;
+            this.clearHeartbeat();
             try { window.RealtimeStore && window.RealtimeStore.update(s => { s.connected = false; s.reconnects = (s.reconnects||0)+1; }); } catch(_){}
             this.scheduleReconnect();
         });
@@ -370,19 +381,69 @@ class RealtimeUpdater {
 
     scheduleReconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            
+            console.warn(`🔌 Max reconnect attempts (${this.maxReconnectAttempts}) reached`);
+            __wsEmit('ws:max_reconnects_reached', { attempts: this.reconnectAttempts });
             return;
         }
         
+        this.clearHeartbeat();
         this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-    // Планируем повторное подключение через delay мс (экспоненциальная задержка)
+        
+        // Exponential backoff with jitter
+        const baseDelay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+        const maxDelay = Math.min(baseDelay, this.maxReconnectDelay);
+        const jitter = maxDelay * this.jitterFactor * Math.random();
+        const delay = maxDelay + jitter;
+        
+        console.log(`🔄 Reconnecting in ${Math.round(delay/1000)}s (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+        __wsEmit('ws:reconnect_scheduled', { attempt: this.reconnectAttempts, delay });
         
         setTimeout(() => {
             if (!this.isConnected) {
                 this.socket?.connect();
             }
         }, delay);
+    }
+    
+    setupHeartbeat() {
+        this.clearHeartbeat();
+        
+        this.heartbeatInterval = setInterval(() => {
+            if (this.isConnected && this.socket) {
+                this.socket.emit('ping', { timestamp: Date.now() });
+                
+                // Set timeout for pong response
+                this.heartbeatTimeout = setTimeout(() => {
+                    console.warn('🏓 Pong timeout - disconnecting');
+                    this.socket?.disconnect();
+                }, this.pongTimeout);
+            }
+        }, this.pingInterval);
+        
+        // Listen for pong responses
+        if (this.socket) {
+            this.socket.on('pong', (data) => {
+                this.lastPongTime = Date.now();
+                if (this.heartbeatTimeout) {
+                    clearTimeout(this.heartbeatTimeout);
+                    this.heartbeatTimeout = null;
+                }
+                if (this.debug) {
+                    console.log('🏓 Pong received', data);
+                }
+            });
+        }
+    }
+    
+    clearHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
+        if (this.heartbeatTimeout) {
+            clearTimeout(this.heartbeatTimeout);
+            this.heartbeatTimeout = null;
+        }
     }
     
     handleDataUpdate(message) {
