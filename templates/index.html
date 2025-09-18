@@ -690,6 +690,8 @@
     <script src="/static/js/predictions.js?v={{ static_version }}"></script>
     <!-- Real-time обновления через WebSocket -->
     <script src="/static/js/realtime-updates.js?v={{ static_version }}"></script>
+    <!-- Admin structured logging (loads after stores and WS) -->
+    <script src="/static/js/admin-logger.js?v={{ static_version }}"></script>
         <script>
         // Fallback навигации: активируется, если основной скрипт не сработал (некоторые мобильные WebView срезают ошибки)
         (function(){

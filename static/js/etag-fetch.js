@@ -54,6 +54,11 @@
     function emit(name, detail){
       try { 
         window.dispatchEvent(new CustomEvent(name, { detail })); 
+        // Admin logging for structured logs
+        if (window.AdminLogger) {
+          const eventType = name.replace('etag:', '');
+          window.AdminLogger.logETagEvent(detail.cacheKey, eventType, detail);
+        }
         // Debug logging for cache events in dev mode
         if (window.StoreDebugger?.enabled) {
           console.log(`📡 ETag Event: ${name}`, detail);

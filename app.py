@@ -8875,6 +8875,118 @@ def telegram_webhook_handler(maybe_token: str):
 def ping():
     return jsonify({'pong': True, 'ts': datetime.now(timezone.utc).isoformat()}), 200
 
+# Health check endpoints for smoke testing
+@app.route('/healthz')
+def healthz():
+    """Basic health check - returns 200 if app is running"""
+    try:
+        # Basic database connectivity check
+        db = get_db()
+        db.execute('SELECT 1').fetchone()
+        
+        status = {
+            'status': 'healthy',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'database': 'connected',
+            'app': 'running'
+        }
+        return jsonify(status), 200
+    except Exception as e:
+        status = {
+            'status': 'unhealthy',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'error': str(e),
+            'database': 'error',
+            'app': 'degraded'
+        }
+        return jsonify(status), 503
+
+@app.route('/version')
+def version():
+    """Returns version and build information"""
+    import sys
+    version_info = {
+        'app_name': 'Liga Obninska',
+        'version': '1.0.0',
+        'build_time': datetime.now(timezone.utc).isoformat(),
+        'python_version': sys.version,
+        'features': {
+            'websockets': True,
+            'centralized_store': True,
+            'etag_caching': True,
+            'admin_logging': True,
+            'security_system': SECURITY_SYSTEM_AVAILABLE
+        }
+    }
+    return jsonify(version_info), 200
+
+@app.route('/features')
+def features():
+    """Returns current feature flags and system capabilities"""
+    features_info = {
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'store': {
+            'centralized': True,
+            'typescript': True,
+            'persistence': ['user', 'shop', 'ui']
+        },
+        'networking': {
+            'etag_caching': True,
+            'websockets': True,
+            'heartbeat': True,
+            'backoff_strategy': 'exponential_jitter'
+        },
+        'ui': {
+            'feature_flags': True,
+            'match_ui_store': True,
+            'debug_mode': True
+        },
+        'monitoring': {
+            'admin_logging': True,
+            'store_debugger': True,
+            'cache_utils': True,
+            'performance_metrics': SECURITY_SYSTEM_AVAILABLE
+        },
+        'deployment': {
+            'platform': 'render.com',
+            'environment': os.environ.get('ENVIRONMENT', 'production'),
+            'typescript_compilation': True
+        }
+    }
+    return jsonify(features_info), 200
+
+# Admin client logs endpoint
+@app.route('/api/admin/client-logs', methods=['POST'])
+def admin_client_logs():
+    """Receives structured logs from admin clients"""
+    try:
+        # Check if user is admin
+        init_data = request.headers.get('X-Telegram-Init-Data', '')
+        user_info = _extract_user_info(init_data)
+        
+        if not user_info or user_info.get('role') not in ['admin', 'owner']:
+            return jsonify({'error': 'Access denied'}), 403
+            
+        if not request.is_json:
+            return jsonify({'error': 'JSON required'}), 400
+            
+        data = request.get_json()
+        logs = data.get('logs', [])
+        
+        # Store in database or log file (simplified implementation)
+        for log_entry in logs:
+            app.logger.info(f"[CLIENT-LOG] {log_entry.get('level', 'info').upper()} "
+                           f"[{log_entry.get('category', 'unknown')}] "
+                           f"{log_entry.get('message', '')} "
+                           f"| Session: {log_entry.get('sessionId', 'unknown')} "
+                           f"| Metadata: {json.dumps(log_entry.get('metadata', {}))}")
+        
+        return jsonify({'received': len(logs), 'status': 'ok'}), 200
+        
+    except Exception as e:
+        app.logger.error(f"Admin client logs error: {e}")
+        return jsonify({'error': 'Internal error'}), 500
+
 # -------- Public profiles (batch) for prizes overlay --------
 @app.route('/api/users/public-batch', methods=['POST'])
 def api_users_public_batch():
