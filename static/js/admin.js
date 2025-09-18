@@ -6,13 +6,11 @@
   let __ordersReqSeq = 0;
   function ensureAdminInit() {
     if (__adminInitDone) return; // уже инициализировано
-    const btnAll = document.getElementById('admin-refresh-all');
-    const btnUsers = document.getElementById('admin-users-refresh');
-    const btnSync = document.getElementById('admin-sync-refresh');
-  const btnBump = document.getElementById('admin-bump-version');
-  const btnFullReset = document.getElementById('admin-full-reset');
+  const btnAll = document.getElementById('admin-refresh-all');
+  const btnUsers = document.getElementById('admin-users-refresh');
+    const btnBump = document.getElementById('admin-bump-version');
+    const btnFullReset = document.getElementById('admin-full-reset');
     const lblUsers = document.getElementById('admin-users-stats');
-    const lblSync = document.getElementById('admin-sync-summary');
     try {
       const tabs = document.querySelectorAll('#admin-subtabs .subtab-item');
       const panes = { service: document.getElementById('admin-pane-service'), stats: document.getElementById('admin-pane-stats'), orders: document.getElementById('admin-pane-orders'), streams: document.getElementById('admin-pane-streams') };
@@ -43,16 +41,7 @@
   fetch('/api/betting/tours/refresh', { method: 'POST', body: fd })
       ]).finally(() => { btnAll.disabled = false; btnAll.textContent = orig; });
     });
-  if (btnUsers && lblUsers) btnUsers.addEventListener('click', renderAdminStats);
-    if (btnSync && lblSync) btnSync.addEventListener('click', () => {
-      btnSync.disabled = true; const o = btnSync.textContent; btnSync.textContent='...';
-      fetch('/health/sync').then(r=>r.json()).then(m => {
-        const last = m.last_sync || {}; const st = m.last_sync_status || {}; const dur = m.last_sync_duration_ms || {};
-        const keys = ['league-table','stats-table','schedule','results','betting-tours','leaderboards'];
-        const lines = keys.map(k => `${k}: ${st[k]||'—'}, ${dur[k]||0}мс, at ${last[k]||'—'}`);
-        lblSync.textContent = lines.join(' | ');
-      }).finally(()=>{ btnSync.disabled=false; btnSync.textContent=o; });
-    });
+    if (btnUsers && lblUsers) btnUsers.addEventListener('click', renderAdminStats);
     if (btnBump) btnBump.addEventListener('click', async () => {
       try {
         btnBump.disabled = true; const o = btnBump.textContent; btnBump.textContent = '...';
