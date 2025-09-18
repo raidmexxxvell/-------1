@@ -147,3 +147,22 @@ fetchEtagUtils.getCacheStats()
 StoreDebugger.toggle()
 StoreDebugger.logState()
 ```
+
+## Betting Configuration Changes
+
+### Vote Influence Update (18 сентября 2025)
+- **BET_VOTE_INFLUENCE_MAX**: увеличено с 9% до 15%
+- **Влияние**: голосования пользователей теперь сильнее влияют на коэффициенты
+- **Тестирование**: проверить что после голосования коэффициенты заметно изменяются
+- **Rollback**: установить `BET_VOTE_INFLUENCE_MAX=0.09` в render.yaml и redeploy
+
+### Betting Environment Variables Reference
+```bash
+BET_VOTE_INFLUENCE_MAX=0.15    # Максимальное влияние голосований (was 0.09)
+BET_MARGIN=0.06                # Маржа букмекера (6%)
+BET_SOFTMAX_GAMMA=1.30         # "Заострение" коэффициентов
+BET_FAV_TARGET_ODDS=1.40       # Целевой коэффициент фаворита
+BET_MIN_STAKE=10               # Минимальная ставка
+BET_MAX_STAKE=10000            # Максимальная ставка
+BET_DAILY_MAX_STAKE=50000      # Дневной лимит ставок
+```

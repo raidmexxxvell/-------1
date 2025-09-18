@@ -643,9 +643,10 @@
     function loadMyBets() {
       if (!myBetsEl) return;
       if (!tg || !tg.initDataUnsafe?.user) { myBetsEl.textContent = 'Недоступно вне Telegram'; return; }
-      const CACHE_KEY = 'betting:mybets';
+      
+      // Используем PredictionsStore вместо прямого localStorage
       const FRESH_TTL = 2 * 60 * 1000; // 2 минуты
-      const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
+      
       const render = (data) => {
         const ds = data?.bets ? data : (data?.data || {});
         const bets = ds.bets || [];
@@ -682,17 +683,29 @@
         myBetsEl.innerHTML = '';
         myBetsEl.appendChild(list);
       };
-      const cached = readCache();
-      if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
-        render(cached);
+      
+      // Проверяем кэш в PredictionsStore
+      const cachedBets = window.PredictionHelpers?.getCachedMyBets?.(FRESH_TTL);
+      if (cachedBets) {
+        render({ bets: cachedBets });
       } else {
         myBetsEl.innerHTML = '<div class="schedule-loading">Загрузка...</div>';
       }
+      
       const fd = new FormData(); fd.append('initData', tg.initData || '');
       fetch('/api/betting/my-bets', { method: 'POST', body: fd })
         .then(r => r.json())
-        .then(data => { try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); } catch(_) {} render(data); })
-        .catch(err => {  if (!cached) myBetsEl.innerHTML = '<div class="schedule-error">Ошибка загрузки</div>'; });
+        .then(data => { 
+          // Сохраняем в PredictionsStore вместо localStorage
+          try { 
+            const bets = data?.bets || [];
+            window.PredictionHelpers?.setCachedMyBets?.(bets, FRESH_TTL);
+          } catch(_) {} 
+          render(data); 
+        })
+        .catch(err => {  
+          if (!cachedBets) myBetsEl.innerHTML = '<div class="schedule-error">Ошибка загрузки</div>'; 
+        });
     }
 
   // Используем унифицированные утилиты форматирования и live-статуса
