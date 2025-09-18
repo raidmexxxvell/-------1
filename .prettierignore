@@ -1,0 +1,36 @@
+# Prettier ignore file
+# Ignore compiled TypeScript output
+static/js/dist/
+
+# Ignore third-party libraries
+static/js/lib/
+
+# Ignore minified files
+*.min.js
+*.min.css
+
+# Ignore node_modules
+node_modules/
+
+# Ignore Python files (handled by different formatter)
+*.py
+
+# Ignore database files
+*.db
+*.sqlite
+
+# Ignore log files
+*.log
+
+# Ignore environment files
+.env
+.env.local
+
+# Ignore build artifacts
+build/
+dist/
+*.map
+
+# Ignore documentation that shouldn't be formatted
+docs/cache-policy.md
+docs/websocket-protocol.md

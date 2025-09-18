@@ -112,7 +112,7 @@
 
     // Convenience methods for common scenarios
     logStoreChange(storeName, action, state) {
-      this.debug('store', `Store ${storeName} ${action}`, {
+      this.debug('стор', `Стор ${storeName} ${this.translateAction(action)}`, {
         storeName,
         action,
         stateKeys: Object.keys(state || {}),
@@ -121,7 +121,7 @@
     }
 
     logWSEvent(eventType, data) {
-      this.info('ws', `WebSocket ${eventType}`, {
+      this.info('ws', `WebSocket ${this.translateWSEvent(eventType)}`, {
         eventType,
         hasData: !!data,
         dataKeys: data ? Object.keys(data) : []
@@ -129,7 +129,7 @@
     }
 
     logETagEvent(cacheKey, event, metadata) {
-      this.info('etag', `ETag ${event} for ${cacheKey}`, {
+      this.info('кэш', `ETag ${this.translateETagEvent(event)} для ${cacheKey}`, {
         cacheKey,
         event,
         ...metadata
@@ -137,7 +137,7 @@
     }
 
     logCacheOperation(operation, key, result) {
-      this.debug('cache', `Cache ${operation}: ${key}`, {
+      this.debug('кэш', `Кэш ${this.translateCacheOperation(operation)}: ${key}`, {
         operation,
         key,
         result: typeof result === 'object' ? Object.keys(result || {}) : result
@@ -145,7 +145,8 @@
     }
 
     logError(category, error, context = {}) {
-      this.error(category, error.message || String(error), {
+      const translatedCategory = this.translateCategory(category);
+      this.error(translatedCategory, error.message || String(error), {
         error: {
           name: error.name,
           message: error.message,
@@ -153,6 +154,68 @@
         },
         context
       });
+    }
+
+    translateAction(action) {
+      const translations = {
+        'updated': 'обновлен',
+        'initialized': 'инициализирован',
+        'reset': 'сброшен',
+        'changed': 'изменен',
+        'loaded': 'загружен'
+      };
+      return translations[action] || action;
+    }
+
+    translateWSEvent(eventType) {
+      const translations = {
+        'connected': 'подключен',
+        'disconnected': 'отключен',
+        'reconnect_scheduled': 'переподключение запланировано',
+        'reconnecting': 'переподключение',
+        'error': 'ошибка',
+        'data_patch': 'обновление данных',
+        'heartbeat': 'проверка связи'
+      };
+      return translations[eventType] || eventType;
+    }
+
+    translateETagEvent(event) {
+      const translations = {
+        'success': 'успех',
+        'error': 'ошибка',
+        'hit': 'попадание',
+        'miss': 'промах',
+        'stale': 'устарел',
+        'refresh': 'обновление'
+      };
+      return translations[event] || event;
+    }
+
+    translateCacheOperation(operation) {
+      const translations = {
+        'get': 'получение',
+        'set': 'сохранение',
+        'delete': 'удаление',
+        'clear': 'очистка',
+        'hit': 'попадание',
+        'miss': 'промах'
+      };
+      return translations[operation] || operation;
+    }
+
+    translateCategory(category) {
+      const translations = {
+        'store': 'стор',
+        'ws': 'ws',
+        'etag': 'кэш',
+        'ui': 'интерфейс',
+        'cache': 'кэш',
+        'global': 'система',
+        'promise': 'промис',
+        'debug': 'отладка'
+      };
+      return translations[category] || category;
     }
   }
 
@@ -165,7 +228,7 @@
     window.StoreDebugger.toggle = function() {
       originalToggle.call(this);
       window.AdminLogger.checkAdminStatus();
-      window.AdminLogger.info('debug', `Store debugger ${this.enabled ? 'enabled' : 'disabled'}`);
+      window.AdminLogger.info('отладка', `Отладчик стора ${this.enabled ? 'включен' : 'отключен'}`);
     };
   }
 
@@ -198,7 +261,7 @@
 
   // Catch unhandled errors
   window.addEventListener('error', (e) => {
-    window.AdminLogger?.logError('global', e.error || new Error(e.message), {
+    window.AdminLogger?.logError('система', e.error || new Error(e.message), {
       filename: e.filename,
       lineno: e.lineno,
       colno: e.colno
@@ -207,7 +270,7 @@
 
   // Catch unhandled promise rejections
   window.addEventListener('unhandledrejection', (e) => {
-    window.AdminLogger?.logError('promise', e.reason, {
+    window.AdminLogger?.logError('промис', e.reason, {
       type: 'unhandledrejection'
     });
   });

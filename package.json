@@ -1,17 +1,45 @@
 {
   "name": "liga-obninsk",
   "version": "1.0.0",
-  "description": "Football league management system",
+  "description": "Лига Обнинска - футбольная лига с прогнозами и ставками",
   "main": "app.py",
+  "type": "module",
   "scripts": {
     "build": "npx tsc -p tsconfig.json",
-    "dev": "npx tsc -p tsconfig.json --watch"
+    "dev": "npx tsc -p tsconfig.json --watch",
+    "lint": "eslint static/js/**/*.js",
+    "lint:fix": "eslint static/js/**/*.js --fix",
+    "format": "prettier --write \"static/js/**/*.{js,ts}\"",
+    "format:check": "prettier --check \"static/js/**/*.{js,ts}\"",
+    "type-check": "tsc --noEmit",
+    "build:ts": "tsc -p tsconfig.json",
+    "prebuild": "npm run build:ts"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raidmexxxvell/-------1.git"
+  },
+  "keywords": [
+    "football",
+    "league",
+    "betting",
+    "predictions",
+    "flask",
+    "javascript",
+    "typescript"
+  ],
+  "author": "Liga Obninsk Team",
+  "license": "MIT",
   "dependencies": {},
   "devDependencies": {
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "eslint": "^9.0.0",
+    "eslint-plugin-import": "^2.29.0",
+    "eslint-plugin-promise": "^6.1.1",
+    "eslint-plugin-unicorn": "^55.0.0",
+    "prettier": "^3.3.0"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   }
 }
