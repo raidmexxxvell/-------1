@@ -137,14 +137,15 @@
   })();
   try { window.__VoteAgg = VoteAgg; } catch(_) {}
 
-  // In-memory состояние для счётов и голосов (исключает мерцание при повторном показе)
-  const MatchState = (() => {
-    const map = new Map(); // key -> { score:"X : Y", votes:{h,d,a,total}, lastAggTs }
-    function get(k){ return map.get(k); }
-    function set(k, patch){ map.set(k, Object.assign({}, map.get(k)||{}, patch)); }
-    return { get, set };
-  })();
-  try { window.MatchState = MatchState; } catch(_) {}
+  // Legacy: MatchState теперь поступает из MatchesStore с совместимостью
+  // Код сохранён для комментариев, но MatchState теперь глобальный из store/matches.js
+  // const MatchState = (() => {
+  //   const map = new Map(); // key -> { score:"X : Y", votes:{h,d,a,total}, lastAggTs }
+  //   function get(k){ return map.get(k); }
+  //   function set(k, patch){ map.set(k, Object.assign({}, map.get(k)||{}, patch)); }
+  //   return { get, set };
+  // })();
+  // try { window.MatchState = MatchState; } catch(_) {}
 
   function setUpdatedLabelSafely(labelEl, newIso) {
     try {

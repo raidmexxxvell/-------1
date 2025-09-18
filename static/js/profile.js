@@ -626,10 +626,15 @@
         const updatedText = document.getElementById('league-updated-text');
         if (!table) return;
         _leagueLoading = true;
-        fetch('/api/league-table')
-            .then(r => r.json())
-            .then(data => {
-                try { window.League?.renderLeagueTable?.(table, updatedText, data); } catch(_) {
+        
+        // Используем ETag fetch для кэширования, ETL listeners автоматически обновят LeagueStore
+        fetchEtag('/api/league-table', {
+            cacheKey: 'league:table',
+            maxAge: 30000,
+            onSuccess: (data) => {
+                try { 
+                    window.League?.renderLeagueTable?.(table, updatedText, data); 
+                } catch(_) {
                     // fallback: nothing, errors are non-fatal
                 }
                 // показать кнопку обновления для админа (обработчик навешивается один раз выше)
@@ -641,9 +646,24 @@
                 }
                 _tableLoaded = true;
                 trySignalAllReady();
-            })
-            .catch(err => { console.error('league table load error', err); })
-            .finally(() => { _tableLoaded = true; trySignalAllReady(); _leagueLoading = false; });
+            },
+            onStale: (data) => {
+                // Используем закэшированные данные
+                try { 
+                    window.League?.renderLeagueTable?.(table, updatedText, data); 
+                } catch(_) {}
+                _tableLoaded = true;
+                trySignalAllReady();
+            }
+        })
+        .catch(err => { 
+            console.error('league table load error', err); 
+        })
+        .finally(() => { 
+            _tableLoaded = true; 
+            trySignalAllReady(); 
+            _leagueLoading = false; 
+        });
     }
 
     // Безопасное обновление метки "Обновлено":
