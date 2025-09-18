@@ -88,9 +88,11 @@
  - WS слушатель: `static/js/store/ws_listeners.ts` (dist) обновляет `RealtimeStore` по событиям соединения/топиков, маппит `ws:odds` в `OddsStore` (с защитой от устаревших версий) и аккуратно переносит `ws:data_patch` по сущностям `match`/`match_events` в `MatchesStore` (обновление счёта и пополнение списка событий без дублей).
 
 - shop (persist)
-  - state: `{ cart: ShopCartItem[]; orders: ShopOrder[]; ttl: number|null }`
-  - persistPaths: `["cart","orders","ttl"]`, TTL: 14d
+  - state: `{ cart: ShopCartItem[]; orders: ShopOrder[]; products: ShopProduct[]; ttl: number|null; lastCartUpdate: number|null; lastOrdersUpdate: number|null }`
+  - persistPaths: `["cart","orders","ttl","lastCartUpdate","lastOrdersUpdate"]`, TTL: 14d
   - обновляется из: UI-действий и подтверждений API
+  - Особенности: мигрирует старую корзину из `localStorage['shop:cart']`, поддерживает валидации, типизацию TypeScript
+  - Feature flag: `localStorage['feature:shop_ui_store'] = '1'` для включения реактивного UI
 
 - profile (no persist)
   - state: `{ achievements: Achievement[]; badges: string[]; lastUpdated: number|null }`
@@ -125,3 +127,44 @@
 - Дедупликация: сигнатура (score + длина events + hash stats) предотвращает лишние события.
 - Откат: добавить параметр `?ff=0` к URL — флаг удалится и мост не будет активирован.
 - Поиск текущего матча: по текстам в `#md-home-name`/`#md-away-name` сопоставляет записи из `MatchesStore.map` и выбирает последнюю по `lastUpdated`.
+
+## Shop интеграция со стором (Этап 5 завершен)
+
+### Архитектура Shop стора
+
+- **ShopStore** (`static/js/store/shop.ts`): централизованное управление корзиной и заказами
+- **ShopHelpers** (глобальные функции): API для работы с корзиной, валидации, оформления заказов
+- **shop_ui_bindings.ts**: реактивная интеграция UI под feature flag `feature:shop_ui_store`
+- **shop_validators.ts**: клиентские валидации с TypeScript типизацией
+
+### Ключевые возможности
+
+1. **Миграция данных**: автоматически переносит корзину из старого формата `localStorage['shop:cart']`
+2. **Персистенция**: корзина и заказы сохраняются с TTL 14 дней
+3. **Валидации**: 
+   - Проверка количества (1-99), цены, названий товаров
+   - Лимиты корзины (максимум 50 товаров, максимальная сумма 999999)
+   - Валидация при добавлении товаров и оформлении заказа
+4. **Реактивный UI**: автоматическое обновление корзины, badge навигации, списка заказов
+5. **API интеграция**: полная совместимость с `/api/shop/checkout` и `/api/shop/my-orders`
+
+### Feature flag активация
+
+```javascript
+localStorage.setItem('feature:shop_ui_store', '1');
+```
+
+При включении флага:
+- UI переключается на стор для управления корзиной
+- Vanilla JS функции остаются как fallback
+- Автоматическая миграция существующих данных
+- Валидации при всех операциях
+
+### Интеграция с существующим кодом
+
+- **Сохранена совместимость** с `window.Shop` API из `shop.js`
+- **ShopHelpers** расширяет функциональность валидациями
+- **Реактивные обновления** через подписки на стор
+- **Graceful degradation** при отсутствии стора
+
+Это завершает интеграцию Shop модуля согласно roadmap этап 5.
