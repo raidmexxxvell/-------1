@@ -11,7 +11,8 @@ class RealtimeUpdater {
     constructor() {
         this.socket = null;
         this.reconnectAttempts = 0;
-               console.warn(`🔌 Max reconnect attempts (${this.maxReconnectAttempts}) reached`);
+        this.maxReconnectAttempts = 8;  // increased from 5
+        console.warn(`🔌 Max reconnect attempts (${this.maxReconnectAttempts}) reached`);
         __wsEmit('ws:max_reconnects_reached', { attempts: this.reconnectAttempts });
         
         // Admin logging
@@ -20,7 +21,7 @@ class RealtimeUpdater {
             attempts: this.reconnectAttempts,
             maxAttempts: this.maxReconnectAttempts
           });
-        }his.maxReconnectAttempts = 8;  // increased from 5
+        }this.maxReconnectAttempts = 8;  // increased from 5
         this.reconnectDelay = 1000;
         this.maxReconnectDelay = 30000; // 30 sec max
         this.jitterFactor = 0.3;        // 30% random jitter

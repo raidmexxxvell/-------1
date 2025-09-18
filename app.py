@@ -7920,6 +7920,33 @@ def api_leader_prizes():
         return {'data': data, 'updated_at': datetime.now(timezone.utc).isoformat()}
     return etag_json('leader-prizes', _build, cache_ttl=LEADER_TTL, max_age=3600, swr=600, core_filter=lambda p: {'data': p.get('data')})
 _BOT_TOKEN_WARNED = False
+
+def _extract_user_info(init_data: str):
+    """
+    Унифицированный парсер initData для получения user_info.
+    Возвращает dict с ключами: user_id, role, display_name, tg_username, level, xp, consecutive_days, photo_url
+    Если данные некорректны — возвращает None.
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(init_data)
+        user = parsed.get('user') if parsed else None
+        if not user:
+            return None
+        # role определяем по user['is_admin'] или user['role'] если есть
+        role = user.get('role') or ('admin' if user.get('is_admin') else 'user')
+        return {
+            'user_id': user.get('id'),
+            'role': role,
+            'display_name': user.get('display_name') or user.get('first_name') or '',
+            'tg_username': user.get('username') or '',
+            'level': user.get('level', 0),
+            'xp': user.get('xp', 0),
+            'consecutive_days': user.get('consecutive_days', 0),
+            'photo_url': user.get('photo_url', ''),
+        }
+    except Exception:
+        return None
+
 def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 24*60*60):
     """Парсит и проверяет initData из Telegram WebApp.
     Возвращает dict с полями 'user', 'auth_date', 'raw' при успехе, иначе None.
