@@ -29,27 +29,21 @@
     const subtabs = mdPane.querySelector('.modal-subtabs');
     // PR-2a: topic-based автоподписка на детали матча (если включено)
   let __topic = null;
-  let __topicFallback = null;
     try {
       if(window.__WS_TOPIC_SUBS__ && window.realtimeUpdater){
         const h=(match?.home||'').toLowerCase().trim();
         const a=(match?.away||'').toLowerCase().trim();
         const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):''));
         const d=raw?raw.slice(0,10):'';
-        __topic = `match:${h}__${a}__${d}:details`;
-        __topicFallback = `match:${h}__${a}__:details`; // подписка без даты как резерв
-        console.log('[WS Матч] Подписываемся на топик:', __topic, 'WS включен:', !!window.__WEBSOCKETS_ENABLED__, 'Топики включены:', !!window.__WS_TOPIC_SUBS__);
+  const scheme = (window.__WS_TOPIC_SCHEME__ === 'with_date') ? 'with_date' : 'no_date';
+  __topic = (scheme === 'with_date') ? `match:${h}__${a}__${d}:details` : `match:${h}__${a}__:details`;
+  console.log('[WS Матч] Подписываемся на топик:', __topic, 'схема:', scheme, 'WS включен:', !!window.__WEBSOCKETS_ENABLED__, 'Топики включены:', !!window.__WS_TOPIC_SUBS__);
         // небольшая задержка чтобы дождаться connect
         setTimeout(()=>{ 
           try { 
             console.log('[WS Матч] Попытка подписки на топик:', __topic);
             window.realtimeUpdater.subscribeTopic(__topic); 
             console.log('[WS Матч] Подписка выполнена для:', __topic);
-            // Подписка на fallback‑топик без даты
-            try {
-              console.log('[WS Матч] Подписка на fallback‑топик:', __topicFallback);
-              window.realtimeUpdater.subscribeTopic(__topicFallback);
-            } catch(_){}
           } catch(e){
             console.error('[WS Матч] Ошибка подписки:', e);
           } 

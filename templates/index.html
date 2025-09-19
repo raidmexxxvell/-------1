@@ -12,18 +12,21 @@
                 {% if websockets_enabled %}
         <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
         {% endif %}
-                <meta name="ws-flags" data-ws-enabled="{{ '1' if websockets_enabled else '0' }}" data-topic-subs="{{ '1' if ws_topic_subs else '0' }}">
+                <meta name="ws-flags" data-ws-enabled="{{ '1' if websockets_enabled else '0' }}" data-topic-subs="{{ '1' if ws_topic_subs else '0' }}" data-topic-scheme="{{ ws_topic_scheme }}">
                 <script>
                     (function(){
                         try {
                             var m = document.querySelector('meta[name="ws-flags"]');
                             var enabled = m && m.dataset && m.dataset.wsEnabled === '1';
                             var topics = m && m.dataset && m.dataset.topicSubs === '1';
+                            var scheme = (m && m.dataset && m.dataset.topicScheme) || 'no_date';
                             window.__WEBSOCKETS_ENABLED__ = !!enabled;
                             window.__WS_TOPIC_SUBS__ = !!topics;
+                            window.__WS_TOPIC_SCHEME__ = (scheme === 'with_date' ? 'with_date' : 'no_date');
                             console.log('[WS Config] Флаги из мета-тега:', {
                                 enabled: enabled,
                                 topics: topics,
+                                scheme: window.__WS_TOPIC_SCHEME__,
                                 __WEBSOCKETS_ENABLED__: window.__WEBSOCKETS_ENABLED__,
                                 __WS_TOPIC_SUBS__: window.__WS_TOPIC_SUBS__
                             });
@@ -31,6 +34,7 @@
                             console.log('[WS Config] Ошибка парсинга мета-тега');
                             window.__WEBSOCKETS_ENABLED__ = false; 
                             window.__WS_TOPIC_SUBS__ = false; 
+                            window.__WS_TOPIC_SCHEME__ = 'no_date';
                         }
                     })();
                 </script>

@@ -281,6 +281,7 @@ if SECURITY_SYSTEM_AVAILABLE:
         try:
             app.config['WEBSOCKETS_ENABLED'] = bool(getattr(Config, 'WEBSOCKETS_ENABLED', False))
             app.config['WS_TOPIC_SUBSCRIPTIONS_ENABLED'] = bool(getattr(Config, 'WS_TOPIC_SUBSCRIPTIONS_ENABLED', False))
+            app.config['WS_TOPIC_SCHEME'] = str(getattr(Config, 'WS_TOPIC_SCHEME', 'no_date'))
         except Exception:
             pass
         input_validator = InputValidator()
@@ -8047,6 +8048,7 @@ def index():
         static_version=STATIC_VERSION,
         websockets_enabled=ws_enabled,
         ws_topic_subs=ws_topic_subs,
+        ws_topic_scheme=str(app.config.get('WS_TOPIC_SCHEME','no_date')),
     )
 
 @app.route('/api/user', methods=['POST'])
@@ -15156,14 +15158,16 @@ def api_match_stats_set():
                     dt = _get_match_datetime(home, away, req_date or None)
                     date_str = (dt.isoformat()[:10] if dt else (req_date or ''))
 
-                    # Подготовим список топиков для публикации: с датой (если есть) и fallback без даты
+                    # Выбираем схему публикации
                     h = (home or '').lower().strip()
                     a = (away or '').lower().strip()
-                    topics = []
-                    if date_str:
-                        topics.append(f"match:{h}__{a}__{date_str}:details")
-                    # Fallback-топик без даты: клиенты дополнительно подписываются на него
-                    topics.append(f"match:{h}__{a}__:details")
+                    scheme = str(app.config.get('WS_TOPIC_SCHEME','no_date'))
+                    if scheme == 'with_date':
+                        # Если нет даты — публикуем в бездатовый, чтобы не терять событие
+                        topic = (f"match:{h}__{a}__{date_str}:details" if date_str else f"match:{h}__{a}__:details")
+                    else:
+                        # no_date (по умолчанию)
+                        topic = f"match:{h}__{a}__:details"
 
                     payload = {
                         'entity': 'match_stats',
@@ -15171,14 +15175,13 @@ def api_match_stats_set():
                         'away': away,
                         'updated_at': row.updated_at.isoformat() if getattr(row, 'updated_at', None) else None
                     }
-                    for tp in topics:
-                        try:
-                            print(f"[API Stats Set] Публикуем в топик: {tp}")
-                            print(f"[API Stats Set] Payload: {payload}")
-                            inv.publish_topic(tp, 'topic_update', payload, priority=0)
-                        except Exception as pub_err:
-                            print(f"[API Stats Set] Ошибка publish_topic для {tp}: {pub_err}")
-                    print(f"[API Stats Set] publish_topic завершен для {len(topics)} топиков")
+                    try:
+                        print(f"[API Stats Set] Публикуем в топик: {topic}")
+                        print(f"[API Stats Set] Payload: {payload}")
+                        inv.publish_topic(topic, 'topic_update', payload, priority=0)
+                        print(f"[API Stats Set] publish_topic завершен")
+                    except Exception as pub_err:
+                        print(f"[API Stats Set] Ошибка publish_topic для {topic}: {pub_err}")
                 else:
                     print("[API Stats Set] invalidator недоступен")
             except Exception as e:

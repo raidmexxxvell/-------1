@@ -399,6 +399,8 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     transform: translateY(-2px) scale(1.02);
 }
 
+/* (удалено) новые стили статистики и анимации — используем уже существующие ниже в разделе "Match stats" */
+
 /* --- Страница команды --- */
 #ufo-team .team-header {
     background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
@@ -1360,8 +1362,8 @@ body.theme-blb .share-btn {
 .stat-side .stat-val { min-width: 18px; text-align: center; font-weight: 700; }
 .stat-side .admin-inc { display:flex; gap:4px; }
 .stat-bar { position: relative; height: 12px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); }
-.stat-fill-left { position: absolute; left: 0; top: 0; bottom: 0; }
-.stat-fill-right { position: absolute; right: 0; top: 0; bottom: 0; }
+.stat-fill-left { position: absolute; left: 0; top: 0; bottom: 0; transition: width .35s ease; }
+.stat-fill-right { position: absolute; right: 0; top: 0; bottom: 0; transition: width .35s ease; }
 
 /* Магазин */
 .store-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 12px 10px 20px; }

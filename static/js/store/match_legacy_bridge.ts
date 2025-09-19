@@ -217,7 +217,9 @@ declare global {
       const mid=document.createElement('div'); mid.className='stat-bar';
       const leftFill=document.createElement('div'); leftFill.className='stat-fill-left';
       const rightFill=document.createElement('div'); rightFill.className='stat-fill-right';
-      const total = lh+rh; const lp = total>0? Math.round((lh/total)*100):50; leftFill.style.width=lp+'%'; rightFill.style.width=(100-lp)+'%';
+  const total = lh+rh; const lp = total>0? Math.round((lh/total)*100):50;
+  // Используем существующие стили: только выставляем ширины, без новых transition
+  leftFill.style.width=lp+'%'; rightFill.style.width=(100-lp)+'%';
       
       // Добавляем цвета команд если доступны
       try {
@@ -232,6 +234,7 @@ declare global {
       const rightVal=document.createElement('div'); rightVal.className='stat-val'; rightVal.textContent=String(rh); rightSide.appendChild(rightVal);
       bar.append(leftSide, mid, rightSide);
       rowWrap.appendChild(bar);
+      // Поддерживаем только обновление значений без новых CSS-классов
       wrap.appendChild(rowWrap);
     });
     host.innerHTML=''; host.appendChild(wrap);

@@ -40,12 +40,15 @@ class Config:
     # Realtime/WebSocket feature flags
     WEBSOCKETS_ENABLED = os.environ.get('WEBSOCKETS_ENABLED', '').lower() in ('1', 'true', 'yes')
     WS_TOPIC_SUBSCRIPTIONS_ENABLED = os.environ.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', '').lower() in ('1', 'true', 'yes')
+    # Topic scheme: 'no_date' | 'with_date' (default: no_date)
+    WS_TOPIC_SCHEME = os.environ.get('WS_TOPIC_SCHEME', 'no_date').lower() if os.environ.get('WS_TOPIC_SCHEME') else 'no_date'
     
     # Отладка WebSocket конфигурации
     print(f"[Config Debug] WEBSOCKETS_ENABLED env: '{os.environ.get('WEBSOCKETS_ENABLED', 'NOT_SET')}'")
     print(f"[Config Debug] WEBSOCKETS_ENABLED parsed: {WEBSOCKETS_ENABLED}")
     print(f"[Config Debug] WS_TOPIC_SUBSCRIPTIONS_ENABLED env: '{os.environ.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', 'NOT_SET')}'")
     print(f"[Config Debug] WS_TOPIC_SUBSCRIPTIONS_ENABLED parsed: {WS_TOPIC_SUBSCRIPTIONS_ENABLED}")
+    print(f"[Config Debug] WS_TOPIC_SCHEME env: '{os.environ.get('WS_TOPIC_SCHEME', 'NOT_SET')}', parsed: {WS_TOPIC_SCHEME}")
     
     # Cache settings
     REDIS_URL = os.environ.get('REDIS_URL', '')
