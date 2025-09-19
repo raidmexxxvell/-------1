@@ -161,11 +161,12 @@ class RealtimeUpdater {
         });
 
         // Топиковые уведомления (например, глобальный full_reset)
-        this.socket.on('topic_update', (payload) => {
-            console.log('[Реалтайм] Получен topic_update:', payload);
-            this.handleTopicUpdate(payload);
-            __wsEmit('ws:topic_update', payload || {});
-        });
+            this.socket.on('topic_update', (payload) => {
+                try { console.log('[Реалтайм] Получен topic_update:', payload); } catch(_){ }
+                // Транслируем событие на DOM
+                this.handleTopicUpdate(payload);
+                __wsEmit('ws:topic_update', payload || {});
+            });
 
         // Событие завершения матча (содержит optional results_block для мгновенного UX)
         this.socket.on('match_finished', (payload) => {

@@ -28,7 +28,8 @@
     try { if (match.date || match.time){ const d=match.date? new Date(match.date):null; const ds=d?d.toLocaleDateString():''; dt.textContent = `${ds}${match.time? ' '+match.time:''}`; } else dt.textContent=''; } catch(_) { dt.textContent = match.time||''; }
     const subtabs = mdPane.querySelector('.modal-subtabs');
     // PR-2a: topic-based автоподписка на детали матча (если включено)
-    let __topic = null;
+  let __topic = null;
+  let __topicFallback = null;
     try {
       if(window.__WS_TOPIC_SUBS__ && window.realtimeUpdater){
         const h=(match?.home||'').toLowerCase().trim();
@@ -36,6 +37,7 @@
         const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):''));
         const d=raw?raw.slice(0,10):'';
         __topic = `match:${h}__${a}__${d}:details`;
+        __topicFallback = `match:${h}__${a}__:details`; // подписка без даты как резерв
         console.log('[WS Матч] Подписываемся на топик:', __topic, 'WS включен:', !!window.__WEBSOCKETS_ENABLED__, 'Топики включены:', !!window.__WS_TOPIC_SUBS__);
         // небольшая задержка чтобы дождаться connect
         setTimeout(()=>{ 
@@ -43,6 +45,11 @@
             console.log('[WS Матч] Попытка подписки на топик:', __topic);
             window.realtimeUpdater.subscribeTopic(__topic); 
             console.log('[WS Матч] Подписка выполнена для:', __topic);
+            // Подписка на fallback‑топик без даты
+            try {
+              console.log('[WS Матч] Подписка на fallback‑топик:', __topicFallback);
+              window.realtimeUpdater.subscribeTopic(__topicFallback);
+            } catch(_){}
           } catch(e){
             console.error('[WS Матч] Ошибка подписки:', e);
           } 
@@ -101,6 +108,29 @@
   } catch(_) {}
   // WS-first: при обновлении деталей матча (в т.ч. событий) перерисовываем составы/события
   try {
+    // Реакция на topic_update с сущностью match_stats: целевой refetch деталей
+    const onTopicUpdate = async (e)=>{
+      try {
+        const p = e?.detail || {};
+        if (!p || p.entity !== 'match_stats') return;
+        if (p.home && p.away) {
+          const same = (p.home === match.home) && (p.away === match.away);
+          if (!same) return;
+        }
+        const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):''));
+        const dateStr=raw?raw.slice(0,10):'';
+        if (typeof window.fetchMatchDetails === 'function') {
+          const store = await window.fetchMatchDetails({ home: match.home||'', away: match.away||'', date: dateStr, forceFresh: true }).catch(()=>null);
+          const d = store && (store.data||store.raw) ? (store.data||store.raw) : null;
+          if (d && window.MatchRostersEvents?.render) {
+            window.MatchRostersEvents.render(match, d, mdPane, { homePane, awayPane });
+          }
+        }
+      } catch(_){}
+    };
+    document.addEventListener('ws:topic_update', onTopicUpdate);
+    mdPane.__onTopicUpdate = onTopicUpdate;
+
     const onDetailsUpdate = (e)=>{
       try {
         const d = e?.detail || {};

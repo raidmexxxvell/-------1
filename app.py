@@ -15151,23 +15151,38 @@ def api_match_stats_set():
                 inv = globals().get('invalidator')
                 print(f"[API Stats Set] invalidator найден: {bool(inv)}")
                 if inv:
-                    dt = _get_match_datetime(home, away)
-                    date_str = dt.isoformat()[:10] if dt else ''
-                    topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
+                    # Принимаем optional дату из запроса как подсказку (YYYY-MM-DD)
+                    req_date = (request.form.get('date') or '').strip()[:10]
+                    dt = _get_match_datetime(home, away, req_date or None)
+                    date_str = (dt.isoformat()[:10] if dt else (req_date or ''))
+
+                    # Подготовим список топиков для публикации: с датой (если есть) и fallback без даты
+                    h = (home or '').lower().strip()
+                    a = (away or '').lower().strip()
+                    topics = []
+                    if date_str:
+                        topics.append(f"match:{h}__{a}__{date_str}:details")
+                    # Fallback-топик без даты: клиенты дополнительно подписываются на него
+                    topics.append(f"match:{h}__{a}__:details")
+
                     payload = {
                         'entity': 'match_stats',
                         'home': home,
                         'away': away,
                         'updated_at': row.updated_at.isoformat() if getattr(row, 'updated_at', None) else None
                     }
-                    print(f"[API Stats Set] Публикуем в топик: {topic}")
-                    print(f"[API Stats Set] Payload: {payload}")
-                    inv.publish_topic(topic, 'topic_update', payload, priority=0)
-                    print(f"[API Stats Set] publish_topic завершен")
+                    for tp in topics:
+                        try:
+                            print(f"[API Stats Set] Публикуем в топик: {tp}")
+                            print(f"[API Stats Set] Payload: {payload}")
+                            inv.publish_topic(tp, 'topic_update', payload, priority=0)
+                        except Exception as pub_err:
+                            print(f"[API Stats Set] Ошибка publish_topic для {tp}: {pub_err}")
+                    print(f"[API Stats Set] publish_topic завершен для {len(topics)} топиков")
                 else:
                     print("[API Stats Set] invalidator недоступен")
             except Exception as e:
-                print(f"[API Stats Set] Ошибка publish_topic: {e}")
+                print(f"[API Stats Set] Критическая ошибка publish_topic: {e}")
                 pass
             return jsonify({'status':'ok'})
         finally:
