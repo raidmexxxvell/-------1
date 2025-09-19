@@ -645,7 +645,7 @@
             } catch(_){}
             // After base stores are ready, try to load additional slices from dist (optional)
             if (supportsModule) {
-                var extra=['realtime.js','matches.js','league.js','odds.js','predictions.js','shop.js','profile.js','etl_listeners.js','ws_listeners.js','realtime_indicator.js','match_ui_bindings.js','match_legacy_bridge.js','match_stats_adapter.js','league_ui_bindings.js','predictions_ui_bindings.js','shop_ui_bindings.js','shop_validators.js','debugger.js'];
+                var extra=['realtime.js','matches.js','match_stats_adapter.js','league.js','odds.js','predictions.js','shop.js','profile.js','etl_listeners.js','ws_listeners.js','realtime_indicator.js','match_ui_bindings.js','match_legacy_bridge.js','league_ui_bindings.js','predictions_ui_bindings.js','shop_ui_bindings.js','shop_validators.js','debugger.js'];
                 extra.forEach(function(n){
                     var s=document.createElement('script'); s.defer=true; s.type='module'; s.src=distBase+n+'?v='+v; s.onerror=function(){}; document.head.appendChild(s);
                 });

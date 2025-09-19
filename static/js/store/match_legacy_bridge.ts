@@ -57,16 +57,55 @@ declare global {
     try {
       const orig = window.MatchStats && window.MatchStats.render;
       if(!orig || (window.MatchStats && window.MatchStats.__storeDriven)) return;
+      
+      // Сохраняем оригинальную функцию
+      const originalRender = orig;
+      
       window.MatchStats.render = function(host: HTMLElement, match: any){
-        // Мгновенный рендер из стора
-        try { renderStatsFromStore(host, match); } catch(_){ host.innerHTML = '<div class="stats-wrap">Нет данных</div>'; }
+        console.log('[Bridge] MatchStats.render called', { 
+          host, 
+          match,
+          hostId: host?.id,
+          matchInfo: match ? { home: match.home, away: match.away, date: match.date } : null
+        });
+        
+        // Сначала пытаемся получить данные из стора
+        let hasStoreData = false;
+        try {
+          hasStoreData = renderStatsFromStore(host, match);
+          console.log('[Bridge] renderStatsFromStore result:', hasStoreData);
+        } catch(e) {
+          console.warn('[Bridge] renderStatsFromStore failed:', e);
+        }
+        
+        // Если данных в сторе нет, вызываем оригинальную функцию
+        if (!hasStoreData) {
+          console.log('[Bridge] No store data, calling original render');
+          try {
+            originalRender.call(this, host, match);
+          } catch(e) {
+            console.error('[Bridge] Original render failed:', e);
+            host.innerHTML = '<div class="stats-wrap">Нет данных</div>';
+          }
+        }
       };
+      
       window.MatchStats.__storeDriven = true;
-    } catch(_) {}
+      console.log('[Bridge] Stats override installed successfully');
+    } catch(e) {
+      console.error('[Bridge] Failed to install stats override:', e);
+    }
   }
 
-  function renderStatsFromStore(host: HTMLElement, match: any){
-    if(!host) return;
+  function renderStatsFromStore(host: HTMLElement, match: any): boolean {
+    console.log('[Bridge] renderStatsFromStore called', {
+      matchesStoreAPIExists: !!(window as any).MatchesStoreAPI,
+      matchesStoreExists: !!window.MatchesStore,
+      currentNames: currentNames(),
+      match
+    });
+    
+    if(!host) return false;
     
     // Пытаемся получить статистику через новый API
     let stats: any = null;
@@ -101,8 +140,8 @@ declare global {
     }
     
     if (!hasStoreData) {
-      host.innerHTML='<div class="stats-wrap">Нет данных</div>';
-      return;
+      host.innerHTML='<div class="stats-wrap">Загрузка статистики...</div>';
+      return false;
     }
     
     // Ожидаемые метрики
@@ -164,6 +203,7 @@ declare global {
       wrap.appendChild(rowWrap);
     });
     host.innerHTML=''; host.appendChild(wrap);
+    return true;
   }
 
   // Периодически пытаемся установить override, пока legacy модуль не прогружен

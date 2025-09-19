@@ -24,6 +24,12 @@ type MatchesStoreAPI = {
   const STATS_CACHE_TTL = 30000; // 30 секунд кэш для минимизации запросов
   
   function initStatsStoreAdapter() {
+    console.log('[StatsStoreAdapter] Initializing...', {
+      fetchExists: !!window.fetch,
+      matchesStoreAPIExists: !!(window as any).MatchesStoreAPI,
+      featureFlag: localStorage.getItem('feature:match_ui_store')
+    });
+    
     if (!window.fetch || !(window as any).MatchesStoreAPI) return;
     
     // Если уже перехвачен, не делаем повторно
@@ -159,9 +165,22 @@ type MatchesStoreAPI = {
   
   // Также инициализируем при появлении MatchesStoreAPI (если еще не загружен)
   let checkStoreTimer: any = null;
+  let attempts = 0;
+  const maxAttempts = 100; // 10 секунд максимум
+  
   function waitForMatchesStore() {
+    attempts++;
+    console.log(`[StatsStoreAdapter] Waiting for MatchesStore, attempt ${attempts}/${maxAttempts}`);
+    
     if ((window as any).MatchesStoreAPI) {
+      console.log('[StatsStoreAdapter] MatchesStoreAPI found, initializing...');
       initStatsStoreAdapter();
+      if (checkStoreTimer) {
+        clearInterval(checkStoreTimer);
+        checkStoreTimer = null;
+      }
+    } else if (attempts >= maxAttempts) {
+      console.warn('[StatsStoreAdapter] Timeout waiting for MatchesStoreAPI');
       if (checkStoreTimer) {
         clearInterval(checkStoreTimer);
         checkStoreTimer = null;
@@ -171,12 +190,20 @@ type MatchesStoreAPI = {
   
   checkStoreTimer = setInterval(waitForMatchesStore, 100);
   
-  // Останавливаем проверку через 10 секунд
-  setTimeout(() => {
-    if (checkStoreTimer) {
-      clearInterval(checkStoreTimer);
-      checkStoreTimer = null;
+  // Добавляем глобальную функцию для отладки
+  (window as any).debugMatchStats = function() {
+    console.log('=== DEBUG MATCH STATS ===');
+    console.log('MatchesStoreAPI exists:', !!(window as any).MatchesStoreAPI);
+    console.log('MatchStats exists:', !!(window as any).MatchStats);
+    console.log('Feature flag:', localStorage.getItem('feature:match_ui_store'));
+    console.log('Fetch patched:', !!(window.fetch as any).__statsStorePatched);
+    console.log('Last stats cache:', lastStatsCache);
+    
+    if ((window as any).MatchesStoreAPI) {
+      const store = (window as any).MatchesStoreAPI.get();
+      console.log('Store state:', store);
     }
-  }, 10000);
+    console.log('========================');
+  };
   
 })();
