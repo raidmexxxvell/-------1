@@ -21,7 +21,17 @@
                             var topics = m && m.dataset && m.dataset.topicSubs === '1';
                             window.__WEBSOCKETS_ENABLED__ = !!enabled;
                             window.__WS_TOPIC_SUBS__ = !!topics;
-                        } catch(_) { window.__WEBSOCKETS_ENABLED__ = false; window.__WS_TOPIC_SUBS__ = false; }
+                            console.log('[WS Config] Флаги из мета-тега:', {
+                                enabled: enabled,
+                                topics: topics,
+                                __WEBSOCKETS_ENABLED__: window.__WEBSOCKETS_ENABLED__,
+                                __WS_TOPIC_SUBS__: window.__WS_TOPIC_SUBS__
+                            });
+                        } catch(_) { 
+                            console.log('[WS Config] Ошибка парсинга мета-тега');
+                            window.__WEBSOCKETS_ENABLED__ = false; 
+                            window.__WS_TOPIC_SUBS__ = false; 
+                        }
                     })();
                 </script>
         {# Подключаем оверлей ошибок только администратору #}

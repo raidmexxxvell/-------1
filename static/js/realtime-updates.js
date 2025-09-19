@@ -44,18 +44,30 @@ class RealtimeUpdater {
     
     initSocket() {
         try {
-            if (!window.__WEBSOCKETS_ENABLED__) {  return; }
+            console.log(`[WS Инициализация] window.__WEBSOCKETS_ENABLED__: ${window.__WEBSOCKETS_ENABLED__}`);
+            if (!window.__WEBSOCKETS_ENABLED__) {  
+                console.log('[WS Инициализация] WebSockets отключены через флаг');
+                return; 
+            }
             // Проверяем поддержку Socket.IO
-            if (typeof io === 'undefined') { return; }
+            console.log(`[WS Инициализация] typeof io: ${typeof io}`);
+            if (typeof io === 'undefined') { 
+                console.log('[WS Инициализация] Socket.IO не загружен');
+                return; 
+            }
             // Пробный ping на /socket.io/ без апгрейда: если 4xx/5xx — не подключаемся
             const probeUrl = '/socket.io/?EIO=4&transport=polling&t=' + Date.now();
+            console.log(`[WS Инициализация] Проверяем доступность: ${probeUrl}`);
             fetch(probeUrl, { method: 'GET', cache: 'no-store', redirect: 'manual' })
                 .then(r => {
+                    console.log(`[WS Инициализация] Ответ пробы: статус=${r?.status}, ok=${r?.ok}`);
                     if (!r || !r.ok) {
+                        console.log('[WS Инициализация] Проба неуспешна, отключаем WebSockets');
                         window.__WEBSOCKETS_ENABLED__ = false;
                         return null;
                     }
                     // ok → инициализируем соединение
+                    console.log('[WS Инициализация] Проба успешна, создаем Socket.IO соединение');
                     this.socket = io({
                         transports: ['websocket','polling'],
                         upgrade: true,
@@ -63,12 +75,16 @@ class RealtimeUpdater {
                         timeout: 20000,
                         forceNew: false
                     });
+                    console.log('[WS Инициализация] Socket.IO создан, настраиваем обработчики');
                     this.setupEventHandlers();
                     return true;
                 })
-                .catch(() => { window.__WEBSOCKETS_ENABLED__ = false; });
+                .catch((err) => { 
+                    console.log(`[WS Инициализация] Ошибка пробы: ${err}`);
+                    window.__WEBSOCKETS_ENABLED__ = false; 
+                });
         } catch (error) {
-            
+            console.log(`[WS Инициализация] Критическая ошибка: ${error}`);
         }
     }
     

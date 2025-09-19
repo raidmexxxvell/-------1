@@ -8036,12 +8036,17 @@ def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 2
 @app.route('/')
 def index():
     """Главная страница приложения"""
+    ws_enabled = bool(app.config.get('WEBSOCKETS_ENABLED', False))
+    ws_topic_subs = bool(app.config.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', False))
+    print(f"[Index Template] WEBSOCKETS_ENABLED из app.config: {ws_enabled}")
+    print(f"[Index Template] WS_TOPIC_SUBSCRIPTIONS_ENABLED из app.config: {ws_topic_subs}")
+    print(f"[Index Template] Config.WEBSOCKETS_ENABLED: {getattr(Config, 'WEBSOCKETS_ENABLED', 'NOT_SET')}")
     return render_template(
         'index.html',
         admin_user_id=os.environ.get('ADMIN_USER_ID', ''),
         static_version=STATIC_VERSION,
-        websockets_enabled=bool(app.config.get('WEBSOCKETS_ENABLED', False)),
-        ws_topic_subs=bool(app.config.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', False)),
+        websockets_enabled=ws_enabled,
+        ws_topic_subs=ws_topic_subs,
     )
 
 @app.route('/api/user', methods=['POST'])

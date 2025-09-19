@@ -41,6 +41,12 @@ class Config:
     WEBSOCKETS_ENABLED = os.environ.get('WEBSOCKETS_ENABLED', '').lower() in ('1', 'true', 'yes')
     WS_TOPIC_SUBSCRIPTIONS_ENABLED = os.environ.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', '').lower() in ('1', 'true', 'yes')
     
+    # Отладка WebSocket конфигурации
+    print(f"[Config Debug] WEBSOCKETS_ENABLED env: '{os.environ.get('WEBSOCKETS_ENABLED', 'NOT_SET')}'")
+    print(f"[Config Debug] WEBSOCKETS_ENABLED parsed: {WEBSOCKETS_ENABLED}")
+    print(f"[Config Debug] WS_TOPIC_SUBSCRIPTIONS_ENABLED env: '{os.environ.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED', 'NOT_SET')}'")
+    print(f"[Config Debug] WS_TOPIC_SUBSCRIPTIONS_ENABLED parsed: {WS_TOPIC_SUBSCRIPTIONS_ENABLED}")
+    
     # Cache settings
     REDIS_URL = os.environ.get('REDIS_URL', '')
     CACHE_DEFAULT_TIMEOUT = int(os.environ.get('CACHE_DEFAULT_TIMEOUT', '300'))
