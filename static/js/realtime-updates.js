@@ -11,29 +11,19 @@ class RealtimeUpdater {
     constructor() {
         this.socket = null;
         this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 8;  // increased from 5
-        console.warn(`🔌 Max reconnect attempts (${this.maxReconnectAttempts}) reached`);
-        __wsEmit('ws:max_reconnects_reached', { attempts: this.reconnectAttempts });
-        
-        // Admin logging
-        if (window.AdminLogger) {
-          window.AdminLogger.error('ws', `Max reconnect attempts reached`, {
-            attempts: this.reconnectAttempts,
-            maxAttempts: this.maxReconnectAttempts
-          });
-        }this.maxReconnectAttempts = 8;  // increased from 5
+                this.maxReconnectAttempts = 8;  // increased from 5
         this.reconnectDelay = 1000;
         this.maxReconnectDelay = 30000; // 30 sec max
         this.jitterFactor = 0.3;        // 30% random jitter
         this.isConnected = false;
         this.callbacks = new Map();
         this.debug = localStorage.getItem('websocket_debug') === 'true';
-        // Heartbeat config
-        this.heartbeatInterval = null;
-        this.heartbeatTimeout = null;
-        this.pingInterval = 30000;      // 30 sec ping (уменьшена частота)
-        this.pongTimeout = 15000;       // 15 sec pong wait (увеличено для стабильности)
-        this.lastPongTime = 0;
+                // Rely on Socket.IO built-in heartbeats; custom ping/pong removed to avoid false disconnects
+                this.heartbeatInterval = null;
+                this.heartbeatTimeout = null;
+                this.pingInterval = null;
+                this.pongTimeout = null;
+                this.lastPongTime = 0;
     // Версионность коэффициентов по матчу: key = "home|away" → int
     this.oddsVersions = new Map();
     // Очередь тем для подписки до момента connect
@@ -89,7 +79,7 @@ class RealtimeUpdater {
             
             this.isConnected = true;
             this.reconnectAttempts = 0;
-            this.setupHeartbeat();
+        // No manual heartbeat: Socket.IO handles ping/pong internally
     try { window.RealtimeStore && window.RealtimeStore.set({ connected: true }); } catch(_){}
     __wsEmit('ws:connected', { reconnects: this.reconnectAttempts });
             
@@ -424,35 +414,7 @@ class RealtimeUpdater {
         }, delay);
     }
     
-    setupHeartbeat() {
-        this.clearHeartbeat();
-        
-        this.heartbeatInterval = setInterval(() => {
-            if (this.isConnected && this.socket) {
-                this.socket.emit('ping', { timestamp: Date.now() });
-                
-                // Set timeout for pong response
-                this.heartbeatTimeout = setTimeout(() => {
-                    console.warn('🏓 Pong timeout - disconnecting');
-                    this.socket?.disconnect();
-                }, this.pongTimeout);
-            }
-        }, this.pingInterval);
-        
-        // Listen for pong responses
-        if (this.socket) {
-            this.socket.on('pong', (data) => {
-                this.lastPongTime = Date.now();
-                if (this.heartbeatTimeout) {
-                    clearTimeout(this.heartbeatTimeout);
-                    this.heartbeatTimeout = null;
-                }
-                if (this.debug) {
-                    console.log('🏓 Pong received', data);
-                }
-            });
-        }
-    }
+    // Manual heartbeat removed — using Socket.IO internal ping/pong
     
     clearHeartbeat() {
         if (this.heartbeatInterval) {

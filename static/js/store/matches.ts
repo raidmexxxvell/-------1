@@ -74,13 +74,17 @@ declare global {
   };
 
   // API для обновления статистики матча
-  function updateMatchStats(matchKey: string, stats: MatchStats) {
+  function updateMatchStats(matchKey: string, stats: MatchStats & { __home?: string; __away?: string; __date?: string }) {
     matches.update(state => {
-      if (!state.map[matchKey]) {
-        state.map[matchKey] = { info: null, score: null, events: [], stats: null, ui: null, lastUpdated: null };
-      }
-      state.map[matchKey].stats = stats;
-      state.map[matchKey].lastUpdated = Date.now();
+      const cur = state.map[matchKey] || { info: null, score: null, events: [], stats: null, ui: null, lastUpdated: null };
+      // If adapter provided match meta, persist it into info for reliable findMatchByTeams
+      const home = (stats && typeof stats.__home === 'string') ? stats.__home : (cur.info?.home || null);
+      const away = (stats && typeof stats.__away === 'string') ? stats.__away : (cur.info?.away || null);
+      const date = (stats && typeof stats.__date === 'string') ? stats.__date : (cur.info?.date || undefined);
+      cur.info = (home || away) ? { id: matchKey, home: home || '', away: away || '', date } : cur.info;
+      cur.stats = stats as MatchStats;
+      cur.lastUpdated = Date.now();
+      state.map[matchKey] = cur;
     });
   }
 

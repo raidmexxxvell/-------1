@@ -71,20 +71,16 @@ type MatchesStoreAPI = {
                     JSON.stringify(cached.data) !== statsSignature;
                   
                   if (needsUpdate) {
-                    // Находим ключ матча в сторе
-                    let matchKey = api.findMatchByTeams(home, away);
-                    
-                    if (!matchKey) {
-                      // Если матча нет в сторе, создаем его
-                      matchKey = cacheKey;
-                    }
-                    
-                    // Обновляем статистику в сторе
-                    api.updateMatchStats(matchKey, {
+                    // Находим ключ матча в сторе (предпочтительно по info), иначе используем стабильный ключ
+                    let matchKey = api.findMatchByTeams(home, away) || cacheKey;
+                    // Обновляем статистику в сторе, пробрасывая meta __home/__away/__date для заполнения info
+                    api.updateMatchStats(matchKey, Object.assign({
                       home: extractTeamStats(statsData, 'home'),
                       away: extractTeamStats(statsData, 'away'),
-                      ...statsData
-                    });
+                      __home: home,
+                      __away: away,
+                      __date: (statsData && (statsData.date || statsData.match_date)) || undefined
+                    }, statsData));
                     
                     // Обновляем локальный кэш
                     lastStatsCache[cacheKey] = {
@@ -93,15 +89,7 @@ type MatchesStoreAPI = {
                       etag: response.headers.get('ETag') || undefined
                     };
                     
-                    console.log('[StatsStoreAdapter] Updated stats for match:', home, 'vs', away, {
-                      matchKey,
-                      statsData,
-                      storeData: {
-                        home: extractTeamStats(statsData, 'home'),
-                        away: extractTeamStats(statsData, 'away'),
-                        ...statsData
-                      }
-                    });
+                    console.log('[StatsStoreAdapter] Updated stats for match:', home, 'vs', away, { matchKey });
                   }
                 }
               } catch (error) {
