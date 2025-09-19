@@ -55,17 +55,22 @@ class WebSocketManager:
         Не бросает исключения и не меняет существующее поведение broadcast.
         """
         if not self.socketio:
+            print(f"[WebSocketManager] emit_to_topic: нет socketio")
             return
         try:
             if not topic or not isinstance(topic, str):
+                print(f"[WebSocketManager] emit_to_topic: неверный топик: {topic}")
                 return
+            print(f"[WebSocketManager] Отправляем событие '{event}' в комнату '{topic}' с данными: {data}")
             self.socketio.emit(event, data, room=topic, namespace='/')
+            print(f"[WebSocketManager] Событие '{event}' успешно отправлено в комнату '{topic}'")
             try:
                 with self._topic_lock:
                     self._metrics['ws_messages_sent'] += 1
             except Exception:
                 pass
         except Exception as e:
+            print(f"[WebSocketManager] Ошибка при отправке '{event}' в топик '{topic}': {e}")
             logger.warning(f"Failed to emit '{event}' to topic '{topic}': {e}")
 
     def _make_topic_key(self, topic: str, event: str) -> str:

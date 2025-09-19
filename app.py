@@ -425,13 +425,20 @@ if _socketio_ref is not None:
         @_socketio_ref.on('subscribe', namespace='/')
         def _ws_subscribe_handler(payload):  # noqa: ANN001
             try:
+                print(f"[WS Subscribe] Получен запрос подписки: {payload}")
+                print(f"[WS Subscribe] Флаг WS_TOPIC_SUBSCRIPTIONS_ENABLED: {app.config.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED')}")
                 if not app.config.get('WS_TOPIC_SUBSCRIPTIONS_ENABLED'):
+                    print("[WS Subscribe] Подписки на топики отключены в конфигурации")
                     return  # фича выключена
                 topic = (payload or {}).get('topic')
                 if not topic or not isinstance(topic, str):
+                    print(f"[WS Subscribe] Неверный топик: {topic}")
                     return
+                print(f"[WS Subscribe] Добавляем клиента в комнату: {topic}")
                 join_room(topic)
-            except Exception:
+                print(f"[WS Subscribe] Клиент успешно добавлен в комнату: {topic}")
+            except Exception as e:
+                print(f"[WS Subscribe] Ошибка подписки: {e}")
                 pass
 
         @_socketio_ref.on('unsubscribe', namespace='/')

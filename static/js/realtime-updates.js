@@ -75,6 +75,11 @@ class RealtimeUpdater {
     setupEventHandlers() {
         if (!this.socket) return;
         
+        // Глобальная отладка всех WS событий
+        this.socket.onAny((eventName, ...args) => {
+            console.log(`[WS События] Получено: ${eventName}`, args);
+        });
+        
     this.socket.on('connect', () => {
             
             this.isConnected = true;

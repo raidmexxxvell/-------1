@@ -111,17 +111,24 @@ class SmartCacheInvalidator:
         Формат для Redis: {event, topic, payload, priority} на канале REDIS_TOPIC_CHANNEL.
         """
         try:
+            print(f"[SmartInvalidator] publish_topic вызван: топик={topic}, событие={event}, полезная_нагрузка={payload}")
             # Локальная доставка (если есть WS менеджер)
             if self.websocket_manager and topic and event:
                 try:
+                    print(f"[SmartInvalidator] Отправляем через WebSocket Manager в топик: {topic}")
                     # Используем батчированный эмит (PR-3) с приоритетом
                     # data_patch/topic_update — совместимо с клиентским обработчиком
                     if hasattr(self.websocket_manager, 'emit_to_topic_batched'):
+                        print(f"[SmartInvalidator] Используем emit_to_topic_batched")
                         self.websocket_manager.emit_to_topic_batched(topic, event, payload or {}, priority=int(priority or 0))
                     else:
+                        print(f"[SmartInvalidator] Используем emit_to_topic")
                         self.websocket_manager.emit_to_topic(topic, event, payload or {})
-                except Exception:
+                except Exception as ws_err:
+                    print(f"[SmartInvalidator] Ошибка WebSocket Manager: {ws_err}")
                     pass
+            else:
+                print(f"[SmartInvalidator] WebSocket Manager недоступен: ws_manager={bool(self.websocket_manager)}, topic={bool(topic)}, event={bool(event)}")
             # Публикация для других инстансов
             if self.redis_client and topic and event:
                 try:
@@ -133,7 +140,8 @@ class SmartCacheInvalidator:
                     }))
                 except Exception:
                     pass
-        except Exception:
+        except Exception as e:
+            print(f"[SmartInvalidator] Критическая ошибка в publish_topic: {e}")
             pass
 
     def invalidate_for_change(self, change_type: str, context: Dict = None) -> bool:
