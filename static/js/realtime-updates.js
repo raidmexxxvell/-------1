@@ -141,6 +141,7 @@ class RealtimeUpdater {
 
         // Топиковые уведомления (например, глобальный full_reset)
         this.socket.on('topic_update', (payload) => {
+            console.log('[Реалтайм] Получен topic_update:', payload);
             this.handleTopicUpdate(payload);
             __wsEmit('ws:topic_update', payload || {});
         });
@@ -240,18 +241,25 @@ class RealtimeUpdater {
     
     handleTopicUpdate(payload){
         try {
+            console.log('[Реалтайм] Обработка topic_update:', payload);
             if (!payload || typeof payload !== 'object') return;
             const reason = payload.reason || payload.change_type || '';
+            const topic = payload.topic || '';
+            console.log('[Реалтайм] Обрабатываем обновление топика - сущность:', payload.entity, 'топик:', topic, 'причина:', reason);
+            
             // Точечный триггер обновления статистики матча по WS (без ожидания polling)
             try {
                 if (payload.entity === 'match_stats' && payload.home && payload.away) {
+                    console.log('[Реалтайм] Отправляем matchStatsRefresh для:', payload.home, 'против', payload.away);
                     const ev = new CustomEvent('matchStatsRefresh', { detail: { home: payload.home, away: payload.away } });
                     document.dispatchEvent(ev);
                 }
             } catch(_){}
+            
             // Обновление составов/событий: при изменении событий матча перезагружаем детали и оповещаем слушателей
             try {
                 if ((payload.entity === 'match_events' || payload.entity === 'match_events_removed') && payload.home && payload.away) {
+                    console.log('[Реалтайм] Обновляем детали матча для событий:', payload.home, 'против', payload.away);
                     if (typeof window.fetchMatchDetails === 'function') {
                         // Быстрый рефетч только деталей открытого матча
                         window.fetchMatchDetails({ home: payload.home, away: payload.away, forceFresh: true })
@@ -624,19 +632,29 @@ class RealtimeUpdater {
     subscribeTopic(topic){
         try {
             if(!topic || typeof topic!== 'string') return;
+            console.log('[Реалтайм] Вызов subscribeTopic:', topic, 'топики включены:', this.topicEnabled, 'подключен:', this.isConnected);
             // Кладём в очередь всегда (на случай вызова до готовности socket)
             this.pendingTopics.add(topic);
             try {
                 window.__PENDING_WS_TOPICS__ = window.__PENDING_WS_TOPICS__ || new Set();
                 window.__PENDING_WS_TOPICS__.add(topic);
             } catch(_) {}
-            if(!this.topicEnabled) return;
+            if(!this.topicEnabled) {
+                console.warn('[Реалтайм] Подписки на топики отключены');
+                return;
+            }
             if(this.socket && this.isConnected && !this.subscribedTopics.has(topic)){
+                console.log('[Реалтайм] Отправляем подписку на топик:', topic);
                 this.socket.emit('subscribe', { topic });
                 this.subscribedTopics.add(topic);
+                console.log('[Реалтайм] Подписались на топик:', topic, 'Всего подписок:', this.subscribedTopics.size);
                 try { window.RealtimeStore && window.RealtimeStore.update(s => { if (!Array.isArray(s.topics)) s.topics = []; if (!s.topics.includes(topic)) s.topics.push(topic); }); } catch(_){}
+            } else {
+                console.log('[Реалтайм] Не можем подписаться сейчас - сокет:', !!this.socket, 'подключен:', this.isConnected, 'уже подписан:', this.subscribedTopics.has(topic));
             }
-        } catch(_) {}
+        } catch(e) {
+            console.error('[Реалтайм] Ошибка subscribeTopic:', e);
+        }
     }
     unsubscribeTopic(topic){
         try {

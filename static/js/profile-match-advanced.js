@@ -36,10 +36,23 @@
         const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):''));
         const d=raw?raw.slice(0,10):'';
         __topic = `match:${h}__${a}__${d}:details`;
+        console.log('[WS Матч] Подписываемся на топик:', __topic, 'WS включен:', !!window.__WEBSOCKETS_ENABLED__, 'Топики включены:', !!window.__WS_TOPIC_SUBS__);
         // небольшая задержка чтобы дождаться connect
-        setTimeout(()=>{ try { window.realtimeUpdater.subscribeTopic(__topic); } catch(_){} }, 400);
+        setTimeout(()=>{ 
+          try { 
+            console.log('[WS Матч] Попытка подписки на топик:', __topic);
+            window.realtimeUpdater.subscribeTopic(__topic); 
+            console.log('[WS Матч] Подписка выполнена для:', __topic);
+          } catch(e){
+            console.error('[WS Матч] Ошибка подписки:', e);
+          } 
+        }, 400);
+      } else {
+        console.warn('[WS Матч] Подписка на топики отключена. WS_TOPIC_SUBS:', !!window.__WS_TOPIC_SUBS__, 'realtimeUpdater:', !!window.realtimeUpdater);
       }
-    } catch(_){ }
+    } catch(e){ 
+      console.error('[WS Матч] Ошибка настройки топика:', e);
+    }
     try { const mkKey=(o)=>{ const h=(o?.home||'').toLowerCase().trim(); const a=(o?.away||'').toLowerCase().trim(); const raw=o?.date?String(o.date):(o?.datetime?String(o.datetime):''); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; }; mdPane.setAttribute('data-match-key', mkKey(match)); const oldTab=subtabs?.querySelector('[data-mdtab="stream"]'); if(oldTab) oldTab.remove(); const oldPane=document.getElementById('md-pane-stream'); if(oldPane) oldPane.remove(); } catch(_) {}
     mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach(el=>el.classList.remove('active'));
     try { const tabHome=subtabs?.querySelector('[data-mdtab="home"]'); const tabAway=subtabs?.querySelector('[data-mdtab="away"]'); if(tabHome) tabHome.textContent=(match.home||'Команда 1'); if(tabAway) tabAway.textContent=(match.away||'Команда 2'); } catch(_) {}
@@ -109,11 +122,20 @@
   // preload stats & specials (modular)
   try { if(window.MatchStats?.render) window.MatchStats.render(statsPane, match); } catch(e){ console.error('preload stats err', e); }
   try { if(window.MatchSpecials?.render) window.MatchSpecials.render(specialsPane, match); } catch(e){ console.error('preload specials err', e); }
-  // Lightweight polling fallback when WebSockets are disabled: refresh rosters/events via ETag every ~5s
+  // Lightweight polling fallback when WebSockets are disabled OR when topic subscriptions are not working
   try {
     const wsEnabled = !!window.__WEBSOCKETS_ENABLED__;
-    // Запускаем только если WS отключены и есть утилита получения деталей
-    if(!wsEnabled && window.fetchMatchDetails){
+    const wsTopicEnabled = !!window.__WS_TOPIC_SUBS__;
+    console.log('[Поллинг Матча] WS включен:', wsEnabled, 'WS топики включены:', wsTopicEnabled);
+    
+    // Запускаем поллинг если:
+    // 1) WS полностью отключены, ИЛИ
+    // 2) WS включены, но топики отключены, ИЛИ 
+    // 3) Принудительно для отладки (можно настроить через localStorage)
+    const shouldPoll = !wsEnabled || !wsTopicEnabled || localStorage.getItem('debug:force_match_polling') === '1';
+    
+    if(shouldPoll && window.fetchMatchDetails){
+      console.log('[Поллинг Матча] Запускаем поллинг деталей матча');
       // вычисляем дату в формате YYYY-MM-DD как в топике
       const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):''));
       const dateStr=raw?raw.slice(0,10):'';
@@ -129,9 +151,11 @@
         if(busy){ schedule(); return; }
         busy=true;
         try {
+          console.log('[Поллинг Матча] Получаем детали матча...');
           const store = await window.fetchMatchDetails({ home: match.home||'', away: match.away||'', date: dateStr, forceFresh: true }).catch(()=>null);
           const ver = store?.version || store?.etag || null;
           if(store && ver && ver !== lastVersion){
+            console.log('[Поллинг Матча] Обнаружена новая версия:', ver, 'предыдущая:', lastVersion);
             lastVersion = ver;
             try {
               // Если недавно были админские изменения карточек (желт/красн/гол/ассист), не перерисовываем составы мгновенно, чтобы избежать фликера селектов.
@@ -147,9 +171,14 @@
         }
       };
       const schedule = ()=>{ if(cancelled) return; const base=5000; const jitter=1200; const delay = base + Math.floor(Math.random()*jitter); timer = setTimeout(loop, delay); };
+      console.log('[Поллинг Матча] Запускаем цикл поллинга...');
       schedule();
+    } else {
+      console.log('[Поллинг Матча] Поллинг отключен - полагаемся на WS топики');
     }
-  } catch(_){}
+  } catch(e){
+    console.error('[Поллинг Матча] Ошибка настройки:', e);
+  }
   mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach(btn=>{ btn.onclick=()=>{ mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach(x=>x.classList.remove('active')); btn.classList.add('active'); const key=btn.getAttribute('data-mdtab'); if(key!=='stream'){ try { document.body.classList.remove('allow-landscape'); } catch(_){ } try { if(window.MatchStream?.deactivate){ window.MatchStream.deactivate(streamPane); } } catch(_){ } }
       if(key==='home'){ homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display='none'; }
   else if(key==='away'){ homePane.style.display='none'; awayPane.style.display=''; specialsPane.style.display='none'; statsPane.style.display='none'; if(streamPane) streamPane.style.display='none'; }
