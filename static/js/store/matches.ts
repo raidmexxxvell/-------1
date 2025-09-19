@@ -94,13 +94,18 @@ declare global {
     const homeNorm = home.toLowerCase().trim();
     const awayNorm = away.toLowerCase().trim();
     
+    console.log('[MatchesStore] findMatchByTeams:', { home, away, homeNorm, awayNorm });
+    
     for (const [key, entry] of Object.entries(state.map)) {
       const entryHome = entry.info?.home?.toLowerCase().trim() || '';
       const entryAway = entry.info?.away?.toLowerCase().trim() || '';
+      console.log('[MatchesStore] Checking entry:', { key, entryHome, entryAway, match: entryHome === homeNorm && entryAway === awayNorm });
       if (entryHome === homeNorm && entryAway === awayNorm) {
+        console.log('[MatchesStore] Found match:', key);
         return key;
       }
     }
+    console.log('[MatchesStore] No match found');
     return null;
   }
 

@@ -31,8 +31,8 @@ class RealtimeUpdater {
         // Heartbeat config
         this.heartbeatInterval = null;
         this.heartbeatTimeout = null;
-        this.pingInterval = 25000;      // 25 sec ping
-        this.pongTimeout = 5000;        // 5 sec pong wait
+        this.pingInterval = 30000;      // 30 sec ping (уменьшена частота)
+        this.pongTimeout = 15000;       // 15 sec pong wait (увеличено для стабильности)
         this.lastPongTime = 0;
     // Версионность коэффициентов по матчу: key = "home|away" → int
     this.oddsVersions = new Map();

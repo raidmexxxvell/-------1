@@ -93,7 +93,15 @@ type MatchesStoreAPI = {
                       etag: response.headers.get('ETag') || undefined
                     };
                     
-                    console.log('[StatsStoreAdapter] Updated stats for match:', home, 'vs', away);
+                    console.log('[StatsStoreAdapter] Updated stats for match:', home, 'vs', away, {
+                      matchKey,
+                      statsData,
+                      storeData: {
+                        home: extractTeamStats(statsData, 'home'),
+                        away: extractTeamStats(statsData, 'away'),
+                        ...statsData
+                      }
+                    });
                   }
                 }
               } catch (error) {

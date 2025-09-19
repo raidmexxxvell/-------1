@@ -102,7 +102,9 @@ declare global {
       matchesStoreAPIExists: !!(window as any).MatchesStoreAPI,
       matchesStoreExists: !!window.MatchesStore,
       currentNames: currentNames(),
-      match
+      match,
+      matchHome: match?.home,
+      matchAway: match?.away
     });
     
     if(!host) return false;
@@ -111,15 +113,16 @@ declare global {
     let stats: any = null;
     let hasStoreData = false;
     
-    if ((window as any).MatchesStoreAPI) {
+    if ((window as any).MatchesStoreAPI && match?.home && match?.away) {
       try {
-        const { h, a } = currentNames();
-        if (h && a) {
-          const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(h, a);
-          if (matchKey) {
-            stats = (window as any).MatchesStoreAPI.getMatchStats(matchKey);
-            hasStoreData = !!(stats && (stats.home || stats.away || stats.shots_total));
-          }
+        // Используем данные из объекта match, а не currentNames (которые могут не совпадать)
+        const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(match.home, match.away);
+        console.log('[Bridge] Found match key:', matchKey);
+        
+        if (matchKey) {
+          stats = (window as any).MatchesStoreAPI.getMatchStats(matchKey);
+          hasStoreData = !!(stats && (stats.home || stats.away || stats.shots_total));
+          console.log('[Bridge] MatchesStoreAPI stats:', { stats, hasStoreData });
         }
       } catch(e) {
         console.warn('[Bridge] MatchesStoreAPI error:', e);
@@ -127,19 +130,26 @@ declare global {
     }
     
     // Fallback на старый MatchesStore
-    if (!hasStoreData) {
-      const st = window.MatchesStore?.get();
-      if (st) {
-        const key = findMatchKey(st);
-        if (key) {
-          const entry = st.map[key];
-          stats = entry?.stats || null;
-          hasStoreData = !!(stats && (stats.home || stats.away));
+    if (!hasStoreData && window.MatchesStore) {
+      try {
+        const st = window.MatchesStore.get();
+        if (st) {
+          const key = findMatchKey(st);
+          console.log('[Bridge] Legacy store key:', key);
+          if (key) {
+            const entry = st.map[key];
+            stats = entry?.stats || null;
+            hasStoreData = !!(stats && (stats.home || stats.away));
+            console.log('[Bridge] Legacy store stats:', { stats, hasStoreData });
+          }
         }
+      } catch(e) {
+        console.warn('[Bridge] Legacy store error:', e);
       }
     }
     
     if (!hasStoreData) {
+      console.log('[Bridge] No store data found, showing loading');
       host.innerHTML='<div class="stats-wrap">Загрузка статистики...</div>';
       return false;
     }
