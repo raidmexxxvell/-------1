@@ -30,7 +30,7 @@
 - templates/
   - index.html — основной интерфейс SPA (Vanilla JS), подключение всех модулей
   - admin_dashboard.html — административные экраны
-- utils/ — валидаторы, middleware, метрики, интеграции с Google Sheets
+- utils/ — валидаторы, middleware, метрики, (исторически) интеграции с внешними источниками данных
 - docs/ — документация (текущий файл)
 
 Назначение директорий:
@@ -63,7 +63,7 @@
 - SQLAlchemy, alembic — БД и миграции
 - psycopg[binary] — драйвер PostgreSQL
 - orjson — быстрая JSON-сериализация для ответов
-- gspread, google-auth — интеграция с Google Sheets
+- gspread, google-auth — (исторические) зависимости для админ‑импорта/экспорта; клиентская часть и публичные эндпоинты работают только от БД
 - gevent, gevent-websocket — worker для WS
 - redis — кэш и pub/sub (в рамках оптимизаций)
 

@@ -30,8 +30,14 @@ declare global {
     // Map: league table
     if (cacheKey === 'league:table' && window.LeagueStore){
       try {
-        const table = Array.isArray(data) ? data : (data?.table || []);
-        window.LeagueStore.update(s => { s.table = table; });
+        // API может отдавать таблицу в разных обёртках:
+        //  - объект с полем values
+        //  - прямой массив
+        //  - объект с полем table
+        const table = Array.isArray((data as any)?.values)
+          ? (data as any).values
+          : (Array.isArray(data) ? (data as any) : ((data as any)?.table || []));
+        window.LeagueStore.update(s => { s.table = Array.isArray(table) ? table : []; });
       } catch(_) {}
     }
 

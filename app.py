@@ -1,4 +1,4 @@
-"""Flask backend for Liga Obninska app with betting, Google Sheets and SQLAlchemy."""
+"""Flask backend for Liga Obninska app with betting and SQLAlchemy (DB-first)."""
 import os
 import flask  # added to reference flask.g explicitly
 import json

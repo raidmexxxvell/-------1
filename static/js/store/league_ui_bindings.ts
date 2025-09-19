@@ -60,8 +60,7 @@ declare global {
       const data = {
         values: state.table,
         updated_at: new Date().toISOString()
-      };
-      
+      } as any;
       window.League.renderLeagueTable(table, updatedText, data);
       lastTableRender = Date.now();
       
