@@ -2,8 +2,8 @@
 // UI bindings for Predictions components to subscribe to PredictionsStore changes
 // Provides automatic UI updates when store state changes
 
-// Импортируем типы из predictions.ts
-import './predictions';
+// Импортируем PredictionsStore (браузерный ESM: явное .js)
+import './predictions.js';
 import type { StoreApi } from './core';
 
 // Дополнительные глобальные объявления для Predictions API

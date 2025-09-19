@@ -62,6 +62,16 @@ declare global {
       const originalRender = orig;
       
       window.MatchStats.render = function(host: HTMLElement, match: any){
+        // Администратор: не перехватываем, оставляем оригинальный рендер с контролами редактирования
+        try {
+          const adminId = document.body.getAttribute('data-admin');
+          const currentId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id ? String((window as any).Telegram.WebApp.initDataUnsafe.user.id) : '';
+          const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+          if (isAdmin) {
+            return originalRender.call(this, host, match);
+          }
+        } catch(_) {}
+        
         console.log('[Bridge] MatchStats.render called', { 
           host, 
           match,

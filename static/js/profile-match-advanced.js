@@ -68,6 +68,24 @@
   homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; if(streamPane) streamPane.style.display='none'; statsPane.style.display='none';
   // Delegate roster & events rendering
   try { if(window.MatchRostersEvents?.render) { window.MatchRostersEvents.render(match, details, mdPane, { homePane, awayPane }); } } catch(_) {}
+
+  // Если составы не пришли в initial details — сделаем одноразовый догруз через fetchMatchDetails
+  try {
+    const hasRosters = (()=>{ try { const h=Array.isArray(details?.rosters?.home)?details.rosters.home:[]; const a=Array.isArray(details?.rosters?.away)?details.rosters.away:[]; return (h.length + a.length) > 0; } catch(_) { return false; } })();
+    if (!hasRosters && typeof window.fetchMatchDetails === 'function') {
+      const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):''));
+      const dateStr=raw?raw.slice(0,10):'';
+      window.fetchMatchDetails({ home: match.home||'', away: match.away||'', date: dateStr, forceFresh: true })
+        .then(store => {
+          try {
+            const d = store && (store.data||store.raw) ? (store.data||store.raw) : null;
+            if (!d) return;
+            if (window.MatchRostersEvents?.render) window.MatchRostersEvents.render(match, d, mdPane, { homePane, awayPane });
+          } catch(_) {}
+        })
+        .catch(()=>{});
+    }
+  } catch(_) {}
   // WS-first: при обновлении деталей матча (в т.ч. событий) перерисовываем составы/события
   try {
     const onDetailsUpdate = (e)=>{

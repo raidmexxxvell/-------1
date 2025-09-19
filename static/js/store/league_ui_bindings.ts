@@ -2,8 +2,8 @@
 // UI bindings for League components to subscribe to LeagueStore changes
 // Provides automatic UI updates when store state changes
 
-// Импортируем типы из league.ts
-import './league';
+// Импортируем стора лиги (браузерный ESM требует явного расширения .js)
+import './league.js';
 import type { StoreApi } from './core';
 
 // Дополнительные глобальные объявления для League API
@@ -34,9 +34,11 @@ declare global {
   // Selectors for DOM elements
   const getLeagueTable = () => document.getElementById('league-table') as HTMLElement | null;
   const getLeagueUpdatedText = () => document.getElementById('league-updated-text') as HTMLElement | null;
-  const getSchedulePane = () => document.getElementById('league-pane-schedule') as HTMLElement | null;
+  // Вёрстка использует id "ufo-schedule" для панели расписания
+  const getSchedulePane = () => document.getElementById('ufo-schedule') as HTMLElement | null;
   const getStatsTable = () => document.getElementById('stats-table') as HTMLElement | null;
-  const getStatsUpdated = () => document.getElementById('stats-updated') as HTMLElement | null;
+  // Вёрстка использует id "stats-table-updated" для текста обновления статистики
+  const getStatsUpdated = () => document.getElementById('stats-table-updated') as HTMLElement | null;
 
   // State tracking to prevent unnecessary re-renders
   let lastTableRender = 0;
