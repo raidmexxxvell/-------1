@@ -73,6 +73,46 @@ declare global {
     }
   };
 
+  // API для обновления статистики матча
+  function updateMatchStats(matchKey: string, stats: MatchStats) {
+    matches.update(state => {
+      if (!state.map[matchKey]) {
+        state.map[matchKey] = { info: null, score: null, events: [], stats: null, ui: null, lastUpdated: null };
+      }
+      state.map[matchKey].stats = stats;
+      state.map[matchKey].lastUpdated = Date.now();
+    });
+  }
+
+  function getMatchStats(matchKey: string): MatchStats | null {
+    const state = matches.get();
+    return state.map[matchKey]?.stats || null;
+  }
+
+  function findMatchByTeams(home: string, away: string): string | null {
+    const state = matches.get();
+    const homeNorm = home.toLowerCase().trim();
+    const awayNorm = away.toLowerCase().trim();
+    
+    for (const [key, entry] of Object.entries(state.map)) {
+      const entryHome = entry.info?.home?.toLowerCase().trim() || '';
+      const entryAway = entry.info?.away?.toLowerCase().trim() || '';
+      if (entryHome === homeNorm && entryAway === awayNorm) {
+        return key;
+      }
+    }
+    return null;
+  }
+
+  // Экспортируем API для использования в других модулях
+  (window as any).MatchesStoreAPI = {
+    updateMatchStats,
+    getMatchStats, 
+    findMatchByTeams,
+    subscribe: matches.subscribe,
+    get: matches.get
+  };
+
   // Экспортируем legacy API для обратной совместимости
   try { 
     (window as any).MatchState = MatchStateCompat; 

@@ -67,12 +67,44 @@ declare global {
 
   function renderStatsFromStore(host: HTMLElement, match: any){
     if(!host) return;
-    const st = window.MatchesStore?.get();
-    if(!st){ host.innerHTML='<div class="stats-wrap">Загрузка…</div>'; return; }
-    const key = findMatchKey(st);
-    if(!key){ host.innerHTML='<div class="stats-wrap">Нет данных</div>'; return; }
-    const entry = st.map[key];
-    const stats = entry?.stats || null;
+    
+    // Пытаемся получить статистику через новый API
+    let stats: any = null;
+    let hasStoreData = false;
+    
+    if ((window as any).MatchesStoreAPI) {
+      try {
+        const { h, a } = currentNames();
+        if (h && a) {
+          const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(h, a);
+          if (matchKey) {
+            stats = (window as any).MatchesStoreAPI.getMatchStats(matchKey);
+            hasStoreData = !!(stats && (stats.home || stats.away || stats.shots_total));
+          }
+        }
+      } catch(e) {
+        console.warn('[Bridge] MatchesStoreAPI error:', e);
+      }
+    }
+    
+    // Fallback на старый MatchesStore
+    if (!hasStoreData) {
+      const st = window.MatchesStore?.get();
+      if (st) {
+        const key = findMatchKey(st);
+        if (key) {
+          const entry = st.map[key];
+          stats = entry?.stats || null;
+          hasStoreData = !!(stats && (stats.home || stats.away));
+        }
+      }
+    }
+    
+    if (!hasStoreData) {
+      host.innerHTML='<div class="stats-wrap">Нет данных</div>';
+      return;
+    }
+    
     // Ожидаемые метрики
     const metrics = [
       { key:'shots_total', label:'Всего ударов' },
@@ -81,14 +113,28 @@ declare global {
       { key:'yellows', label:'Жёлтые карточки' },
       { key:'reds', label:'Удаления' }
     ];
-    // Формат хранения в сто́ре: stats.home / stats.away -> объект {shots_total: n, ...} или альтернативно вложенность
+    
+    // Универсальная функция получения значений для метрики
     const getValPair = (metric: string): [number, number] => {
       try {
-        const h = Number(stats?.home?.[metric] ?? 0) || 0;
-        const a = Number(stats?.away?.[metric] ?? 0) || 0;
-        return [h,a];
-      } catch { return [0,0]; }
+        // Формат 1: прямые массивы [home, away] (из адаптера)
+        if (stats[metric] && Array.isArray(stats[metric]) && stats[metric].length >= 2) {
+          return [Number(stats[metric][0]) || 0, Number(stats[metric][1]) || 0];
+        }
+        
+        // Формат 2: структура {home: {...}, away: {...}} (старый формат)
+        if (stats.home && stats.away) {
+          const h = Number(stats.home[metric] ?? 0) || 0;
+          const a = Number(stats.away[metric] ?? 0) || 0;
+          return [h, a];
+        }
+        
+        return [0, 0];
+      } catch { 
+        return [0, 0]; 
+      }
     };
+    
     const wrap = document.createElement('div'); wrap.className='stats-grid';
     metrics.forEach(mt => {
       const [lh,rh] = getValPair(mt.key);
@@ -101,6 +147,15 @@ declare global {
       const leftFill=document.createElement('div'); leftFill.className='stat-fill-left';
       const rightFill=document.createElement('div'); rightFill.className='stat-fill-right';
       const total = lh+rh; const lp = total>0? Math.round((lh/total)*100):50; leftFill.style.width=lp+'%'; rightFill.style.width=(100-lp)+'%';
+      
+      // Добавляем цвета команд если доступны
+      try {
+        if (typeof (window as any).getTeamColor === 'function') {
+          leftFill.style.backgroundColor = (window as any).getTeamColor(match.home || '');
+          rightFill.style.backgroundColor = (window as any).getTeamColor(match.away || '');
+        }
+      } catch(_) {}
+      
       mid.append(leftFill,rightFill);
       const rightSide=document.createElement('div'); rightSide.className='stat-side stat-right';
       const rightVal=document.createElement('div'); rightVal.className='stat-val'; rightVal.textContent=String(rh); rightSide.appendChild(rightVal);
