@@ -15149,17 +15149,25 @@ def api_match_stats_set():
             # Публикуем topic‑сообщение о статистике матча (неблокирующе)
             try:
                 inv = globals().get('invalidator')
+                print(f"[API Stats Set] invalidator найден: {bool(inv)}")
                 if inv:
                     dt = _get_match_datetime(home, away)
                     date_str = dt.isoformat()[:10] if dt else ''
                     topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
-                    inv.publish_topic(topic, 'topic_update', {
+                    payload = {
                         'entity': 'match_stats',
                         'home': home,
                         'away': away,
                         'updated_at': row.updated_at.isoformat() if getattr(row, 'updated_at', None) else None
-                    }, priority=0)
-            except Exception:
+                    }
+                    print(f"[API Stats Set] Публикуем в топик: {topic}")
+                    print(f"[API Stats Set] Payload: {payload}")
+                    inv.publish_topic(topic, 'topic_update', payload, priority=0)
+                    print(f"[API Stats Set] publish_topic завершен")
+                else:
+                    print("[API Stats Set] invalidator недоступен")
+            except Exception as e:
+                print(f"[API Stats Set] Ошибка publish_topic: {e}")
                 pass
             return jsonify({'status':'ok'})
         finally:
