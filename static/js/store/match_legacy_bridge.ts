@@ -32,8 +32,13 @@ declare global {
   const awayNameEl = () => document.getElementById('md-away-name');
 
   function currentNames(){
-    const h = homeNameEl()?.textContent?.trim() || '';
-    const a = awayNameEl()?.textContent?.trim() || '';
+    // Сначала пробуем брать исходные имена команд из data-атрибутов (без количества в скобках)
+    const hAttr = (homeNameEl() as HTMLElement | null)?.getAttribute('data-team-name') || '';
+    const aAttr = (awayNameEl() as HTMLElement | null)?.getAttribute('data-team-name') || '';
+    const hText = homeNameEl()?.textContent?.trim() || '';
+    const aText = awayNameEl()?.textContent?.trim() || '';
+    const h = (hAttr || hText).trim();
+    const a = (aAttr || aText).trim();
     return { h, a };
   }
 
@@ -254,8 +259,32 @@ declare global {
     if(!entry) return 'empty';
     const score = entry.score? `${entry.score.home}:${entry.score.away}`:'-';
     const evCount = entry.events? entry.events.length:0;
-    const statsSig = (()=>{ try { const h=entry.stats?.home||{}; const a=entry.stats?.away||{}; return Object.keys(h).sort().map(k=>k+':'+h[k]).join(',')+'|'+Object.keys(a).sort().map(k=>k+':'+a[k]).join(','); } catch { return ''; } })();
-    return `${score}|${evCount}|${statsSig}`;
+    // Поддержка обоих форматов статистики: {home/away} и верхнеуровневые массивы (shots_total: [h,a], ...)
+    const statsObj: any = entry.stats || {};
+    const sigHomeAway = (()=>{ try { const h=statsObj?.home||{}; const a=statsObj?.away||{}; return Object.keys(h).sort().map(k=>k+':'+h[k]).join(',')+'|'+Object.keys(a).sort().map(k=>k+':'+a[k]).join(','); } catch { return ''; } })();
+    const sigTopLevel = (()=>{
+      try {
+        const keys = Object.keys(statsObj).filter(k => k !== 'home' && k !== 'away').sort();
+        if(keys.length===0) return '';
+        const parts: string[] = [];
+        for(const k of keys){
+          const v = (statsObj as any)[k];
+          if (Array.isArray(v)) {
+            parts.push(k+':'+v.map(x=>Number(x)||0).join('-'));
+          } else if (typeof v === 'number') {
+            parts.push(k+':'+v);
+          } else if (v && typeof v === 'object') {
+            // редкий случай: вложенный объект
+            parts.push(k+':'+Object.values(v).map(x=>Number(x)||0).join('-'));
+          } else {
+            parts.push(k+':'+String(v));
+          }
+        }
+        return parts.join('|');
+      } catch { return ''; }
+    })();
+    const ts = Number(entry.lastUpdated||0) || 0;
+    return `${score}|${evCount}|${sigHomeAway}|${sigTopLevel}|${ts}`;
   }
 
   function dispatchUpdates(entry: MatchEntry){
@@ -268,8 +297,16 @@ declare global {
       document.dispatchEvent(ev);
       // Прямое обновление статистики (если stats есть): ререндерим панель stats если открыта
       try {
-        const statsPane = document.getElementById('md-pane-stats');
-        if(statsPane && window.MatchStats?.__storeDriven){
+        const statsPane = document.getElementById('md-pane-stats') as HTMLElement | null;
+        const isStatsVisible = !!statsPane && statsPane.style.display !== 'none';
+        // Не вмешиваемся в админский рендер, чтобы сохранить анимации/контролы
+        let isAdmin = false;
+        try {
+          const adminId = document.body.getAttribute('data-admin');
+          const currentId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id ? String((window as any).Telegram.WebApp.initDataUnsafe.user.id) : '';
+          isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+        } catch(_) {}
+        if(isStatsVisible && !isAdmin && window.MatchStats?.__storeDriven){
           renderStatsFromStore(statsPane as HTMLElement, { home: info.home, away: info.away });
         }
       } catch(_){}
