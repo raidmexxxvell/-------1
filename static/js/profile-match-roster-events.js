@@ -69,10 +69,18 @@
   table.appendChild(tbody); pane.appendChild(table); if(side==='home'){ const btnWrap=document.createElement('div'); btnWrap.style.display='flex'; btnWrap.style.justifyContent='center'; btnWrap.style.marginTop='8px'; const btn=document.createElement('button'); btn.className='details-btn'; btn.textContent='Обновить составы'; btn.style.fontSize='12px'; btn.style.padding='6px 10px'; btn.style.borderRadius='8px'; const mkKey=()=>{ try { const dRaw=(match?.datetime||match?.date||'').toString(); const d=dRaw?dRaw.slice(0,10):''; return `roster:refresh:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${d}`; } catch(_) { return 'roster:refresh'; } }; const rKey=mkKey(); const COOLDOWN=10*60*1000; const updateState=()=>{ try { const last=Number(localStorage.getItem(rKey)||'0')||0; const left=Math.max(0,(last+COOLDOWN)-Date.now()); if(left>0){ btn.disabled=true; const mins=Math.ceil(left/60000); btn.textContent=`Доступно через ${mins} мин`; } else { btn.disabled=false; btn.textContent='Обновить составы'; } } catch(_){} }; updateState(); btn.addEventListener('click',async()=>{ try { const last=Number(localStorage.getItem(rKey)||'0')||0; if(Date.now()-last<COOLDOWN){ updateState(); return; } } catch(_){} btn.disabled=true; const orig=btn.textContent; btn.textContent='Обновляю...'; try { const params=new URLSearchParams({ home:match.home||'', away:match.away||'' }); const r=await fetch(`/api/match/lineups?${params.toString()}`,{ headers:{'Cache-Control':'no-store'} }); const fresh=await r.json(); const homeList=Array.isArray(fresh?.rosters?.home)?fresh.rosters.home:[]; const awayList=Array.isArray(fresh?.rosters?.away)?fresh.rosters.away:[]; const ev = details?.events || {home:[],away:[]}; renderRosterTable(homePane,homeList,'home',ev); renderRosterTable(awayPane,awayList,'away',ev); try { localStorage.setItem(rKey,String(Date.now())); } catch(_){} } catch(e){} btn.textContent=orig; updateState(); }); btnWrap.appendChild(btn); pane.appendChild(btnWrap); }
     };
     try {
-      // Сохраняем последние события, чтобы при частичных обновлениях (без поля events) не терять иконки на UI
+      // Сохраняем последние события и ростеры, чтобы при частичных обновлениях (без этих полей)
+      // не терять данные и не показывать "Нет данных"
       try {
         if (!mdPane.__lastEvents) mdPane.__lastEvents = { home: [], away: [] };
         if (details && details.events) mdPane.__lastEvents = details.events;
+      } catch(_){}
+      try {
+        if (!mdPane.__lastRosters) mdPane.__lastRosters = { home: [], away: [] };
+        if (details && details.rosters) mdPane.__lastRosters = {
+          home: Array.isArray(details.rosters.home) ? details.rosters.home : (mdPane.__lastRosters.home || []),
+          away: Array.isArray(details.rosters.away) ? details.rosters.away : (mdPane.__lastRosters.away || [])
+        };
       } catch(_){}
       // Если есть расширенный формат lineups
       if(details?.lineups){
@@ -97,9 +105,21 @@
         patchRender(homePane, toFlat(homeExt),'home', ev);
         patchRender(awayPane, toFlat(awayExt),'away', ev);
       } else {
-        const homeList=Array.isArray(details?.rosters?.home)?details.rosters.home:[]; const awayList=Array.isArray(details?.rosters?.away)?details.rosters.away:[]; const ev=details?.events || mdPane.__lastEvents || {home:[],away:[]}; renderRosterTable(homePane, homeList,'home',ev); renderRosterTable(awayPane, awayList,'away',ev);
+        const homeList=(Array.isArray(details?.rosters?.home)?details.rosters.home: (mdPane.__lastRosters?.home||[]));
+        const awayList=(Array.isArray(details?.rosters?.away)?details.rosters.away: (mdPane.__lastRosters?.away||[]));
+        const ev=details?.events || mdPane.__lastEvents || {home:[],away:[]}; renderRosterTable(homePane, homeList,'home',ev); renderRosterTable(awayPane, awayList,'away',ev);
       }
-    } catch(_) { renderRosterTable(homePane,[], 'home', (mdPane.__lastEvents||{home:[],away:[]})); renderRosterTable(awayPane,[], 'away', (mdPane.__lastEvents||{home:[],away:[]})); }
+    } catch(_) { 
+      // В случае ошибки пытаемся показать последний валидный кэш ростеров
+      try {
+        const lastR = mdPane.__lastRosters || { home: [], away: [] };
+        renderRosterTable(homePane, Array.isArray(lastR.home)? lastR.home: [], 'home', (mdPane.__lastEvents||{home:[],away:[]})); 
+        renderRosterTable(awayPane, Array.isArray(lastR.away)? lastR.away: [], 'away', (mdPane.__lastEvents||{home:[],away:[]})); 
+      } catch(__){
+        renderRosterTable(homePane,[], 'home', (mdPane.__lastEvents||{home:[],away:[]})); 
+        renderRosterTable(awayPane,[], 'away', (mdPane.__lastEvents||{home:[],away:[]}));
+      }
+    }
   }
   window.MatchRostersEvents = { render };
 })();

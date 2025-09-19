@@ -18,6 +18,7 @@ declare global {
   interface Window {
     // MatchesStore likely already declared globally in other store modules; avoid redeclaration conflict
     MatchStats?: any;
+    __WEBSOCKETS_ENABLED__?: boolean;
   }
 }
 
@@ -67,12 +68,18 @@ declare global {
       const originalRender = orig;
       
       window.MatchStats.render = function(host: HTMLElement, match: any){
-        // Администратор: не перехватываем, оставляем оригинальный рендер с контролами редактирования
+        // Администратор: не перехватываем, оставляем оригинальный рендер с контролами и анимацией
         try {
           const adminId = document.body.getAttribute('data-admin');
-          const currentId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id ? String((window as any).Telegram.WebApp.initDataUnsafe.user.id) : '';
-          const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+          const isAdmin = !!(adminId && adminId.trim() !== '');
           if (isAdmin) {
+            return originalRender.call(this, host, match);
+          }
+        } catch(_) {}
+
+        // Если вебсокеты недоступны, используем оригинальный рендер, чтобы работал легаси-поллинг ETag
+        try {
+          if (!window.__WEBSOCKETS_ENABLED__) {
             return originalRender.call(this, host, match);
           }
         } catch(_) {}
@@ -303,10 +310,9 @@ declare global {
         let isAdmin = false;
         try {
           const adminId = document.body.getAttribute('data-admin');
-          const currentId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id ? String((window as any).Telegram.WebApp.initDataUnsafe.user.id) : '';
-          isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+          isAdmin = !!(adminId && adminId.trim() !== '');
         } catch(_) {}
-        if(isStatsVisible && !isAdmin && window.MatchStats?.__storeDriven){
+        if(isStatsVisible && !isAdmin && window.MatchStats?.__storeDriven && !!window.__WEBSOCKETS_ENABLED__){
           renderStatsFromStore(statsPane as HTMLElement, { home: info.home, away: info.away });
         }
       } catch(_){}
