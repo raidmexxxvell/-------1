@@ -165,8 +165,23 @@
     if (!tableEl) return;
     const tbody = tableEl.querySelector('tbody');
     if (!tbody) return;
-    tbody.innerHTML = '';
     const rows = data?.values || [];
+    // Guard: проверяем и версию, и короткую сигнатуру, чтобы избежать пропуска реальных изменений
+    try {
+      const sigRows = JSON.stringify(rows.slice(0, 10));
+      const sameSig = !!(tbody.children.length > 0 && tableEl.dataset && tableEl.dataset.sig === sigRows);
+      const prevIso = updatedTextEl?.getAttribute('data-updated-iso') || '';
+      const nextIso = data?.updated_at || '';
+      let notNewer = false;
+      if (nextIso && prevIso) {
+        const prevTs = Date.parse(prevIso);
+        const nextTs = Date.parse(nextIso);
+        notNewer = Number.isFinite(prevTs) && Number.isFinite(nextTs) && nextTs <= prevTs;
+      }
+      if (sameSig && notNewer) return; // ничего не поменялось — не перерисовываем
+      if (tableEl.dataset) tableEl.dataset.sig = sigRows;
+    } catch(_) {}
+    tbody.innerHTML = '';
     const nodes = [];
     for (let i = 0; i < 10; i++) {
       const r = rows[i] || [];
@@ -238,6 +253,22 @@
     if (!pane) return;
     const ds = data?.tours ? data : (data?.data || {});
     let tours = ds?.tours || [];
+    // Guard: сравнение сигнатуры туров. Если расписание не изменилось — не перерисовываем контейнер (исключаем моргание голосовалок)
+    try {
+      const mkKeySafe = (m) => {
+        try { return matchKey(m); } catch(_) { return `${m?.home||''}__${m?.away||''}__${m?.date||m?.datetime||''}`; }
+      };
+      const sig = JSON.stringify((Array.isArray(tours)?tours:[]).map(t=>({
+        t: t?.tour||t?.title||'',
+        m: (t?.matches||[]).map(m=>mkKeySafe(m))
+      })));
+      if (pane.dataset && pane.dataset.hasContent === '1' && pane.dataset.sig === sig) {
+        // Данные не изменились — лишь убедимся, что голосование пропатчено и выходим
+        try { ensureBettingToursFresh().then(() => { try { patchScheduleVotes(pane); } catch(_){} }); } catch(_) {}
+        return;
+      }
+      if (pane.dataset) pane.dataset.sig = sig;
+    } catch(_) {}
     // Синхронизируем расписание и betting:tours для актуального голосования (динамический импорт)
     (async () => {
       try {
@@ -755,7 +786,8 @@
     // Пройдём по матч-картам без уже вставленного голосования
     pane.querySelectorAll('.match-card').forEach(card => {
       try {
-        if (card.querySelector('.vote-inline')) return; // уже есть
+        // Если уже патчили или уже есть vote-inline — пропускаем (исключает мигалки)
+        if (card.__votePatched === true || card.querySelector('.vote-inline')) return;
         const nameHomeEl = card.querySelector('.team.home .team-name');
         const nameAwayEl = card.querySelector('.team.away .team-name');
         const home = (nameHomeEl?.getAttribute('data-team-name') || nameHomeEl?.textContent || '').trim();
@@ -779,7 +811,7 @@
         // Создаём голосование
         if (window.VoteInline && typeof window.VoteInline.create === 'function') {
           const voteEl = window.VoteInline.create({ home, away, date: dateKey, getTeamColor });
-          if (voteEl) card.appendChild(voteEl);
+          if (voteEl) { card.appendChild(voteEl); card.__votePatched = true; }
         }
       } catch(_) {}
     });
