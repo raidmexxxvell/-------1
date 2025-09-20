@@ -117,8 +117,7 @@ declare global {
     const updatedEl = getStatsUpdated();
     if (!table || !window.League?.renderStatsTable) return;
 
-    // Skip if no new data
-    if (state.stats.length === 0) return;
+  // Не пропускаем пустое состояние — отрисуем скелет, чтобы таблица не выглядела пустой
 
     try {
       // Guard: если сигнатура совпадает — не перерисовываем (устраняем мерцание)

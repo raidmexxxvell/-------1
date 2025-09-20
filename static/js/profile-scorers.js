@@ -1,6 +1,8 @@
 // Scorers table loader
 (function(){
+  function isStoreEnabled(){ try { return localStorage.getItem('feature:league_ui_store') === '1'; } catch(_) { return false; } }
   function renderScorers(){
+    if (isStoreEnabled()) return; // do not interfere when store UI is on
     const hostPane = document.getElementById('ufo-stats');
     if(!hostPane) return;
     const table = document.getElementById('stats-table');
@@ -44,10 +46,10 @@
   document.addEventListener('click', (e)=>{
     try {
       const tab = e.target.closest('.subtab-item[data-subtab="stats"]');
-      if(tab){ setTimeout(renderScorers, 50); }
+      if(tab){ if (isStoreEnabled()) return; setTimeout(renderScorers, 50); }
     } catch(_) {}
   });
   // Фолбэк автозапуска (если уже открыта вкладка stats через программный клик)
-  setTimeout(()=>{ const active = document.querySelector('#ufo-subtabs .subtab-item.active[data-subtab="stats"]'); if(active) renderScorers(); }, 500);
+  setTimeout(()=>{ const active = document.querySelector('#ufo-subtabs .subtab-item.active[data-subtab="stats"]'); if(active){ if (!isStoreEnabled()) renderScorers(); } }, 500);
   window.renderScorersTable = renderScorers;
 })();
