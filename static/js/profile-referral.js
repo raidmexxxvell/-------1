@@ -7,18 +7,18 @@
 
   function updateCounters(){
     try {
-      if (!_referralCache) return;
+  if (!_referralCache) { return; }
       const val = (_referralCache.invited_count ?? 0).toString();
       const c1 = document.getElementById('ref-count');
       const c2 = document.getElementById('ref-count-2');
-      if (c1) c1.textContent = val;
-      if (c2) c2.textContent = val;
+  if (c1) { c1.textContent = val; }
+  if (c2) { c2.textContent = val; }
     } catch(_) {}
   }
 
   function prefetchReferral(){
-    if (!tg || !tg.initDataUnsafe?.user) return;
-    if (_referralCache) { updateCounters(); return; }
+  if (!tg || !tg.initDataUnsafe?.user) { return; }
+  if (_referralCache) { updateCounters(); return; }
     const fd = new FormData();
     fd.append('initData', tg.initData || '');
     fetch('/api/referral', { method: 'POST', body: fd })
@@ -28,7 +28,7 @@
   }
 
   function loadReferralInfo(){
-    if (!tg || !tg.initDataUnsafe?.user) return Promise.resolve();
+  if (!tg || !tg.initDataUnsafe?.user) { return Promise.resolve(); }
     // Instant render from cache if present
     updateCounters();
     const fd = new FormData();
@@ -41,13 +41,13 @@
 
   function setupShareButton(){
     const btn = document.getElementById('share-ref');
-    if (!btn) return;
+  if (!btn) { return; }
     btn.setAttribute('data-throttle', '1200');
     btn.addEventListener('click', async () => {
       try {
-        if (!_referralCache) await loadReferralInfo();
+  if (!_referralCache) { await loadReferralInfo(); }
         const link = _referralCache?.referral_link || '';
-        if (!link) return;
+  if (!link) { return; }
         const text = encodeURIComponent(`Присоединяйся к лиге: ${link}`);
         if (window.Telegram?.WebApp?.openTelegramLink) {
           window.Telegram.WebApp.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`);

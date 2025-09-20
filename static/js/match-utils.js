@@ -1,11 +1,11 @@
 // static/js/match-utils.js
 // Универсальные утилиты для матчей: время, live-статус, форматирование, ключи, уведомления
 (function(){
-  if (window.MatchUtils) return;
+  if (window.MatchUtils) { return; }
 
   function parseDateTime(match){
     try {
-      if (!match) return null;
+  if (!match) { return null; }
       if (match.datetime) {
         const d = new Date(match.datetime);
         return isNaN(d.getTime()) ? null : d;
@@ -27,7 +27,7 @@
       const a = (m?.away||'').toLowerCase().trim();
       const d = (m?.date || m?.datetime || '').toString().slice(0,10);
       return `${h}__${a}__${d}`;
-    } catch(_) { return `${m?.home||''}__${m?.away||''}`; }
+  } catch(_) { return `${m?.home||''}__${m?.away||''}`; }
   }
 
   function isLiveNow(m, opts={}){
@@ -36,7 +36,7 @@
       // Проверяем finStore (завершенные матчи)
       const finStore = window.__FINISHED_MATCHES || {};
       const key = matchKey(m);
-      if (finStore[key]) return false;
+  if (finStore[key]) { return false; }
       
       // Проверяем результаты в кэше
       try {
@@ -51,17 +51,17 @@
       } catch(_) {}
       
       const start = parseDateTime(m);
-      if (!start) return false;
+  if (!start) { return false; }
       const endTs = start.getTime() + windowMinutes*60*1000;
       return nowTs >= start.getTime() && nowTs < endTs;
-    } catch(_) { return false; }
+  } catch(_) { return false; }
   }
 
   function isStartingSoon(m, minutes = 5, opts={}){
     try {
       const nowTs = opts.nowTs || Date.now();
       const start = parseDateTime(m);
-      if (!start) return false;
+  if (!start) { return false; }
       const diffMin = (start.getTime() - nowTs) / 60000;
       return diffMin > 0 && diffMin <= minutes;
     } catch(_) { return false; }
@@ -69,7 +69,7 @@
 
   function formatDateTime(dateIso, time){
     try {
-      if (!dateIso) return time || '';
+      if (!dateIso) { return time || ''; }
       const d = new Date(dateIso);
       if (!isNaN(d.getTime()) && dateIso.includes('T') && !time) {
         const ds = d.toLocaleDateString();
@@ -79,7 +79,7 @@
       if (!isNaN(d.getTime())) {
         const ds = d.toLocaleDateString();
         const ts = time || (d.toTimeString().slice(0,5));
-        return `${ds}${ts? ' ' + ts : ''}`;
+    return `${ds}${ts? ' ' + ts : ''}`;
       }
     } catch(_) {}
     return time || '';
@@ -89,7 +89,7 @@
     shownKeys: new Set(),
     showMatchStart(match){
       const key = matchKey(match);
-      if (this.shownKeys.has(key)) return;
+      if (this.shownKeys.has(key)) { return; }
       this.shownKeys.add(key);
       if (window.NotificationSystem) {
         const msg = `${match.home} vs ${match.away} — старт матча!`;
@@ -112,7 +112,7 @@
     scan(matches){
       try {
         const nowTs = Date.now();
-        (matches||[]).forEach(m => { if (isLiveNow(m, { nowTs }) ) this.showMatchStart(m); });
+        (matches||[]).forEach(m => { if (isLiveNow(m, { nowTs }) ) { this.showMatchStart(m); } });
       } catch(_) {}
     }
   };

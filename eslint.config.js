@@ -2,22 +2,33 @@
 export default [
   {
     files: ["static/js/**/*.js"],
-    languageOptions: {
+  languageOptions: {
       ecmaVersion: 2022,
       sourceType: "script", // Legacy JS files
       globals: {
         window: "readonly",
         document: "readonly",
         console: "readonly",
-        fetch: "readonly",
+  fetch: "readonly",
         localStorage: "readonly",
         sessionStorage: "readonly",
         navigator: "readonly",
         location: "readonly",
+  URL: "readonly",
         URLSearchParams: "readonly",
         FormData: "readonly",
         WebSocket: "readonly",
         EventSource: "readonly",
+  CustomEvent: "readonly",
+  Image: "readonly",
+  MutationObserver: "readonly",
+  IntersectionObserver: "readonly",
+  performance: "readonly",
+  requestAnimationFrame: "readonly",
+  getComputedStyle: "readonly",
+  Notification: "readonly",
+  alert: "readonly",
+  confirm: "readonly",
         setInterval: "readonly",
         clearInterval: "readonly",
         setTimeout: "readonly",
@@ -45,7 +56,10 @@ export default [
         vars: "all", 
         args: "after-used", 
         ignoreRestSiblings: true,
-        varsIgnorePattern: "^_"
+        varsIgnorePattern: "^_",
+        argsIgnorePattern: "^_",
+        caughtErrors: "all",
+        caughtErrorsIgnorePattern: "^_"
       }],
       "no-undef": "error",
       "no-unreachable": "error",

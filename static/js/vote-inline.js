@@ -1,7 +1,7 @@
 // vote-inline.js
 // Унифицированный helper для полосы голосования П1 / X / П2
 (function(){
-  if (window.VoteInline) return;
+  if (window.VoteInline) { return; }
   const VoteAgg = window.__VoteAgg;
   const MatchState = window.MatchState;
   function keyFrom(obj){
@@ -9,11 +9,11 @@
       const raw = obj.date?String(obj.date):(obj.datetime?String(obj.datetime):'');
       const d = raw?raw.slice(0,10):'';
       return `${(obj.home||'').toLowerCase().trim()}__${(obj.away||'').toLowerCase().trim()}__${d}`;
-    } catch(_) { return `${(obj.home||'').toLowerCase()}__${(obj.away||'').toLowerCase()}__`; }
+  } catch(_) { return `${(obj.home||'').toLowerCase()}__${(obj.away||'').toLowerCase()}__`; }
   }
   function create(opts){
     const { home, away, date, datetime, getTeamColor } = opts || {};
-    if (!home || !away) return null;
+  if (!home || !away) { return null; }
     const voteKey = keyFrom({ home, away, date: date || datetime });
     const wrap = document.createElement('div'); wrap.className='vote-inline';
     const title = document.createElement('div'); title.className='vote-title'; title.textContent='Голосование';
@@ -52,9 +52,9 @@
           sum = Math.max(1, sum);
         }
         const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
-        if (segH.style.width !== ph+'%') segH.style.width = ph+'%';
-        if (segD.style.width !== pd+'%') segD.style.width = pd+'%';
-        if (segA.style.width !== pa+'%') segA.style.width = pa+'%';
+  if (segH.style.width !== ph+'%') { segH.style.width = ph+'%'; }
+  if (segD.style.width !== pd+'%') { segD.style.width = pd+'%'; }
+  if (segA.style.width !== pa+'%') { segA.style.width = pa+'%'; }
         MatchState?.set(voteKey, { votes:{ h,d,a,total:h+d+a }, lastAggTs: Date.now() });
 
         // Обновим UI «проголосовано/кнопки» по факту наличия моего голоса
@@ -67,7 +67,7 @@
             btns.querySelectorAll('button').forEach(b => b.disabled = false);
           } else if (agg && agg.my_choice) {
             // Есть зафиксированный голос → скрываем кнопки и подтверждаем
-            btns.querySelectorAll('button').forEach(x=>x.disabled=true);
+            btns.querySelectorAll('button').forEach(x=>{ x.disabled=true; });
             btns.style.display='none';
             confirm.textContent='Ваш голос учтён';
             try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
@@ -79,7 +79,7 @@
       try {
         const st = MatchState?.get(voteKey) || { votes:{ h:0,d:0,a:0,total:0 } };
         const v = st.votes || { h:0,d:0,a:0,total:0 };
-        if (code==='home') v.h++; else if (code==='away') v.a++; else v.d++;
+  if (code==='home') { v.h++; } else if (code==='away') { v.a++; } else { v.d++; }
         v.total = v.h+v.d+v.a; const sum = Math.max(1, v.total);
         segH.style.width = Math.round(v.h*100/sum)+'%';
         segD.style.width = Math.round(v.d*100/sum)+'%';
@@ -98,7 +98,7 @@
           const dkey = (date ? String(date) : (datetime ? String(datetime) : '')).slice(0,10);
           fd.append('date', dkey); fd.append('choice', code);
           const r = await fetch('/api/vote/match', { method:'POST', body: fd });
-          if (!r.ok) throw 0;
+          if (!r.ok) { throw 0; }
           btns.querySelectorAll('button').forEach(x=>x.disabled=true);
           confirm.textContent='Ваш голос учтён'; btns.style.display='none';
           // Небольшая задержка, чтобы БД точно отдала обновлённые агрегаты
@@ -111,15 +111,28 @@
     btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
     try { if (localStorage.getItem('voted:'+voteKey) === '1') { btns.style.display='none'; confirm.textContent='Ваш голос учтён'; } } catch(_) {}
     // Восстановим из MatchState если есть
-    try { const st = MatchState?.get(voteKey); if (st && st.votes) { const v=st.votes; const sum=Math.max(1,v.total||(v.h+v.d+v.a)); segH.style.width=Math.round(v.h*100/sum)+'%'; segD.style.width=Math.round(v.d*100/sum)+'%'; segA.style.width=Math.round(v.a*100/sum)+'%'; } } catch(_) {}
+    try {
+      const st = MatchState?.get(voteKey);
+      if (st && st.votes) {
+        const v = st.votes;
+        const sum = Math.max(1, v.total || (v.h + v.d + v.a));
+        segH.style.width = Math.round(v.h * 100 / sum) + '%';
+        segD.style.width = Math.round(v.d * 100 / sum) + '%';
+        segA.style.width = Math.round(v.a * 100 / sum) + '%';
+      }
+    } catch(_) {}
     // Ленивая загрузка
     const doFetch = () => {
       VoteAgg?.fetchAgg(home, away, date || datetime).then(applyAgg);
     };
     if (window.IntersectionObserver) {
-      const io = new IntersectionObserver(ents => { ents.forEach(e=>{ if(e.isIntersecting){ doFetch(); io.unobserve(wrap); } }); }, { root:null, rootMargin:'200px', threshold:0.01 });
+      const io = new window.IntersectionObserver(ents => {
+        ents.forEach(e=>{
+          if(e.isIntersecting){ doFetch(); io.unobserve(wrap); }
+        });
+      }, { root:null, rootMargin:'200px', threshold:0.01 });
       io.observe(wrap);
-    } else doFetch();
+    } else { doFetch(); }
     wrap.__applyAgg = applyAgg;
     return wrap;
   }

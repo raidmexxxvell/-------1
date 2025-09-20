@@ -27,10 +27,10 @@
     }
     
     // Отключаем вертикальные свайпы при просмотре видео в фуллскрине
-    let isVideoFullscreen = false;
+    let _isVideoFullscreen = false;
     
     function disableSwipes() {
-        isVideoFullscreen = true;
+    _isVideoFullscreen = true;
         document.body.style.overflow = 'hidden';
         document.body.style.position = 'fixed';
         document.body.style.width = '100%';
@@ -43,7 +43,7 @@
     }
     
     function enableSwipes() {
-        isVideoFullscreen = false;
+    _isVideoFullscreen = false;
         document.body.style.overflow = '';
         document.body.style.position = '';
         document.body.style.width = '';
@@ -56,7 +56,9 @@
     }
     
     // Слушаем изменения псевдо-фуллскрина
-    const observer = new MutationObserver((mutations) => {
+    const Observer = window.MutationObserver || window.WebKitMutationObserver || window.MozMutationObserver;
+    if (!Observer) { return; }
+    const observer = new Observer((mutations) => {
         mutations.forEach((mutation) => {
             if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
                 const target = mutation.target;

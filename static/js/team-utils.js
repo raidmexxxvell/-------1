@@ -1,7 +1,7 @@
 // static/js/team-utils.js
 // Унифицированные утилиты команд: нормализация имени, цвет, логотипы, фабрика DOM
 (function(){
-  if (window.TeamUtils) return; // idempotent
+  if (window.TeamUtils) { return; } // idempotent
   const LOGO_BASE = '/static/img/team-logos/';
   function normalizeTeamName(raw){
     try {
@@ -43,10 +43,10 @@
     const name = (teamName||'').trim();
     const norm = normalizeTeamName(name);
     const key = norm || '__default__';
-    if (_logoCache.has(key)) return Promise.resolve(_logoCache.get(key));
-    if (_pending.has(key)) return _pending.get(key);
+  if (_logoCache.has(key)) { return Promise.resolve(_logoCache.get(key)); }
+  if (_pending.has(key)) { return _pending.get(key); }
     const candidates = [];
-    if (norm){
+  if (norm){
       // 1) вариант с приставкой "фк" (если исходное имя не начиналось с фк)
       if (!norm.startsWith('фк')) {
         candidates.push(LOGO_BASE + encodeURIComponent('фк' + norm + '.png'));
@@ -59,7 +59,7 @@
       try { if (norm.includes('')) { const dashed = norm.replace(/\s+/g,'-'); if (dashed && dashed!==norm){ candidates.push(LOGO_BASE + encodeURIComponent(dashed + '.png')); candidates.push(LOGO_BASE + encodeURIComponent(dashed + '.webp')); } } } catch(_){ }
     }
     // 4) сырой оригинал (с пробелами → подчеркивания) — если ассет назван вручную
-    if (name){
+  if (name){
       const rawBase = name.toLowerCase().replace(/ё/g,'е').trim();
       const rawUnderscore = rawBase.replace(/\s+/g,'_');
       const rawCollapsed = rawBase.replace(/\s+/g,'');
@@ -74,7 +74,7 @@
     // Уникализируем
     const uniq = [];
     const seen = new Set();
-    candidates.forEach(c=>{ if(!seen.has(c)){ seen.add(c); uniq.push(c); }});
+  candidates.forEach(c=>{ if(!seen.has(c)){ seen.add(c); uniq.push(c); }});
     const p = new Promise((resolve)=>{
       let i=0;
       const tryNext=()=>{
@@ -91,19 +91,19 @@
     return p;
   }
   function setTeamLogo(imgEl, teamName){
-    try { imgEl.loading='lazy'; imgEl.decoding='async'; } catch(_) {}
+  try { imgEl.loading='lazy'; imgEl.decoding='async'; } catch(_) {}
     const norm = normalizeTeamName(teamName||'');
     const key = norm || '__default__';
     // Если уже устанавливали для этого ключа и src непустой — не трогаем (избегаем мерцания при повторных вызовах)
     try {
-      if (imgEl.dataset && imgEl.dataset.teamLogoKey === key && imgEl.getAttribute('src')) return;
+      if (imgEl.dataset && imgEl.dataset.teamLogoKey === key && imgEl.getAttribute('src')) { return; }
     } catch(_) {}
     // Если нет текущего src — сразу показываем default как placeholder (не будет пустого слота)
-    if (!imgEl.getAttribute('src')) imgEl.setAttribute('src', LOGO_BASE + 'default.png');
+  if (!imgEl.getAttribute('src')) { imgEl.setAttribute('src', LOGO_BASE + 'default.png'); }
     resolveLogoUrl(teamName).then((url)=>{
       // Устанавливаем только если отличается, чтобы не перезагружать изображение
-      if (!_sameSrc(imgEl.getAttribute('src'), url)) imgEl.setAttribute('src', url);
-      try { if (imgEl.dataset) imgEl.dataset.teamLogoKey = key; } catch(_) {}
+      if (!_sameSrc(imgEl.getAttribute('src'), url)) { imgEl.setAttribute('src', url); }
+      try { if (imgEl.dataset) { imgEl.dataset.teamLogoKey = key; } } catch(_) {}
     });
   }
   function createTeamWithLogo(teamName, options={}){

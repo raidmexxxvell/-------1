@@ -1,7 +1,7 @@
 // xp-utils.js
 // Единая логика расчёта уровня и прогресса XP
 (function(){
-  if (window.XPUtils) return;
+  if (window.XPUtils) { return; }
   function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
   // Рассчитать порог для уровня lvl (для перехода на следующий)
   function threshold(lvl){ lvl = Math.max(1, Math.floor(lvl||1)); return lvl * 100; }

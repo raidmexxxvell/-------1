@@ -1,7 +1,7 @@
 // profile-core.js
 // Orchestrator: последовательный запуск загрузок и сигнал готовности
 (function(){
-  if (window.ProfileCore) return;
+  if (window.ProfileCore) { return; }
   const tg = window.Telegram?.WebApp || null;
   let _achLoaded=false, _userLoaded=false, _tableLoaded=false, _statsPreloaded=false, _schedulePreloaded=false, _resultsPreloaded=false;
 
