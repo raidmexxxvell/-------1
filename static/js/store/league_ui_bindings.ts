@@ -56,10 +56,22 @@ declare global {
     if (state.table.length === 0) return;
 
     try {
+      // Guard: если сигнатура первых 10 строк совпадает с уже отрисованной —
+      // пропускаем перерисовку (исключаем мерцание при повторном показе вкладки)
+      const currentSig = (() => {
+        try { return JSON.stringify(state.table.slice(0, 10)); } catch { return null; }
+      })();
+      const prevSig = (table as any)?.dataset?.sig || null;
+      if (currentSig && prevSig && currentSig === prevSig) {
+        return; // DOM уже соответствует данным
+      }
+
       // Transform store data to expected format for legacy renderLeagueTable
+      // ВАЖНО: не генерируем новый updated_at, чтобы не сбивать защиту от лишних рендеров
+      const prevIso = updatedText?.getAttribute('data-updated-iso') || undefined;
       const data = {
         values: state.table,
-        updated_at: new Date().toISOString()
+        ...(prevIso ? { updated_at: prevIso } : {})
       } as any;
       window.League.renderLeagueTable(table, updatedText, data);
       lastTableRender = Date.now();

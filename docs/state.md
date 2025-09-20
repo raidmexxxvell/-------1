@@ -101,6 +101,11 @@ interface MatchStats {
 - league (no persist)
   - state: `{ table: any[]; stats: any[]; schedule: { tours: any[]; lastUpdated: number|null; etag?: string|null } }`
   - обновляется из: etag-fetch (schedule/table/stats), WS патчи
+  - UI bindings: `store/league_ui_bindings.ts` рендерит таблицу лиги без мигания —
+    добавлена защита от лишних перерисовок через сравнение подписи первых 10 строк (`dataset.sig`).
+    Кроме того, при включённом фича-флаге `feature:league_ui_store` вызов `loadLeagueTable()`
+    делегируется в `loadLeagueTableViaStore()` (см. `profile.js`), чтобы не дублировать прямой рендер
+    и не сбивать метку обновления. Это исключает визуальное мерцание при повторном открытии подвкладки «Таблица».
 
 - matches (no persist)
   - state: `{ map: Record<string, { info: MatchInfo|null; score: MatchScore|null; events: MatchEvent[]; lastUpdated: number|null }> }`

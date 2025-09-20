@@ -626,6 +626,14 @@
         const updatedText = document.getElementById('league-updated-text');
         if (!table) return;
         _leagueLoading = true;
+        // Если включён новый стор для UI, делегируем загрузку через стора и выходим,
+        // чтобы избежать двойной перерисовки и мигания.
+        try {
+            if (localStorage.getItem('feature:league_ui_store') === '1' && typeof window.loadLeagueTableViaStore === 'function') {
+                window.loadLeagueTableViaStore().catch(()=>{}).finally(() => { _leagueLoading = false; });
+                return;
+            }
+        } catch(_) {}
         
         // Используем ETag fetch для кэширования, ETL listeners автоматически обновят LeagueStore
         fetchEtag('/api/league-table', {
