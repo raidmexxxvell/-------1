@@ -121,7 +121,7 @@ button:focus:not(:focus-visible),
 
 /* Улучшение таблиц для screen readers */
 .league-table th {
-  text-align: left;
+  text-align: center;
 }
 
 .league-table td,
