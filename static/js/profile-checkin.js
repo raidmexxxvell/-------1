@@ -178,4 +178,5 @@
   document.addEventListener('DOMContentLoaded', ()=>{ const u=getUser(); if(u) renderCheckinSection(u); attach(); });
 
   window.ProfileCheckin = { renderCheckinSection, handleCheckin };
+  try { window.ProfileCheckin.animateStats = animateStats; } catch(_) {}
 })();

@@ -174,6 +174,7 @@ html, body { overflow-x: hidden; }
     opacity: .9;
 }
 .nav-item .nav-badge { position: absolute; top: -2px; right: 2px; background: #ef4444; color: #fff; border-radius: 999px; padding: 1px 5px; font-size: 10px; font-weight: 800; line-height: 1; border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 0 0 1px rgba(0,0,0,0.4); }
+.nav-item .nav-badge.nav-badge--dot { width: 8px; height: 8px; padding: 0; border-radius: 999px; text-indent: -9999px; overflow: hidden; }
 
 /* Полка выбора лиг (красивое открытие) */
 #league-overlay { left: 50% !important; transform: translateX(-50%) !important; width: min(600px, calc(100% - 24px)) !important; }

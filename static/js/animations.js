@@ -154,12 +154,18 @@ class CounterAnimation {
 
 // Система анимации наград
 class RewardAnimation {
-    static async show(container, xpGain, creditsGain) {
+    // options?: { title?: string, subtitle?: string, imageUrl?: string }
+    static async show(container, xpGain, creditsGain, options) {
         const overlay = document.createElement('div');
         overlay.className = 'reward-overlay';
+        const title = (options && options.title) || '🎁 Ежедневная награда!';
+        const subtitle = (options && options.subtitle) || '';
+        const imageUrl = (options && options.imageUrl) || '';
         overlay.innerHTML = `
             <div class="reward-modal">
-                <div class="reward-title">🎁 Ежедневная награда!</div>
+                <div class="reward-title">${title}</div>
+                ${subtitle ? `<div class="reward-subtitle" style="margin-top:2px; font-size:12px; opacity:.9;">${subtitle}</div>` : ''}
+                ${imageUrl ? `<div class="reward-preview" style="margin:8px 0;"><img src="${imageUrl}" alt="" style="max-width:128px; max-height:96px; border-radius:10px;" onerror="this.style.display='none'"></div>` : ''}
                 <div class="reward-items">
                     <div class="reward-item">
                         <div class="reward-icon">⭐</div>
