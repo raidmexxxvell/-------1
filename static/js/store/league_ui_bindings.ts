@@ -121,13 +121,25 @@ declare global {
     if (state.stats.length === 0) return;
 
     try {
-      // Transform store data to expected format
+      // Guard: если сигнатура совпадает — не перерисовываем (устраняем мерцание)
+      const currentSig = (() => {
+        try { return JSON.stringify(state.stats.slice(0, 10)); } catch { return null; }
+      })();
+      const prevSig = (table as any)?.dataset?.sig || null;
+      if (currentSig && prevSig && currentSig === prevSig) {
+        return;
+      }
+      // Не обновляем сигнатуру напрямую здесь — это сделает legacy renderer внутри renderStatsTable
+
+      // Transform store data to expected format (сохраняем формат legacy)
       const data = {
         values: state.stats,
-        updated_at: new Date().toISOString()
+        // Обновим метку дружелюбно: если уже есть актуальная — оставим её; иначе текущее время
+        updated_at: (updatedEl?.getAttribute('data-updated-iso') || new Date().toISOString())
       };
       
-      window.League.renderStatsTable(table, updatedEl, data);
+  window.League.renderStatsTable(table, updatedEl, data);
+  try { (table as any).dataset.sig = currentSig || ''; } catch(_) {}
       lastStatsRender = Date.now();
       
       console.log('[LeagueStore] Stats UI updated from store');
@@ -192,10 +204,42 @@ declare global {
       return Promise.resolve((window as any).loadStatsTable?.() || undefined);
     }
 
-    return window.fetchEtag('/api/stats-table', {
+    // Используем тот же источник, что и legacy: goal+assist leaderboard
+    return window.fetchEtag('/api/leaderboard/goal-assist', {
       cacheKey: 'league:stats',
       swrMs: 60000,
-      extract: (j: any) => j
+      params: { limit: 50 },
+      // Преобразуем ответ в legacy-формат values (массив строк)
+      extract: (json: any) => {
+        try {
+          let items = Array.isArray(json?.items) ? json.items.slice() : [];
+          // Сортировка: Г+П desc, И asc, Г desc, П desc (совпадает с legacy profile.js)
+          items.sort((a: any,b: any)=>{
+            const at = (a.goal_plus_assist ?? ((a.goals||0)+(a.assists||0)));
+            const bt = (b.goal_plus_assist ?? ((b.goals||0)+(b.assists||0)));
+            if (bt !== at) return bt - at;
+            const am = a.matches_played||0, bm = b.matches_played||0;
+            if (am !== bm) return am - bm;
+            const ag = a.goals||0, bg = b.goals||0;
+            if (bg !== ag) return bg - ag;
+            const aa = a.assists||0, ba = b.assists||0;
+            if (ba !== aa) return ba - aa;
+            return 0;
+          });
+          items = items.slice(0,10);
+          const values = items.map((it: any) => {
+            const name = `${it.first_name||''} ${it.last_name||''}`.trim() || (it.player_id?`#${it.player_id}`:'');
+            const matches = it.matches_played||0;
+            const goals = it.goals||0;
+            const assists = it.assists||0;
+            const total = it.goal_plus_assist || (goals + assists);
+            return [ String(name), String(matches), String(goals), String(assists), String(total) ];
+          });
+          return values;
+        } catch {
+          return [];
+        }
+      }
     }).then(({ data }: any) => {
       // Store will be automatically updated via ETL listeners
       console.log('[LeagueStore] Stats loaded via store');

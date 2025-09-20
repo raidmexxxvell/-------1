@@ -101,6 +101,14 @@ interface MatchStats {
 - league (no persist)
   - state: `{ table: any[]; stats: any[]; schedule: { tours: any[]; lastUpdated: number|null; etag?: string|null } }`
   - обновляется из: etag-fetch (schedule/table/stats), WS патчи
+
+### Статистика (вкладка «Статистика» Лиги)
+
+- Источник: `/api/leaderboard/goal-assist?limit=50` (как в legacy)
+- Трансформация: в биндингах стора (`store/league_ui_bindings.ts`) ответ приводится к legacy-формату `values` — массив строк из 5 колонок: `Имя, Матчи, Голы, Ассисты, Г+П` (топ‑10 после сортировки).
+- ETL: результат кладётся в `LeagueStore.stats` под ключом кэша `league:stats` (через `etag:success`).
+- Рендер: `league.js:renderStatsTable()` — тот же легаси‑рендер, вызывается из подписки стора; добавлена защитная сигнатура `dataset.sig` на таблицу для устранения лишних перерисовок.
+- Фича‑флаг: при `localStorage['feature:league_ui_store']='1'` `profile.js` делегирует `loadStatsTable()` на `loadStatsViaStore()` и не очищает `tbody` перед загрузкой (исключает мерцание).
   - UI bindings: `store/league_ui_bindings.ts` рендерит таблицу лиги без мигания —
     добавлена защита от лишних перерисовок через сравнение подписи первых 10 строк (`dataset.sig`).
     Кроме того, при включённом фича-флаге `feature:league_ui_store` вызов `loadLeagueTable()`

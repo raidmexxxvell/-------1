@@ -694,7 +694,15 @@
         const table = document.getElementById('stats-table');
         const updated = document.getElementById('stats-table-updated');
         if (!table) return;
-        // Очищаем таблицу и скрываем tbody до загрузки, чтобы не мигали старые строки
+        // Если включён стор — делегируем загрузку и не очищаем tbody (устраняем мерцание)
+        try {
+            if (localStorage.getItem('feature:league_ui_store') === '1' && typeof window.loadStatsViaStore === 'function') {
+                _statsLoading = true;
+                window.loadStatsViaStore().catch(()=>{}).finally(() => { _statsLoading = false; });
+                return;
+            }
+        } catch(_) {}
+        // Легаси-путь: очищаем tbody и скрываем до загрузки, чтобы не мигали старые строки
         const tbody = table.querySelector('tbody');
         if (tbody) { tbody.innerHTML = ''; tbody.style.display = 'none'; }
         if (updated) updated.textContent = '';
@@ -732,7 +740,7 @@
                 try { window.League?.renderStatsTable?.(table, updated, payload); } catch(_) {}
             })
             .catch(err => { console.error('stats table load error (leaderboard)', err); })
-            .finally(() => { _statsLoading = false; if (tbody) tbody.style.display = ''; });
+        .finally(() => { _statsLoading = false; if (tbody) tbody.style.display = ''; });
     }
 
     // --------- ЛИДЕРБОРД ---------
