@@ -668,6 +668,11 @@
     })();
     </script>
 
+    <!-- Новые унифицированные утилиты (загружаются первыми) -->
+    <script src="/static/js/admin-utils.js?v={{ static_version }}"></script>
+    <script src="/static/js/dom-utils.js?v={{ static_version }}"></script>
+    <script src="/static/js/api-utils.js?v={{ static_version }}"></script>
+    <!-- Существующие утилиты -->
     <script src="/static/js/team-utils.js?v={{ static_version }}"></script>
     <script src="/static/js/match-utils.js?v={{ static_version }}"></script>
     <script src="/static/js/animations.js?v={{ static_version }}"></script>

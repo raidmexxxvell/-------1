@@ -26,7 +26,49 @@
           (vals[0] === null || vals[0] === undefined) ? 0 : (Number(vals[0]) || 0),
           (vals[1] === null || vals[1] === undefined) ? 0 : (Number(vals[1]) || 0)
         ]; const built=bar(safeVals[0],safeVals[1]);
-        try { const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id? String(window.Telegram.WebApp.initDataUnsafe.user.id):''; const isAdmin=!!(adminId && currentId && String(adminId)===currentId); if(isAdmin){ const mk=(t)=>{ const b=document.createElement('button'); b.className='details-btn'; b.textContent=t; b.style.padding='0 6px'; b.style.minWidth='unset'; return b; }; const lh=mk('−'), lplus=mk('+'), rh=mk('−'), rplus=mk('+'); const leftBox=document.createElement('div'); leftBox.className='admin-inc'; const rightBox=document.createElement('div'); rightBox.className='admin-inc'; const base=mt.key; const post=(lv,rv)=>{ const tg=window.Telegram?.WebApp||null; const fd=new FormData(); fd.append('initData', tg?.initData||''); fd.append('home', match.home||''); fd.append('away', match.away||''); fd.append(base+'_home', String(lv)); fd.append(base+'_away', String(rv)); fetch('/api/match/stats/set',{method:'POST', body:fd}).catch(()=>{}); }; const anim=(el,from,to)=>{ if(window.CounterAnimation) {window.CounterAnimation.animate(el,from,to,200);} else {el.textContent=String(to);} el.classList.add('stat-update-animation'); setTimeout(()=>el.classList.remove('stat-update-animation'),300); }; const getVals=()=>{ const l=parseInt(built.leftVal.textContent,10)||0; const r=parseInt(built.rightVal.textContent,10)||0; return [l,r]; }; lh.addEventListener('click',()=>{ const [l,r]=getVals(); const nv=Math.max(0,l-1); anim(built.leftVal,l,nv); updateStatBar(built.row,nv,r); post(nv,r); }); lplus.addEventListener('click',()=>{ const [l,r]=getVals(); const nv=l+1; anim(built.leftVal,l,nv); updateStatBar(built.row,nv,r); post(nv,r); }); rh.addEventListener('click',()=>{ const [l,r]=getVals(); const nv=Math.max(0,r-1); anim(built.rightVal,r,nv); updateStatBar(built.row,l,nv); post(l,nv); }); rplus.addEventListener('click',()=>{ const [l,r]=getVals(); const nv=r+1; anim(built.rightVal,r,nv); updateStatBar(built.row,l,nv); post(l,nv); }); leftBox.append(lh,lplus); rightBox.append(rh,rplus); const leftSide=built.row.querySelector('.stat-left'); const rightSide=built.row.querySelector('.stat-right'); if(leftSide) {leftSide.insertBefore(leftBox,leftSide.firstChild);} if(rightSide) {rightSide.appendChild(rightBox);} } } catch(_){ }
+        try { 
+          // Используем новые утилиты для проверки админа
+          const isAdmin = window.AdminUtils?.isCurrentUserAdmin?.() || (()=>{
+            const adminId=document.body.getAttribute('data-admin'); 
+            const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id? String(window.Telegram.WebApp.initDataUnsafe.user.id):''; 
+            return !!(adminId && currentId && String(adminId)===currentId);
+          })();
+          
+          if(isAdmin){ 
+            // Используем новые утилиты для создания кнопок
+            const createAdminBtn = window.AdminUtils?.createAdminButton || ((text) => {
+              const b=document.createElement('button'); 
+              b.className='details-btn'; 
+              b.textContent=text; 
+              b.style.padding='0 6px'; 
+              b.style.minWidth='unset'; 
+              return b;
+            });
+            
+            const lh=createAdminBtn('−'), lplus=createAdminBtn('+'), rh=createAdminBtn('−'), rplus=createAdminBtn('+'); 
+            const leftBox=document.createElement('div'); leftBox.className='admin-inc'; 
+            const rightBox=document.createElement('div'); rightBox.className='admin-inc'; 
+            const base=mt.key; 
+            
+            const post=(lv,rv)=>{ 
+              // Используем новые утилиты для FormData
+              const fd = window.AdminUtils?.createAdminFormData?.({
+                home: match.home||'', 
+                away: match.away||'',
+                [base+'_home']: String(lv),
+                [base+'_away']: String(rv)
+              }) || (()=>{
+                const tg=window.Telegram?.WebApp||null; 
+                const fd=new FormData(); 
+                fd.append('initData', tg?.initData||''); 
+                fd.append('home', match.home||''); 
+                fd.append('away', match.away||''); 
+                fd.append(base+'_home', String(lv)); 
+                fd.append(base+'_away', String(rv)); 
+                return fd;
+              })();
+              fetch('/api/match/stats/set',{method:'POST', body:fd}).catch(()=>{}); 
+            }; const anim=(el,from,to)=>{ if(window.CounterAnimation) {window.CounterAnimation.animate(el,from,to,200);} else {el.textContent=String(to);} el.classList.add('stat-update-animation'); setTimeout(()=>el.classList.remove('stat-update-animation'),300); }; const getVals=()=>{ const l=parseInt(built.leftVal.textContent,10)||0; const r=parseInt(built.rightVal.textContent,10)||0; return [l,r]; }; lh.addEventListener('click',()=>{ const [l,r]=getVals(); const nv=Math.max(0,l-1); anim(built.leftVal,l,nv); updateStatBar(built.row,nv,r); post(nv,r); }); lplus.addEventListener('click',()=>{ const [l,r]=getVals(); const nv=l+1; anim(built.leftVal,l,nv); updateStatBar(built.row,nv,r); post(nv,r); }); rh.addEventListener('click',()=>{ const [l,r]=getVals(); const nv=Math.max(0,r-1); anim(built.rightVal,r,nv); updateStatBar(built.row,l,nv); post(l,nv); }); rplus.addEventListener('click',()=>{ const [l,r]=getVals(); const nv=r+1; anim(built.rightVal,r,nv); updateStatBar(built.row,l,nv); post(l,nv); }); leftBox.append(lh,lplus); rightBox.append(rh,rplus); const leftSide=built.row.querySelector('.stat-left'); const rightSide=built.row.querySelector('.stat-right'); if(leftSide) {leftSide.insertBefore(leftBox,leftSide.firstChild);} if(rightSide) {rightSide.appendChild(rightBox);} } } catch(_){ }
         rowWrap.append(title,built.row); wrap.appendChild(rowWrap); rows.set(mt.key, built);
       });
       host.innerHTML=''; host.appendChild(wrap);

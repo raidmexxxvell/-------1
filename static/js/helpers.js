@@ -8,14 +8,14 @@ export function syncScheduleAndBettingTours(schedule, bettingTours) {
   const now = new Date();
   const DAY_MS = 24*60*60*1000;
   const maxAhead = 6 * DAY_MS;
-  // Нормализация ключа матча
-  function matchKey(m) {
+  // Используем унифицированную функцию из match-utils.js
+  const matchKey = window.MatchUtils?.matchKey || function(m) {
     const h = (m.home||'').toLowerCase().replace(/ё/g,'е').replace(/\s+/g,'').trim();
     const a = (m.away||'').toLowerCase().replace(/ё/g,'е').replace(/\s+/g,'').trim();
     let d = m.date || m.datetime || '';
     if (d && d.length > 10) {d = d.slice(0,10);}
     return `${h}__${a}__${d}`;
-  }
+  };
   // Собираем все будущие матчи из расписания (6 дней вперёд)
   const upcomingMatches = [];
   (schedule.tours||[]).forEach(t => (t.matches||[]).forEach(m => {

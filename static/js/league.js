@@ -38,8 +38,8 @@
     } catch(_) { return String(isoDate||''); }
   }
 
-  // Унифицированный ключ матча: home__away__YYYY-MM-DD
-  function matchKey(obj) {
+  // Используем унифицированную функцию из match-utils.js
+  const matchKey = window.MatchUtils?.matchKey || function(obj) {
     try {
       const norm = (s)=> (s||'').toLowerCase().replace(/ё/g,'е').replace(/[^a-z0-9а-я]+/gi,'').trim();
       const h = norm(obj?.home);
@@ -47,10 +47,10 @@
       const d = normalizeDateStr(obj?.date || obj?.datetime || '');
       return `${h}__${a}__${d}`;
     } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; }
-  }
+  };
 
-  // Локальный маппер цветов команд (используем глобальный, если есть)
-  const getTeamColor = window.getTeamColor || function(name){
+  // Используем унифицированную функцию из team-utils.js
+  const getTeamColor = window.TeamUtils?.getTeamColor || window.getTeamColor || function(name){
     try {
       const norm = (name||'').toString().trim().toLowerCase().replace(/ё/g,'е').replace(/[^a-z0-9а-я]+/gi,'');
       const map = {
