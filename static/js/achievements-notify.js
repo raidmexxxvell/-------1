@@ -105,16 +105,37 @@
       } catch(_) {}
     }, { passive:true });
 
-    function pickIconUrl(item){
-      // Пытаемся подобрать картинку бейджа; fallback на bronze/silver/gold
+    function slugify(s){ try { return (s||'').toString().trim().toLowerCase().replace(/[\s_/]+/g,'-').replace(/[^a-z0-9\-]/g,''); } catch(_) { return ''; } }
+    function buildIconCandidates(item){
       const base = '/static/img/achievements/';
       const tierMap = {1:'bronze', 2:'silver', 3:'gold'};
       const state = tierMap[item.tier] || (item.icon||'bronze');
-      const generic = base + state + '.png';
-      return generic; // достаточно для первого шага
+      const key = item.key || item.code || item.group || slugify(item.name||'');
+      const candidates = [];
+      if (key) candidates.push(`${base}${slugify(key)}-${state}.png`);
+      if (key && item.icon) candidates.push(`${base}${slugify(key)}-${slugify(item.icon)}.png`);
+      candidates.push(`${base}${state}.png`);
+      candidates.push(`${base}placeholder.png`);
+      // svg варианты
+      candidates.slice().forEach(p => { if (/\.png$/i.test(p)) { const s = p.replace(/\.png$/i, '.svg'); if (!candidates.includes(s)) candidates.push(s); } });
+      return candidates;
+    }
+    function resolveIconUrl(item){
+      return new Promise((resolve) => {
+        const list = buildIconCandidates(item);
+        let i = 0;
+        function tryNext(){
+          if (i >= list.length) { resolve(null); return; }
+          const img = new Image();
+          img.onload = () => resolve(list[i]);
+          img.onerror = () => { i++; tryNext(); };
+          img.src = list[i];
+        }
+        tryNext();
+      });
     }
 
-    function showPending(custom){
+    async function showPending(custom){
       const pending = custom || readPending();
       if (!pending) return;
       // Формируем заголовок и картинку превью
@@ -126,12 +147,12 @@
         if (pending.items?.length > 1) {
           title = 'Новые достижения!';
           subtitle = pending.items.map(it => `${it.name || it.group} (${it.tier})`).slice(0,3).join(', ');
-          img = pickIconUrl(first);
+          img = await resolveIconUrl(first) || '';
         } else if (first) {
           const tierName = {1:'Бронза',2:'Серебро',3:'Золото'}[first.tier] || '';
           title = `Достижение: ${first.name || first.group}`;
           subtitle = tierName ? `Уровень: ${tierName}` : '';
-          img = pickIconUrl(first);
+          img = await resolveIconUrl(first) || '';
         }
       } catch(_) {}
 
