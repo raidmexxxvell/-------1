@@ -125,7 +125,8 @@
     const w = Math.max(0, stats.wins||0);
     const d = Math.max(0, stats.draws||0);
     const l = Math.max(0, stats.losses||0);
-    let wn=w, dn=d, ln=l, sum = w+d+l;
+    let wn=w, dn=d, ln=l;
+    const sum = w+d+l;
   if (total && sum && sum !== total){ const k= total/sum; wn=w*k; dn=d*k; ln=l*k; }
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
   svg.setAttribute('width','140'); svg.setAttribute('height','60'); svg.setAttribute('viewBox','0 0 140 70');

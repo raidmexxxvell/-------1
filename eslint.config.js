@@ -2,6 +2,7 @@
 export default [
   {
     files: ["static/js/**/*.js"],
+    ignores: ["static/js/dist/**/*"],
   languageOptions: {
       ecmaVersion: 2022,
       sourceType: "script", // Legacy JS files
@@ -47,7 +48,18 @@ export default [
         StoreDebugger: "readonly",
         AdminLogger: "readonly",
         fetchEtag: "readonly",
-        fetchEtagUtils: "readonly"
+        fetchEtagUtils: "readonly",
+        // Legacy globals from various modules
+        MatchState: "readonly",
+        XPUtils: "readonly", 
+        getTeamColor: "readonly",
+        ensureBettingToursFresh: "readonly",
+        updateOddsUIFromStore: "readonly",
+        loadReferralInfo: "readonly",
+        closeLeagueShelf: "readonly",
+        initApp: "readonly",
+        module: "writable", // CommonJS modules
+        prompt: "readonly" // Browser prompt dialog
       }
     },
     rules: {
@@ -92,14 +104,118 @@ export default [
   },
   {
     files: ["static/js/**/*.ts"],
+    ignores: ["static/js/dist/**/*"],
     languageOptions: {
       ecmaVersion: 2022,
-      sourceType: "module"
+      sourceType: "module",
+      globals: {
+        window: "readonly",
+        document: "readonly",
+        console: "readonly",
+        fetch: "readonly",
+        localStorage: "readonly",
+        sessionStorage: "readonly",
+        navigator: "readonly",
+        location: "readonly",
+        URL: "readonly",
+        URLSearchParams: "readonly",
+        FormData: "readonly",
+        WebSocket: "readonly",
+        EventSource: "readonly",
+        CustomEvent: "readonly",
+        Image: "readonly",
+        MutationObserver: "readonly",
+        IntersectionObserver: "readonly",
+        performance: "readonly",
+        requestAnimationFrame: "readonly",
+        getComputedStyle: "readonly",
+        Notification: "readonly",
+        alert: "readonly",
+        confirm: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        // Project-specific globals
+        io: "readonly", // Socket.IO client
+        UserStore: "readonly",
+        UIStore: "readonly",
+        LeagueStore: "readonly",
+        MatchesStore: "readonly",
+        OddsStore: "readonly",
+        PredictionsStore: "readonly",
+        ShopStore: "readonly",
+        ProfileStore: "readonly",
+        RealtimeStore: "readonly",
+        StoreDebugger: "readonly",
+        AdminLogger: "readonly",
+        fetchEtag: "readonly",
+        fetchEtagUtils: "readonly",
+        // Legacy globals from various modules
+        MatchState: "readonly",
+        XPUtils: "readonly", 
+        getTeamColor: "readonly",
+        ensureBettingToursFresh: "readonly",
+        updateOddsUIFromStore: "readonly",
+        loadReferralInfo: "readonly",
+        closeLeagueShelf: "readonly",
+        initApp: "readonly",
+        module: "writable", // CommonJS modules
+        prompt: "readonly" // Browser prompt dialog
+      }
     },
     rules: {
-      // TypeScript files using standard JS rules for now
+      // Error Prevention
       "no-unused-vars": ["error", { 
-        varsIgnorePattern: "^_" 
+        vars: "all", 
+        args: "after-used", 
+        ignoreRestSiblings: true,
+        varsIgnorePattern: "^_",
+        argsIgnorePattern: "^_",
+        caughtErrors: "all",
+        caughtErrorsIgnorePattern: "^_"
+      }],
+      "no-undef": "error",
+      "no-unreachable": "error",
+      "no-console": ["warn", { allow: ["warn", "error"] }],
+      
+      // DOM Manipulation Safety
+      "no-global-assign": "error",
+      "no-implicit-globals": "error",
+      
+      // Event Handling - Prevent Memory Leaks
+      "no-inner-declarations": "error",
+      
+      // Memory Leaks Prevention
+      "no-implied-eval": "error",
+      "no-eval": "error",
+      
+      // DOM Event Safety Rules
+      "no-script-url": "error",
+      
+      // Best Practices
+      "eqeqeq": ["error", "always"],
+      "curly": ["error", "all"],
+      "no-var": "error",
+      "prefer-const": "error",
+      "no-duplicate-imports": "error"
+    }
+  },
+  {
+    files: ["static/js/helpers.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: {
+        window: "readonly",
+        document: "readonly",
+        console: "readonly"
+      }
+    },
+    rules: {
+      "no-unused-vars": ["error", { 
+        varsIgnorePattern: "^_",
+        argsIgnorePattern: "^_"
       }]
     }
   },

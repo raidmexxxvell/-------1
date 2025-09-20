@@ -4,25 +4,25 @@
 
 (function(){
   const raf = (cb) => (window.requestAnimationFrame || window.setTimeout)(cb, 0);
-  const rIC = window.requestIdleCallback || function (cb) { return setTimeout(() => cb({ timeRemaining: () => 0 }), 0); };
+  const _rIC = window.requestIdleCallback || function (cb) { return setTimeout(() => cb({ timeRemaining: () => 0 }), 0); };
 
   // Нормализация даты к формату YYYY-MM-DD без преобразования часового пояса
   // Важно: не используем new Date(...), чтобы избежать смещения дня при разных TZ
   function normalizeDateStr(raw) {
     try {
-      if (!raw) return '';
-      let s = String(raw).trim();
+      if (!raw) {return '';}
+      const s = String(raw).trim();
       // dd.mm.yyyy -> yyyy-mm-dd
       const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
-      if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+      if (m) {return `${m[3]}-${m[2]}-${m[1]}`;}
       // Если ISO-подобное — берём первые 10 символов (yyyy-mm-dd)
-      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {return s.slice(0, 10);}
       // Если внутри есть 'T' (datetime), тоже берём yyyy-mm-dd до 'T'
       const tIdx = s.indexOf('T');
-      if (tIdx > 0 && /^\d{4}-\d{2}-\d{2}$/.test(s.slice(0,10))) return s.slice(0,10);
+      if (tIdx > 0 && /^\d{4}-\d{2}-\d{2}$/.test(s.slice(0,10))) {return s.slice(0,10);}
       // Фолбэк: попытка выделить yyyy-mm-dd из произвольной строки
       const m2 = s.match(/(\d{4}-\d{2}-\d{2})/);
-      if (m2) return m2[1];
+      if (m2) {return m2[1];}
       // Иначе вернём обрезанную под YYYY-MM-DD строку — лучше, чем уходить в TZ-конвертацию
       return s.slice(0, 10);
     } catch(_) { return String(raw||'').slice(0,10); }
@@ -32,7 +32,7 @@
   function formatDateRu(isoDate) {
     try {
       const s = String(isoDate||'').slice(0,10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {return s;}
       const [y,m,d] = s.split('-');
       return `${d}.${m}.${y}`;
     } catch(_) { return String(isoDate||''); }
@@ -71,9 +71,9 @@
   function batchAppend(parent, nodes, batchSize = 20) {
     let i = 0;
     function step() {
-      if (i >= nodes.length) return;
+      if (i >= nodes.length) {return;}
       const frag = document.createDocumentFragment();
-      for (let k = 0; k < batchSize && i < nodes.length; k++, i++) frag.appendChild(nodes[i]);
+      for (let k = 0; k < batchSize && i < nodes.length; k++, i++) {frag.appendChild(nodes[i]);}
       parent.appendChild(frag);
       raf(step);
     }
@@ -100,7 +100,7 @@
     const readCache = (key) => {
       try {
         const j = JSON.parse(localStorage.getItem('voteAgg:' + key) || 'null');
-        if (j && Number.isFinite(j.ts) && (Date.now() - j.ts < TTL)) return j;
+        if (j && Number.isFinite(j.ts) && (Date.now() - j.ts < TTL)) {return j;}
       } catch(_) {}
       return null;
     };
@@ -108,14 +108,14 @@
       try { localStorage.setItem('voteAgg:' + key, JSON.stringify({ ...data, ts: Date.now() })); } catch(_) {}
     };
     const pump = () => {
-      if (running >= MAX_CONCURRENCY) return;
+      if (running >= MAX_CONCURRENCY) {return;}
       const job = q.shift();
-      if (!job) return;
+      if (!job) {return;}
       running++;
       let url = `/api/vote/match-aggregates?home=${encodeURIComponent(job.h)}&away=${encodeURIComponent(job.a)}&date=${encodeURIComponent(job.d)}`;
       try {
         const init = window.Telegram?.WebApp?.initData || '';
-        if (init) url += `&initData=${encodeURIComponent(init)}`;
+        if (init) {url += `&initData=${encodeURIComponent(init)}`;}
       } catch(_) {}
       fetch(url, { cache: 'no-store' })
         .then(r => r.json())
@@ -126,8 +126,8 @@
     const fetchAgg = (home, away, dateStr) => {
       const key = keyFrom(home, away, dateStr);
       const cached = readCache(key);
-      if (cached) return Promise.resolve(cached);
-      if (dedup.has(key)) return dedup.get(key);
+      if (cached) {return Promise.resolve(cached);}
+      if (dedup.has(key)) {return dedup.get(key);}
       const p = new Promise(res => { q.push({ key, h: home || '', a: away || '', d: String(dateStr||'').slice(0,10), res }); pump(); });
       dedup.set(key, p);
       p.finally(() => dedup.delete(key));
@@ -152,7 +152,7 @@
       const prevIso = labelEl.getAttribute('data-updated-iso');
       const prevTs = prevIso ? Date.parse(prevIso) : 0;
       const nextTs = Date.parse(newIso);
-      if (!Number.isFinite(nextTs)) return;
+      if (!Number.isFinite(nextTs)) {return;}
       if (nextTs >= prevTs) {
         labelEl.setAttribute('data-updated-iso', newIso);
         const d = new Date(newIso);
@@ -162,9 +162,9 @@
   }
 
   function renderLeagueTable(tableEl, updatedTextEl, data) {
-    if (!tableEl) return;
+    if (!tableEl) {return;}
     const tbody = tableEl.querySelector('tbody');
-    if (!tbody) return;
+    if (!tbody) {return;}
     const rows = data?.values || [];
     // Guard: проверяем и версию, и короткую сигнатуру, чтобы избежать пропуска реальных изменений
     try {
@@ -178,8 +178,8 @@
         const nextTs = Date.parse(nextIso);
         notNewer = Number.isFinite(prevTs) && Number.isFinite(nextTs) && nextTs <= prevTs;
       }
-      if (sameSig && notNewer) return; // ничего не поменялось — не перерисовываем
-      if (tableEl.dataset) tableEl.dataset.sig = sigRows;
+      if (sameSig && notNewer) {return;} // ничего не поменялось — не перерисовываем
+      if (tableEl.dataset) {tableEl.dataset.sig = sigRows;}
     } catch(_) {}
     tbody.innerHTML = '';
     const nodes = [];
@@ -208,19 +208,19 @@
       try {
         const trs = tbody.querySelectorAll('tr');
         trs.forEach((rowEl, idx) => {
-          if (idx === 1) rowEl.classList.add('rank-1');
-          if (idx === 2) rowEl.classList.add('rank-2');
-          if (idx === 3) rowEl.classList.add('rank-3');
+          if (idx === 1) {rowEl.classList.add('rank-1');}
+          if (idx === 2) {rowEl.classList.add('rank-2');}
+          if (idx === 3) {rowEl.classList.add('rank-3');}
         });
       } catch(_) {}
-      if (updatedTextEl && data?.updated_at) setUpdatedLabelSafely(updatedTextEl, data.updated_at);
+      if (updatedTextEl && data?.updated_at) {setUpdatedLabelSafely(updatedTextEl, data.updated_at);}
     });
   }
 
   function renderStatsTable(tableEl, updatedEl, data) {
-    if (!tableEl) return;
+    if (!tableEl) {return;}
     const tbody = tableEl.querySelector('tbody');
-    if (!tbody) return;
+    if (!tbody) {return;}
     tbody.innerHTML = '';
     const rows = data?.values || [];
     const MAX_ROWS = 10; // показываем максимум 10
@@ -233,24 +233,24 @@
         const td = document.createElement('td');
         let val = (r[j] ?? '').toString();
         // Если данных нет — рендерим стабильный скелет: имя пусто, числовые колонки = 0
-        if (isEmpty && j > 0) val = '0';
+        if (isEmpty && j > 0) {val = '0';}
         td.textContent = val;
         tr.appendChild(td);
       }
-      if (i === 0) tr.classList.add('rank-1');
-      else if (i === 1) tr.classList.add('rank-2');
-      else if (i === 2) tr.classList.add('rank-3');
+      if (i === 0) {tr.classList.add('rank-1');}
+      else if (i === 1) {tr.classList.add('rank-2');}
+      else if (i === 2) {tr.classList.add('rank-3');}
       nodes.push(tr);
     }
     batchAppend(tbody, nodes, 10);
     raf(() => {
       try { 
-        if (updatedEl && data?.updated_at) updatedEl.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; 
+        if (updatedEl && data?.updated_at) {updatedEl.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`;} 
       } catch(_) {}
       try {
         // Проставляем сигнатуру первых 10 строк для дедупликации дальнейших рендеров
         const sig = JSON.stringify((rows||[]).slice(0,10));
-        if (tableEl.dataset) tableEl.dataset.sig = sig;
+        if (tableEl.dataset) {tableEl.dataset.sig = sig;}
       } catch(_) {}
     });
   }
@@ -261,7 +261,7 @@
 
   function renderSchedule(pane, data) {
 
-    if (!pane) return;
+    if (!pane) {return;}
     const ds = data?.tours ? data : (data?.data || {});
     let tours = ds?.tours || [];
     // Guard: сравнение сигнатуры туров. Если расписание не изменилось — не перерисовываем контейнер (исключаем моргание голосовалок)
@@ -278,7 +278,7 @@
         try { ensureBettingToursFresh().then(() => { try { patchScheduleVotes(pane); } catch(_){} }); } catch(_) {}
         return;
       }
-      if (pane.dataset) pane.dataset.sig = sig;
+      if (pane.dataset) {pane.dataset.sig = sig;}
     } catch(_) {}
     // Синхронизируем расписание и betting:tours для актуального голосования (динамический импорт)
     (async () => {
@@ -318,7 +318,7 @@
   try { if (window.MatchUtils) { isLive = window.MatchUtils.isLiveNow(m); } } catch(_) {}
   const headerText = document.createElement('span'); headerText.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`; header.appendChild(headerText);
   try { card.setAttribute('data-date', normalizeDateStr(m.date || m.datetime) || ''); } catch(_) {}
-  try { if (m.time) card.setAttribute('data-time', String(m.time)); } catch(_) {}
+  try { if (m.time) {card.setAttribute('data-time', String(m.time));} } catch(_) {}
   const finStore=(window.__FINISHED_MATCHES=window.__FINISHED_MATCHES||{});
   const mkKey = (mm) => matchKey(mm);
   if (isLive && !finStore[mkKey(m)]) { const live = document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); header.appendChild(live); }
@@ -342,7 +342,7 @@
       // Восстанавливаем предыдущий известный счёт сразу (исключаем визуальный скачок 'VS')
       try {
         const prev = MatchState.get(stateKey);
-        if (prev && prev.score) score.textContent = prev.score;
+        if (prev && prev.score) {score.textContent = prev.score;}
       } catch(_) {}
       try {
         if (isLive && !finStore[mkKey(m)]) {
@@ -353,7 +353,7 @@
               const d = await r.json();
               if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') {
                 const txt = `${Number(d.score_home)} : ${Number(d.score_away)}`;
-                if (score.textContent !== txt) score.textContent = txt;
+                if (score.textContent !== txt) {score.textContent = txt;}
                 MatchState.set(stateKey, { score: txt });
               }
             } catch(_) {}
@@ -373,7 +373,7 @@
         if (tourMatches.has(matchKey(m))) {
           try {
             const voteEl = window.VoteInline?.create?.({ home: m.home, away: m.away, date: m.date || m.datetime, getTeamColor });
-            if (voteEl) card.appendChild(voteEl);
+            if (voteEl) {card.appendChild(voteEl);}
           } catch(_) {}
         }
       } catch(_) {}
@@ -387,16 +387,16 @@
         const star = document.createElement('button');
         star.className = 'details-btn'; star.style.marginRight='8px';
         const featureKey = `feature:${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
-        const isFeatured = (()=>{ try { const s = localStorage.getItem('feature:current'); if (!s) return false; const j=JSON.parse(s); return j && j.home===m.home && j.away===m.away; } catch(_) { return false; } })();
+        const isFeatured = (()=>{ try { const s = localStorage.getItem('feature:current'); if (!s) {return false;} const j=JSON.parse(s); return j && j.home===m.home && j.away===m.away; } catch(_) { return false; } })();
         star.textContent = isFeatured ? 'Закреплено' : '⭐ На главную';
           star.addEventListener('click', async () => {
             try {
               star.disabled = true; const orig = star.textContent; star.textContent = '...';
               const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
               fd.append('home', m.home || ''); fd.append('away', m.away || '');
-              if (m.date) fd.append('date', String(m.date).slice(0,10)); if (m.datetime) fd.append('datetime', String(m.datetime));
+              if (m.date) {fd.append('date', String(m.date).slice(0,10));} if (m.datetime) {fd.append('datetime', String(m.datetime));}
               const r = await fetch('/api/feature-match/set', { method: 'POST', body: fd }); const j = await r.json().catch(()=>({}));
-          if (!r.ok) throw new Error(j?.error || 'Ошибка'); star.textContent = 'Закреплено';
+          if (!r.ok) {throw new Error(j?.error || 'Ошибка');} star.textContent = 'Закреплено';
           try { localStorage.setItem('feature:current', JSON.stringify({ home: m.home||'', away: m.away||'', ts: Date.now() })); } catch(_) {}
               try { window.renderTopMatchOfWeek?.({ home: m.home, away: m.away, date: m.date, datetime: m.datetime, time: m.time }); } catch(_) {}
               try { document.dispatchEvent(new CustomEvent('feature-match:set', { detail: { match: m } })); } catch(_) {}
@@ -467,7 +467,7 @@
               // Удалим «самый дальний» в конце массива
               const toRemove = arr[arr.length-1];
               if (toRemove && toRemove !== el) {
-                const body = toRemove.querySelector('.tour-body'); if (body) body.innerHTML='';
+                const body = toRemove.querySelector('.tour-body'); if (body) {body.innerHTML='';}
                 toRemove.__rendered = false; visible.delete(toRemove);
               }
             }
@@ -505,20 +505,20 @@
       const LiveStatusCache = (window.__LIVE_STATUS_CACHE = window.__LIVE_STATUS_CACHE || {
         map: new Map(), // key -> { ts, status }
         TTL: 45000,
-        get(k){ const v=this.map.get(k); if(!v) return null; if(Date.now()-v.ts>this.TTL){ this.map.delete(k); return null;} return v.status; },
+        get(k){ const v=this.map.get(k); if(!v) {return null;} if(Date.now()-v.ts>this.TTL){ this.map.delete(k); return null;} return v.status; },
         set(k,status){ this.map.set(k,{ ts: Date.now(), status }); }
       });
 
       const rescanLiveBadges = () => {
         try {
-          if (!window.MatchUtils || typeof window.MatchUtils.isLiveNow !== 'function') return;
+          if (!window.MatchUtils || typeof window.MatchUtils.isLiveNow !== 'function') {return;}
           const finStore = (window.__FINISHED_MATCHES = window.__FINISHED_MATCHES || {});
           const mkKey = (mm)=>{ try { return `${(mm.home||'').toLowerCase().trim()}__${(mm.away||'').toLowerCase().trim()}__${(mm.date||mm.datetime||'').toString().slice(0,10)}`; } catch(_) { return `${(mm.home||'')}__${(mm.away||'')}`; } };
           // Берём только видимые отрисованные карточки
           const cards = pane.querySelectorAll('.tour-block .tour-body .match-card');
           let scanned = 0;
           cards.forEach(card => {
-            if (scanned > 120) return; // safety limit
+            if (scanned > 120) {return;} // safety limit
             scanned++;
             try {
               // Восстановление данных матча из DOM
@@ -535,7 +535,7 @@
               const matchObj = { home, away, date, time };
               let live = window.MatchUtils.isLiveNow(matchObj);
               const key = mkKey(matchObj);
-              const header = card.querySelector('.match-header'); if(!header) return;
+              const header = card.querySelector('.match-header'); if(!header) {return;}
               let badge = header.querySelector('.live-badge');
               // Фолбэк: если локально не live, но старт в пределах ~±130 минут от now — спросим бекенд статус (1 запрос на матч в TTL)
               if(!live && !finStore[key]){
@@ -551,7 +551,7 @@
                         // делаем отложенный fetch чтобы не блокировать цикл
                         setTimeout(()=>{
                           // двойная проверка чтобы не дублировать запросы
-                          if(LiveStatusCache.get(key) !== null) return;
+                          if(LiveStatusCache.get(key) !== null) {return;}
                           fetch(`/api/match/status/get?home=${encodeURIComponent(matchObj.home||'')}&away=${encodeURIComponent(matchObj.away||'')}`)
                             .then(r=>r.json())
                             .then(s=>{
@@ -590,13 +590,13 @@
   }
 
   function renderResults(pane, data) {
-    if (!pane) return;
+    if (!pane) {return;}
     const withTeamCount = window.withTeamCount || ((n)=>n);
     const all = data?.results || data?.data?.results || [];
     if (!all.length) { pane.innerHTML = '<div class="schedule-empty">Нет прошедших матчей</div>'; return; }
     pane.innerHTML = '';
     const byTour = new Map();
-    all.forEach(m => { const t = m.tour || 0; if (!byTour.has(t)) byTour.set(t, []); byTour.get(t).push(m); });
+    all.forEach(m => { const t = m.tour || 0; if (!byTour.has(t)) {byTour.set(t, []);} byTour.get(t).push(m); });
     const tourList = Array.from(byTour.keys()).sort((a,b)=>b-a);
     const container = document.createElement('div'); container.className='results-container';
     const pager = document.createElement('div'); pager.className='results-pager';
@@ -653,7 +653,7 @@
     try {
       const table = document.getElementById('league-table');
       const updatedText = document.getElementById('league-updated-text');
-      if (!table || !window.fetchEtag) return;
+      if (!table || !window.fetchEtag) {return;}
       // Сначала пробуем живую проекцию (без ETag), затем стандартную таблицу
       fetch('/api/league-table/live', { cache: 'no-store' })
         .then(r => r.ok ? r.json() : Promise.reject('no_live'))
@@ -666,7 +666,7 @@
         .catch(() => {
           window.fetchEtag('/api/league-table', { cacheKey: 'league:table', swrMs: 5000, extract: j=>j, onSuccess: (res)=>{
             try {
-              if (window.LeagueStore) window.LeagueStore.update(s => { s.table = Array.isArray(res.data) ? res.data : []; });
+              if (window.LeagueStore) {window.LeagueStore.update(s => { s.table = Array.isArray(res.data) ? res.data : []; });}
             } catch(_){}
           } })
         .then(({ data, headerUpdatedAt }) => {
@@ -683,7 +683,7 @@
   async function refreshSchedule(){
     try {
       const pane = document.getElementById('league-pane-schedule');
-      if (!pane || !window.fetchEtag) return;
+      if (!pane || !window.fetchEtag) {return;}
       // Сначала пробуем прогретый кэш от /api/summary
       const STORE_KEY = 'schedule:tours';
       const FRESH_TTL = 10 * 60 * 1000; // 10 минут как в profile.js
@@ -697,7 +697,7 @@
       try {
         if (window.__SUMMARY_IN_FLIGHT__) {
           const waitForSummary = (ms=1200) => new Promise(resolve => {
-            let t=null; const onReady = () => { try { if(t) clearTimeout(t); } catch(_) {}; resolve('ready'); };
+            let t=null; const onReady = () => { try { if(t) {clearTimeout(t);} } catch(_) {}; resolve('ready'); };
             try { window.addEventListener('preload:summary-ready', onReady, { once: true }); } catch(_) {}
             t = setTimeout(() => { try { window.removeEventListener('preload:summary-ready', onReady); } catch(_) {}; resolve('timeout'); }, ms);
           });
@@ -710,11 +710,11 @@
       // Фолбэк: обычная загрузка через ETag
       window.fetchEtag('/api/schedule', { cacheKey: 'league:schedule', swrMs: 8000, extract: j=> (j?.data||j), onSuccess: (res)=>{
         try {
-          if (window.LeagueStore) window.LeagueStore.update(s => {
+          if (window.LeagueStore) {window.LeagueStore.update(s => {
             s.schedule.tours = Array.isArray(res.data?.tours) ? res.data.tours : (Array.isArray(res.data) ? res.data : []);
             s.schedule.lastUpdated = Date.now();
             s.schedule.etag = res.etag || s.schedule.etag || null;
-          });
+          });}
         } catch(_){}
       } })
         .then(({ data }) => { try { renderSchedule(pane, data); } catch(_) {} })
@@ -735,10 +735,10 @@
     try {
       const cached = readToursCache();
       const fresh = cached && Number.isFinite(cached.ts) && (Date.now() - cached.ts < TOURS_FRESH_TTL) && (Array.isArray(cached?.data?.tours) ? cached.data.tours.length>0 : Array.isArray(cached?.tours) && cached.tours.length>0);
-      if (fresh) return Promise.resolve(cached);
-      if (__toursFetchPromise) return __toursFetchPromise;
+      if (fresh) {return Promise.resolve(cached);}
+      if (__toursFetchPromise) {return __toursFetchPromise;}
       const headers = { 'Cache-Control': 'no-cache' };
-      if (cached?.version) headers['If-None-Match'] = cached.version;
+      if (cached?.version) {headers['If-None-Match'] = cached.version;}
       __toursFetchPromise = fetch('/api/betting/tours', { headers, cache: 'no-store' })
         .then(async r => {
           if (r.status === 304) {
@@ -773,23 +773,23 @@
     const s = new Set();
     try {
       const tours = cache?.data?.tours || cache?.tours || [];
-      (tours||[]).forEach(t => (t.matches||[]).forEach(m => { const k=buildTourMatchKey(m); if(k) s.add(k); }));
+      (tours||[]).forEach(t => (t.matches||[]).forEach(m => { const k=buildTourMatchKey(m); if(k) {s.add(k);} }));
     } catch(_) {}
     return s;
   }
   function patchScheduleVotes(pane){
-    if (!pane) return;
+    if (!pane) {return;}
     const cache = readToursCache();
-    if (!cache) return;
+    if (!cache) {return;}
     const tourMatches = computeTourMatchSet(cache);
     // Не выходим при пустом set — дадим шанс фолбэку на ближайшие матчи
     const isUpcomingWithinDays = (obj, days=6) => {
       try {
         const now = new Date();
         const d = normalizeDateStr(obj?.date || obj?.datetime || '');
-        if (!d) return false;
+        if (!d) {return false;}
         const dt = new Date(d);
-        if (isNaN(dt.getTime())) return false;
+        if (isNaN(dt.getTime())) {return false;}
         const diff = dt.getTime() - now.getTime();
         return diff >= 0 && diff <= days*24*60*60*1000;
       } catch(_) { return false; }
@@ -798,7 +798,7 @@
     pane.querySelectorAll('.match-card').forEach(card => {
       try {
         // Если уже патчили или уже есть vote-inline — пропускаем (исключает мигалки)
-        if (card.__votePatched === true || card.querySelector('.vote-inline')) return;
+        if (card.__votePatched === true || card.querySelector('.vote-inline')) {return;}
         const nameHomeEl = card.querySelector('.team.home .team-name');
         const nameAwayEl = card.querySelector('.team.away .team-name');
         const home = (nameHomeEl?.getAttribute('data-team-name') || nameHomeEl?.textContent || '').trim();
@@ -813,11 +813,11 @@
             if (m) { const parts = m[1].split('.'); dateKey = `${parts[2]}-${parts[1]}-${parts[0]}`; }
           } catch(_) {}
         }
-        if (!dateKey) return;
+        if (!dateKey) {return;}
         const key = matchKey({ home, away, date: dateKey });
         if (!tourMatches.has(key)) {
           // Фолбэк: если матч ближайшие 6 дней — всё равно показываем голосование
-          if (!isUpcomingWithinDays({ home, away, date: dateKey }, 6)) return;
+          if (!isUpcomingWithinDays({ home, away, date: dateKey }, 6)) {return;}
         }
         // Создаём голосование
         if (window.VoteInline && typeof window.VoteInline.create === 'function') {
@@ -836,12 +836,12 @@
     const INTERVAL = 4000; // 4 секунды (в заданном диапазоне 3-5)
     setInterval(() => {
       try {
-        if (document.hidden) return;
+        if (document.hidden) {return;}
         document.querySelectorAll('.vote-inline[data-votekey]').forEach(wrap => {
           try {
             const key = wrap.dataset.votekey;
             const st = MatchState.get(key);
-            if (st && Date.now() - (st.lastAggTs||0) < 3500) return; // ещё свежо
+            if (st && Date.now() - (st.lastAggTs||0) < 3500) {return;} // ещё свежо
             const home = wrap.dataset.home || '';
             const away = wrap.dataset.away || '';
             const date = wrap.dataset.date || '';
@@ -850,7 +850,7 @@
               const segH = wrap.querySelector('.seg-h');
               const segD = wrap.querySelector('.seg-d');
               const segA = wrap.querySelector('.seg-a');
-              if (!segH) return;
+              if (!segH) {return;}
               // Серверные значения
               let h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
               let sum = Math.max(0, h+d+a);
@@ -865,9 +865,9 @@
                 sum = Math.max(1, sum);
               }
               const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
-              if (segH.style.width !== ph+'%') segH.style.width = ph+'%';
-              if (segD.style.width !== pd+'%') segD.style.width = pd+'%';
-              if (segA.style.width !== pa+'%') segA.style.width = pa+'%';
+              if (segH.style.width !== ph+'%') {segH.style.width = ph+'%';}
+              if (segD.style.width !== pd+'%') {segD.style.width = pd+'%';}
+              if (segA.style.width !== pa+'%') {segA.style.width = pa+'%';}
               MatchState.set(key, { votes:{ h,d,a,total:h+d+a }, lastAggTs: Date.now() });
             }).catch(()=>{});
           } catch(_) {}
@@ -887,7 +887,7 @@ try {
 
     function startToursPolling() {
       try {
-        if (pollToursTimer) return;
+        if (pollToursTimer) {return;}
         pollToursTimer = setInterval(() => {
           try { ensureBettingToursFresh(); } catch(_) {}
         }, 4000);
@@ -901,7 +901,7 @@ try {
 
     // If socket fails to connect within a short timeout, start polling as fallback
     const wsFallbackTimeout = setTimeout(() => {
-      if (!socketConnected) startToursPolling();
+      if (!socketConnected) {startToursPolling();}
     }, 1500);
 
     socket.on('connect', () => {
@@ -910,7 +910,7 @@ try {
     socket.on('disconnect', () => { try { socketConnected = false; startToursPolling(); } catch(_) {} });
     socket.on('data_changed', msg => {
       try {
-        if (!msg || msg.data_type !== 'betting_tours') return;
+        if (!msg || msg.data_type !== 'betting_tours') {return;}
         // Сбрасываем локальный кэш и обновляем туры/расписание
         try { localStorage.removeItem('betting:tours'); } catch(_) {}
         try { window.League && window.League.refreshSchedule && window.League.refreshSchedule(); } catch(_) {}

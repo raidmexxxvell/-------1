@@ -2,7 +2,7 @@
 // Лёгкий индикатор новых достижений: красная точка на профиле и анимация при входе
 (function(){
   try {
-    if (window.AchievementsNotify) return;
+    if (window.AchievementsNotify) {return;}
     const tg = window.Telegram?.WebApp || null;
     const LS_BEST_KEY = 'ach:best:v1'; // { [group]: best_tier }
     const LS_PENDING_KEY = 'ach:pending:v1'; // { xp, credits, items:[{group,tier,name,icon}] }
@@ -18,12 +18,12 @@
   function hasBestBaseline(){ try { return localStorage.getItem(LS_BEST_KEY) != null; } catch(_) { return false; } }
     function writeBest(map){ try { localStorage.setItem(LS_BEST_KEY, JSON.stringify(map||{})); } catch(_) {} }
     function readPending(){ try { return JSON.parse(localStorage.getItem(LS_PENDING_KEY)||'null'); } catch(_) { return null; } }
-    function writePending(p){ try { if (p) localStorage.setItem(LS_PENDING_KEY, JSON.stringify(p)); else localStorage.removeItem(LS_PENDING_KEY); } catch(_) {} }
+    function writePending(p){ try { if (p) {localStorage.setItem(LS_PENDING_KEY, JSON.stringify(p));} else {localStorage.removeItem(LS_PENDING_KEY);} } catch(_) {} }
 
     function getActiveTab(){
       try {
         // Предпочтение стору, иначе по DOM
-        if (window.UIStore?.get) return window.UIStore.get().activeTab || '';
+        if (window.UIStore?.get) {return window.UIStore.get().activeTab || '';}
         const el = document.querySelector('.nav-item.active');
         return el ? (el.getAttribute('data-tab')||'') : '';
       } catch(_) { return ''; }
@@ -31,7 +31,7 @@
 
     function addProfileDot(){
       try {
-        const navItem = document.querySelector('.nav-item[data-tab="profile"]'); if (!navItem) return;
+        const navItem = document.querySelector('.nav-item[data-tab="profile"]'); if (!navItem) {return;}
         let badge = navItem.querySelector('.nav-badge');
         if (!badge){ badge = document.createElement('div'); badge.className = 'nav-badge nav-badge--dot'; navItem.appendChild(badge); }
         // Для «точки» не пишем текст
@@ -46,16 +46,16 @@
       const nextBest = { ...prev };
       const unlocked = [];
       (achievements||[]).forEach(a => {
-        const g = a.group || a.key || a.code; if (!g) return;
+        const g = a.group || a.key || a.code; if (!g) {return;}
         const oldTier = Number(prev[g] || 0);
         const newTier = Number(a.best_tier || a.tier || 0);
-        if (newTier > 0) nextBest[g] = newTier;
+        if (newTier > 0) {nextBest[g] = newTier;}
         if (hadBaseline && newTier > oldTier){
           unlocked.push({ group: g, tier: newTier, name: a.name||g, icon: a.icon||null });
         }
       });
       writeBest(nextBest);
-      if (!unlocked.length) return null;
+      if (!unlocked.length) {return null;}
       // Сервер выдаёт награду только за конечный тир (не суммирует промежуточные)
       let totalXp = 0, totalCr = 0;
       unlocked.forEach(u => { const r = REWARDS_BY_TIER[u.tier] || {xp:0, credits:0}; totalXp += (r.xp||0); totalCr += (r.credits||0); });
@@ -64,11 +64,11 @@
 
     function ensureBackgroundCheck(){
       // Раз в 3 минуты опрашиваем достижения, когда не на профиле (If-None-Match + ETag → дёшево)
-      if (!window.fetchEtag) return; // дождёмся утилиты
+      if (!window.fetchEtag) {return;} // дождёмся утилиты
       let timer = null;
       function tick(){
         try {
-          if (getActiveTab() === 'profile') return; // не тратим сеть на профиле
+          if (getActiveTab() === 'profile') {return;} // не тратим сеть на профиле
           const initData = tg?.initData || '';
           const params = initData ? { initData } : null;
           window.fetchEtag('/api/achievements', {
@@ -78,7 +78,7 @@
             forceRevalidate: true,
             extract: j => Array.isArray(j.achievements) ? j.achievements : []
           }).then(({ data, updated }) => {
-            if (!data) return;
+            if (!data) {return;}
             const summary = summarizeUnlocks(data);
             if (summary && getActiveTab() !== 'profile'){
               writePending(summary); addProfileDot();
@@ -92,7 +92,7 @@
     // Реагируем на любые успешные загрузки достижений (в том числе из экрана профиля)
     window.addEventListener('etag:success', (e) => {
       try {
-        const d = e.detail || {}; if (d.cacheKey !== 'achievements:v1') return;
+        const d = e.detail || {}; if (d.cacheKey !== 'achievements:v1') {return;}
         const summary = summarizeUnlocks(d.data||[]);
         if (summary){
           if (getActiveTab() === 'profile') {
@@ -112,12 +112,12 @@
       const state = tierMap[item.tier] || (item.icon||'bronze');
       const key = item.key || item.code || item.group || slugify(item.name||'');
       const candidates = [];
-      if (key) candidates.push(`${base}${slugify(key)}-${state}.png`);
-      if (key && item.icon) candidates.push(`${base}${slugify(key)}-${slugify(item.icon)}.png`);
+      if (key) {candidates.push(`${base}${slugify(key)}-${state}.png`);}
+      if (key && item.icon) {candidates.push(`${base}${slugify(key)}-${slugify(item.icon)}.png`);}
       candidates.push(`${base}${state}.png`);
       candidates.push(`${base}placeholder.png`);
       // svg варианты
-      candidates.slice().forEach(p => { if (/\.png$/i.test(p)) { const s = p.replace(/\.png$/i, '.svg'); if (!candidates.includes(s)) candidates.push(s); } });
+      candidates.slice().forEach(p => { if (/\.png$/i.test(p)) { const s = p.replace(/\.png$/i, '.svg'); if (!candidates.includes(s)) {candidates.push(s);} } });
       return candidates;
     }
     function resolveIconUrl(item){
@@ -138,18 +138,18 @@
     function selectPreviewItem(items){
       try {
         const arr = Array.isArray(items) ? items : [];
-        if (!arr.length) return null;
+        if (!arr.length) {return null;}
         const priority = ['streak','credits','level','invited'];
         const byGroup = new Map();
-        arr.forEach(it => { const g = (it.group||'').toLowerCase(); if (g) byGroup.set(g, it); });
-        for (const g of priority){ if (byGroup.has(g)) return byGroup.get(g); }
+        arr.forEach(it => { const g = (it.group||'').toLowerCase(); if (g) {byGroup.set(g, it);} });
+        for (const g of priority){ if (byGroup.has(g)) {return byGroup.get(g);} }
         return arr[0];
       } catch(_) { return (items && items[0]) || null; }
     }
 
     async function showPending(custom){
       const pending = custom || readPending();
-      if (!pending) return;
+      if (!pending) {return;}
       // Формируем заголовок и картинку превью
       let title = 'Достижение разблокировано!';
       let subtitle = '';
@@ -184,12 +184,12 @@
     // При переходе на вкладку профиля — показать анимацию, если есть
     document.addEventListener('click', (e) => {
       const nav = e.target && e.target.closest?.('.nav-item[data-tab="profile"]');
-      if (!nav) return;
-      setTimeout(() => { const p = readPending(); if (p) showPending(p); }, 100);
+      if (!nav) {return;}
+      setTimeout(() => { const p = readPending(); if (p) {showPending(p);} }, 100);
     }, { passive:true });
 
     // Автопоказ при загрузке профиля если уже есть pending
-    document.addEventListener('DOMContentLoaded', () => { if (getActiveTab()==='profile'){ const p=readPending(); if(p) showPending(p); } });
+    document.addEventListener('DOMContentLoaded', () => { if (getActiveTab()==='profile'){ const p=readPending(); if(p) {showPending(p);} } });
 
     // Стартуем фоновую проверку
     document.addEventListener('DOMContentLoaded', ensureBackgroundCheck, { once:true });

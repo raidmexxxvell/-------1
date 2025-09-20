@@ -2,7 +2,7 @@
 // Sends logs to server endpoint for centralized viewing
 
 (() => {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') {return;}
 
   class AdminLogger {
     constructor() {
@@ -33,7 +33,7 @@
     }
 
     log(level, category, message, metadata = {}) {
-      if (!this.enabled) return;
+      if (!this.enabled) {return;}
 
       const entry = {
         timestamp: new Date().toISOString(),
@@ -76,7 +76,7 @@
     }
 
     async flush() {
-      if (!this.enabled || this.buffer.length === 0) return;
+      if (!this.enabled || this.buffer.length === 0) {return;}
 
       const logs = [...this.buffer];
       this.buffer = [];

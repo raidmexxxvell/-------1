@@ -5,7 +5,7 @@
   let __adminInitDone = false;
   let __ordersReqSeq = 0;
   function ensureAdminInit() {
-    if (__adminInitDone) return; // уже инициализировано
+    if (__adminInitDone) {return;} // уже инициализировано
   const btnAll = document.getElementById('admin-refresh-all');
   const btnUsers = document.getElementById('admin-users-refresh');
     const btnBump = document.getElementById('admin-bump-version');
@@ -20,16 +20,16 @@
           const key = btn.getAttribute('data-atab');
           tabs.forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
-          if (panes[key]) panes[key].style.display = '';
-          if (key === 'orders') renderAdminOrders();
-          if (key === 'streams') initAdminStreams();
-          if (key === 'stats') renderAdminStats();
+          Object.values(panes).forEach(p => { if (p) {p.style.display = 'none';} });
+          if (panes[key]) {panes[key].style.display = '';}
+          if (key === 'orders') {renderAdminOrders();}
+          if (key === 'streams') {initAdminStreams();}
+          if (key === 'stats') {renderAdminStats();}
         });
       });
     } catch(_) {}
   __adminInitDone = true;
-    if (btnAll) btnAll.addEventListener('click', () => {
+    if (btnAll) {btnAll.addEventListener('click', () => {
       const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
       btnAll.disabled = true; const orig = btnAll.textContent; btnAll.textContent = 'Обновляю...';
       Promise.allSettled([
@@ -40,9 +40,9 @@
   // Также обновим туры для ставок, чтобы подтянулись прогнозы и «матч недели»
   fetch('/api/betting/tours/refresh', { method: 'POST', body: fd })
       ]).finally(() => { btnAll.disabled = false; btnAll.textContent = orig; });
-    });
-    if (btnUsers && lblUsers) btnUsers.addEventListener('click', renderAdminStats);
-    if (btnBump) btnBump.addEventListener('click', async () => {
+    });}
+    if (btnUsers && lblUsers) {btnUsers.addEventListener('click', renderAdminStats);}
+    if (btnBump) {btnBump.addEventListener('click', async () => {
       try {
         btnBump.disabled = true; const o = btnBump.textContent; btnBump.textContent = '...';
         const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
@@ -54,8 +54,8 @@
       } finally {
         btnBump.disabled = false; btnBump.textContent = 'Применить';
       }
-    });
-    if (btnFullReset) btnFullReset.addEventListener('click', async () => {
+    });}
+    if (btnFullReset) {btnFullReset.addEventListener('click', async () => {
       // Проверка feature flag для опасной операции
       if (window.AdminFeatureFlags && !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:season_reset')) {
         const enable = window.AdminFeatureFlags.enableDangerousOperation(
@@ -74,7 +74,7 @@
 
       try {
         const ok = confirm('Полный сброс данных за сезон 25-26? Это удалит временные данные (снимки, ставки, заказы, стримы, комментарии). Пользователи и логи останутся.');
-        if (!ok) return;
+        if (!ok) {return;}
         btnFullReset.disabled = true; const o = btnFullReset.textContent; btnFullReset.textContent = '...';
         const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
         const r = await fetch('/api/admin/full-reset', { method: 'POST', body: fd });
@@ -84,12 +84,12 @@
       } finally {
         btnFullReset.disabled = false; btnFullReset.textContent = 'Сбросить';
       }
-    });
+    });}
   }
   async function renderAdminOrders() {
     const table = document.getElementById('admin-orders-table');
     const updated = document.getElementById('admin-orders-updated');
-    if (!table) return; const tbody = table.querySelector('tbody');
+    if (!table) {return;} const tbody = table.querySelector('tbody');
     // Счётчик запросов: учитываем только самый последний ответ
     const mySeq = ++__ordersReqSeq;
     // Чтобы избежать мерцания: показываем лоадер и чистим перед применением свежего результата
@@ -99,14 +99,14 @@
       const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
       const r = await fetch('/api/admin/orders', { method: 'POST', body: fd }); const data = await r.json();
       // Если пришёл устаревший ответ — игнорируем
-      if (mySeq !== __ordersReqSeq) return;
+      if (mySeq !== __ordersReqSeq) {return;}
       (data.orders||[]).forEach((o, idx) => {
         // Устойчивый ключ дедупликации на случай дублей в ответе
         const oid = String(
           (o.id != null ? o.id : (o.order_id != null ? o.order_id : ''))
         );
         const composite = oid || [o.user_id||'', o.created_at||'', o.total||'', o.items_preview||''].join('|');
-        if (seen.has(composite)) return; seen.add(composite);
+        if (seen.has(composite)) {return;} seen.add(composite);
         const tr = document.createElement('tr');
         let created = o.created_at || '';
         try { created = new Date(created).toLocaleDateString('ru-RU'); } catch(_) {}
@@ -148,7 +148,7 @@
             sel.disabled = true;
             const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || '')); fd.append('status', sel.value);
             const rr = await fetch(`/api/admin/orders/${o.id}/status`, { method: 'POST', body: fd });
-            if (!rr.ok) throw new Error('status');
+            if (!rr.ok) {throw new Error('status');}
           } catch(_) { /* revert on error */ sel.value = o.status||'new'; }
           finally { sel.disabled = false; }
         });
@@ -173,11 +173,11 @@
           }
 
           try {
-            if (!confirm('Удалить заказ?')) return;
+            if (!confirm('Удалить заказ?')) {return;}
             btnDel.disabled = true;
             const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
             const rr = await fetch(`/api/admin/orders/${o.id}/delete`, { method: 'POST', body: fd });
-            if (!rr.ok) throw new Error('delete');
+            if (!rr.ok) {throw new Error('delete');}
             tr.remove();
           } catch(_) { btnDel.disabled = false; }
         });
@@ -189,10 +189,10 @@
     } catch(_) { /* ignore */ }
   }
   async function initAdminStreams() {
-    const host = document.getElementById('admin-pane-streams'); if (!host) return;
+    const host = document.getElementById('admin-pane-streams'); if (!host) {return;}
     const list = document.getElementById('admin-streams-list'); const msg = document.getElementById('admin-streams-msg');
     const winInput = document.getElementById('admin-streams-window'); const refreshBtn = document.getElementById('admin-streams-refresh');
-    if (!list || !msg || !winInput || !refreshBtn) return;
+    if (!list || !msg || !winInput || !refreshBtn) {return;}
     list.innerHTML = '';
     try {
   const winMin = Math.max(60, Math.min(480, Number(winInput.value)||360));
@@ -201,7 +201,7 @@
   const data = await r.json();
       list.innerHTML = '';
       // Получим уже сохранённые подтверждения, чтобы предзаполнить поля
-      let saved = {};
+      const saved = {};
       try {
         const rr = await fetch('/api/streams/list');
         const dd = await rr.json();
@@ -244,7 +244,7 @@
               const prevHuman = prev ? (prev.vkVideoId ? `https://vk.com/video${prev.vkVideoId}` : (prev.vkPostUrl||'')) : '';
               if (prevHuman && prevHuman !== val) {
                 const ok = confirm('Ссылка уже сохранена. Перезаписать?');
-                if (!ok) return;
+                if (!ok) {return;}
               }
             } catch(_) {}
             btn.disabled = true; const o = btn.textContent; btn.textContent = '...';
@@ -272,7 +272,7 @@
         btnReset.addEventListener('click', async () => {
           try {
             const ok = confirm('Сбросить ссылку трансляции для этого матча?');
-            if (!ok) return;
+            if (!ok) {return;}
             btnReset.disabled = true; const o = btnReset.textContent; btnReset.textContent = '...';
             const fd = new FormData();
             fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
@@ -281,7 +281,7 @@
             fd.append('date', dateKey);
             const rr = await fetch('/api/streams/reset', { method: 'POST', body: fd });
             const resp = await rr.json().catch(()=>({}));
-            if (!rr.ok) throw new Error(resp?.error || 'reset');
+            if (!rr.ok) {throw new Error(resp?.error || 'reset');}
             hint.textContent = 'Ссылка сброшена'; hint.classList.remove('error'); hint.classList.add('success');
             input.value = '';
           } catch(_){ /* ignore */ }
@@ -301,7 +301,7 @@
     const updated = document.getElementById('admin-stats-updated');
     const btn = document.getElementById('admin-stats-refresh');
     const lblUsers = document.getElementById('admin-users-stats');
-    if (!table) return;
+    if (!table) {return;}
     const tbody = table.querySelector('tbody');
     try {
       if (btn) { btn.disabled = true; btn.textContent = '...'; }
@@ -322,7 +322,7 @@
         tr.append(tdK, tdV); tbody.appendChild(tr);
       });
       if (updated) { try { updated.textContent = `Обновлено: ${new Date().toLocaleString()}`; } catch(_) {} }
-  if (lblUsers) lblUsers.textContent = `Активные: ${d.active_1d||0}/${d.active_7d||0}/${d.active_30d||0} • Всего: ${d.total_users||0}`;
+  if (lblUsers) {lblUsers.textContent = `Активные: ${d.active_1d||0}/${d.active_7d||0}/${d.active_30d||0} • Всего: ${d.total_users||0}`;}
     } catch(_) {
       // ignore
     } finally {

@@ -4,7 +4,7 @@
 export function syncScheduleAndBettingTours(schedule, bettingTours) {
   // schedule: объект с расписанием (tours, matches)
   // bettingTours: объект с турами для ставок (tours, matches)
-  if (!schedule || !bettingTours) return;
+  if (!schedule || !bettingTours) {return;}
   const now = new Date();
   const DAY_MS = 24*60*60*1000;
   const maxAhead = 6 * DAY_MS;
@@ -13,21 +13,21 @@ export function syncScheduleAndBettingTours(schedule, bettingTours) {
     const h = (m.home||'').toLowerCase().replace(/ё/g,'е').replace(/\s+/g,'').trim();
     const a = (m.away||'').toLowerCase().replace(/ё/g,'е').replace(/\s+/g,'').trim();
     let d = m.date || m.datetime || '';
-    if (d && d.length > 10) d = d.slice(0,10);
+    if (d && d.length > 10) {d = d.slice(0,10);}
     return `${h}__${a}__${d}`;
   }
   // Собираем все будущие матчи из расписания (6 дней вперёд)
   const upcomingMatches = [];
   (schedule.tours||[]).forEach(t => (t.matches||[]).forEach(m => {
     let dateStr = m.date || m.datetime || '';
-    if (dateStr && dateStr.length > 10) dateStr = dateStr.slice(0,10);
+    if (dateStr && dateStr.length > 10) {dateStr = dateStr.slice(0,10);}
     const matchDate = dateStr ? new Date(dateStr) : null;
-    if (!matchDate || isNaN(matchDate.getTime())) return;
+    if (!matchDate || isNaN(matchDate.getTime())) {return;}
     const diff = matchDate - now;
-    if (diff < 0 || diff > maxAhead) return;
+    if (diff < 0 || diff > maxAhead) {return;}
     upcomingMatches.push({ ...m, _date: matchDate });
   }));
-  if (!upcomingMatches.length) return;
+  if (!upcomingMatches.length) {return;}
 
   // Найти ближайший тур в bettingTours (по дате первого матча)
   let bestTourIdx = -1;
@@ -35,9 +35,9 @@ export function syncScheduleAndBettingTours(schedule, bettingTours) {
   (bettingTours.tours||[]).forEach((t, idx) => {
     const firstMatch = (t.matches||[])[0];
     let dateStr = firstMatch ? (firstMatch.date || firstMatch.datetime || '') : '';
-    if (dateStr && dateStr.length > 10) dateStr = dateStr.slice(0,10);
+    if (dateStr && dateStr.length > 10) {dateStr = dateStr.slice(0,10);}
     const matchDate = dateStr ? new Date(dateStr) : null;
-    if (!matchDate || isNaN(matchDate.getTime())) return;
+    if (!matchDate || isNaN(matchDate.getTime())) {return;}
     if (matchDate >= now && (!bestTourDate || matchDate < bestTourDate)) {
       bestTourDate = matchDate;
       bestTourIdx = idx;
@@ -53,7 +53,7 @@ export function syncScheduleAndBettingTours(schedule, bettingTours) {
     });
     bestTourIdx = 0;
   }
-  if (bestTourIdx === -1) return;
+  if (bestTourIdx === -1) {return;}
 
   // Собираем ключи уже существующих матчей в bettingTours
   const existingKeys = new Set();

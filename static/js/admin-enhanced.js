@@ -3,7 +3,7 @@
 (function(){
   // Toast system
   function ensureToastContainer(){
-    if(document.getElementById('toast-container')) return;
+    if(document.getElementById('toast-container')) {return;}
     const c=document.createElement('div');
     c.id='toast-container';
     c.style.position='fixed';
@@ -40,7 +40,7 @@
 
   function displayTeams(teams) {
     const tbody = document.getElementById('teams-table');
-    if (!tbody) return;
+    if (!tbody) {return;}
     
     tbody.innerHTML = '';
     
@@ -91,7 +91,7 @@
     const logoEl = document.getElementById('team-logo-url');
     const descEl = document.getElementById('team-description');
 
-    if (!modal || !title || !form) return;
+    if (!modal || !title || !form) {return;}
 
     currentTeamId = teamId;
 
@@ -99,15 +99,15 @@
       title.textContent = 'Редактировать команду';
       const team = allTeams.find(t => t.id === teamId);
       if (team) {
-        if (nameEl) nameEl.value = team.name || '';
-        if (cityEl) cityEl.value = team.city || '';
-        if (foundedEl) foundedEl.value = team.founded_year || '';
-        if (logoEl) logoEl.value = team.logo_url || '';
-        if (descEl) descEl.value = team.description || '';
+        if (nameEl) {nameEl.value = team.name || '';}
+        if (cityEl) {cityEl.value = team.city || '';}
+        if (foundedEl) {foundedEl.value = team.founded_year || '';}
+        if (logoEl) {logoEl.value = team.logo_url || '';}
+        if (descEl) {descEl.value = team.description || '';}
       }
     } else {
       title.textContent = 'Добавить команду';
-      if (form) form.reset();
+      if (form) {form.reset();}
     }
 
     modal.style.display = 'flex';
@@ -115,11 +115,11 @@
 
   function closeTeamModal() {
     const modal = document.getElementById('team-modal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {modal.style.display = 'none';}
   }
 
   async function saveTeam(e) {
-    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.preventDefault) {e.preventDefault();}
     const name = document.getElementById('team-name')?.value.trim();
     const city = document.getElementById('team-city')?.value.trim();
     const founded_year = parseInt(document.getElementById('team-founded-year')?.value || '0', 10) || null;
@@ -140,7 +140,7 @@
         body: JSON.stringify({ initData, ...payload })
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'Ошибка сохранения');
+      if (!res.ok || data.error) {throw new Error(data.error || 'Ошибка сохранения');}
       showToast(currentTeamId ? 'Команда обновлена' : 'Команда добавлена', 'success');
       closeTeamModal();
       loadTeams();
@@ -165,7 +165,7 @@
       }
     }
 
-    if (!confirm(`Удалить команду "${name}"?`)) return;
+    if (!confirm(`Удалить команду "${name}"?`)) {return;}
     try {
       const res = await fetch(`/api/admin/teams/${teamId}`, {
         method: 'DELETE',
@@ -173,7 +173,7 @@
         body: JSON.stringify({ initData: window.Telegram?.WebApp?.initData || '' })
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'Ошибка удаления');
+      if (!res.ok || data.error) {throw new Error(data.error || 'Ошибка удаления');}
       showToast('Команда удалена', 'success');
       loadTeams();
     } catch (err) {
@@ -187,14 +187,14 @@
     const title = document.getElementById('team-roster-title');
     const status = document.getElementById('team-roster-status');
     const tbody = document.getElementById('team-roster-table');
-    if (!modal || !tbody) return;
-    if (title) title.textContent = `Состав команды: ${teamName}`;
+    if (!modal || !tbody) {return;}
+    if (title) {title.textContent = `Состав команды: ${teamName}`;}
     if (status){ status.style.display='block'; status.textContent='Загрузка состава...'; }
     tbody.innerHTML = '';
     try{
       const res = await fetch(`/api/admin/teams/${teamId}/roster`);
       const data = await res.json();
-      if(!res.ok || data.error) throw new Error(data.error||'Ошибка загрузки состава');
+      if(!res.ok || data.error) {throw new Error(data.error||'Ошибка загрузки состава');}
       // API возвращает players (динамические team_stats_<id>), поддержим также старый ключ roster на всякий случай
       const list = data.players || data.roster || [];
       list.forEach((p, idx)=>{
@@ -209,7 +209,7 @@
           <td>${(p.red_cards ?? p.red) ?? 0}</td>`;
         tbody.appendChild(tr);
       });
-      if(status){ status.textContent = list.length? '' : 'Состав пуст'; if(!list.length) status.className='status-text'; }
+      if(status){ status.textContent = list.length? '' : 'Состав пуст'; if(!list.length) {status.className='status-text';} }
     }catch(e){
       console.error('openTeamRoster error', e);
       if(status){ status.textContent = 'Ошибка загрузки состава: '+e.message; status.className='status-text'; }
@@ -219,7 +219,7 @@
 
   function closeTeamRoster(){
     const modal = document.getElementById('team-roster-modal');
-    if(modal) modal.style.display='none';
+    if(modal) {modal.style.display='none';}
   }
 
     // Teams management buttons
@@ -244,7 +244,7 @@
     }
 
   function showToast(msg,type='info',timeout=3000){
-    try { ensureToastContainer(); const c=document.getElementById('toast-container'); if(!c) return; const box=document.createElement('div'); box.textContent=msg; box.style.pointerEvents='auto'; box.style.padding='10px 14px'; box.style.borderRadius='8px'; box.style.fontSize='13px'; box.style.maxWidth='340px'; box.style.lineHeight='1.35'; box.style.fontFamily='inherit'; box.style.color='#fff'; box.style.background= type==='error'? 'linear-gradient(135deg,#d9534f,#b52a25)': (type==='success'? 'linear-gradient(135deg,#28a745,#1e7e34)': 'linear-gradient(135deg,#444,#222)'); box.style.boxShadow='0 4px 12px rgba(0,0,0,0.35)'; box.style.opacity='0'; box.style.transform='translateY(-6px)'; box.style.transition='opacity .25s ease, transform .25s ease'; const close=document.createElement('span'); close.textContent='×'; close.style.marginLeft='8px'; close.style.cursor='pointer'; close.style.fontWeight='600'; close.onclick=()=>{ box.style.opacity='0'; box.style.transform='translateY(-6px)'; setTimeout(()=>box.remove(),220); }; const wrap=document.createElement('div'); wrap.style.display='flex'; wrap.style.alignItems='flex-start'; wrap.style.justifyContent='space-between'; wrap.style.gap='6px'; const textSpan=document.createElement('span'); textSpan.style.flex='1'; textSpan.textContent=msg; wrap.append(textSpan,close); box.innerHTML=''; box.appendChild(wrap); c.appendChild(box); requestAnimationFrame(()=>{ box.style.opacity='1'; box.style.transform='translateY(0)'; }); if(timeout>0){ setTimeout(()=>close.click(), timeout); } } catch(e){ console.warn('toast fail',e); }
+    try { ensureToastContainer(); const c=document.getElementById('toast-container'); if(!c) {return;} const box=document.createElement('div'); box.textContent=msg; box.style.pointerEvents='auto'; box.style.padding='10px 14px'; box.style.borderRadius='8px'; box.style.fontSize='13px'; box.style.maxWidth='340px'; box.style.lineHeight='1.35'; box.style.fontFamily='inherit'; box.style.color='#fff'; box.style.background= type==='error'? 'linear-gradient(135deg,#d9534f,#b52a25)': (type==='success'? 'linear-gradient(135deg,#28a745,#1e7e34)': 'linear-gradient(135deg,#444,#222)'); box.style.boxShadow='0 4px 12px rgba(0,0,0,0.35)'; box.style.opacity='0'; box.style.transform='translateY(-6px)'; box.style.transition='opacity .25s ease, transform .25s ease'; const close=document.createElement('span'); close.textContent='×'; close.style.marginLeft='8px'; close.style.cursor='pointer'; close.style.fontWeight='600'; close.onclick=()=>{ box.style.opacity='0'; box.style.transform='translateY(-6px)'; setTimeout(()=>box.remove(),220); }; const wrap=document.createElement('div'); wrap.style.display='flex'; wrap.style.alignItems='flex-start'; wrap.style.justifyContent='space-between'; wrap.style.gap='6px'; const textSpan=document.createElement('span'); textSpan.style.flex='1'; textSpan.textContent=msg; wrap.append(textSpan,close); box.innerHTML=''; box.appendChild(wrap); c.appendChild(box); requestAnimationFrame(()=>{ box.style.opacity='1'; box.style.transform='translateY(0)'; }); if(timeout>0){ setTimeout(()=>close.click(), timeout); } } catch(e){ console.warn('toast fail',e); }
   }
   window.showToast = showToast;
   ensureToastContainer();
@@ -351,15 +351,15 @@
     if (healthSyncBtn) {
       healthSyncBtn.addEventListener('click', () => {
         const out = document.getElementById('admin-health-sync-view');
-        if (out) out.textContent = 'Загрузка...';
+        if (out) {out.textContent = 'Загрузка...';}
         fetch('/health/sync', { cache: 'no-store' })
           .then(r => r.json().then(d => ({ ok: r.ok, d })))
           .then(res => {
-            if (!res.ok) throw new Error('HTTP ' + (res.d?.status || r.status));
-            if (out) out.textContent = JSON.stringify(res.d, null, 2);
+            if (!res.ok) {throw new Error('HTTP ' + (res.d?.status || r.status));}
+            if (out) {out.textContent = JSON.stringify(res.d, null, 2);}
           })
           .catch(err => {
-            if (out) out.textContent = 'Ошибка загрузки: ' + (err && err.message || String(err));
+            if (out) {out.textContent = 'Ошибка загрузки: ' + (err && err.message || String(err));}
           });
       });
       // auto-load once
@@ -399,7 +399,7 @@
     const startInput = document.getElementById('season-generate-date');
     if (startInput) {
       const labelEl = document.getElementById('season-generate-label');
-      const update = () => { if (labelEl) labelEl.textContent = 'Будет создан сезон: ' + computeSeasonLabelFromDate(startInput.value); };
+      const update = () => { if (labelEl) {labelEl.textContent = 'Будет создан сезон: ' + computeSeasonLabelFromDate(startInput.value);} };
       startInput.addEventListener('input', update);
       update();
     }
@@ -418,8 +418,8 @@
       logsClearBtn.addEventListener('click', () => {
         const actionEl = document.getElementById('logs-action-filter');
         const statusEl = document.getElementById('logs-status-filter');
-        if (actionEl) actionEl.value = '';
-        if (statusEl) statusEl.value = '';
+        if (actionEl) {actionEl.value = '';}
+        if (statusEl) {statusEl.value = '';}
         // выключаем автообновление метрик, если включено
         const chk = document.getElementById('metrics-autorefresh');
         if (chk && chk.checked) { chk.checked = false; }
@@ -483,7 +483,7 @@
   }
 
   function getLineupStatus(lineups) {
-    if (!lineups) return { class: 'lineup-empty', text: 'Нет составов' };
+    if (!lineups) {return { class: 'lineup-empty', text: 'Нет составов' };}
     
     const homeMain = lineups.home?.main?.length || 0;
     const awayMain = lineups.away?.main?.length || 0;
@@ -500,7 +500,7 @@
   // ================== MATCHES & LINEUPS LIST ==================
   async function loadMatches(){
     const container = document.getElementById('matches-list');
-    if (!container) return;
+    if (!container) {return;}
     container.innerHTML = '<div class="status-text">Загрузка ближайших матчей...</div>';
     try{
       const fd = new FormData();
@@ -555,7 +555,7 @@
       body: fd
     })
     .then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {throw new Error(`HTTP ${r.status}`);}
       return r.json();
     })
     .then(data => {
@@ -576,7 +576,7 @@
     ['home', 'away'].forEach(team => {
       // Рендерим только основной состав (main)
       const container = document.getElementById(`${team}-main-lineup`);
-      if (!container) return;
+      if (!container) {return;}
       
       container.innerHTML = '';
       
@@ -598,7 +598,7 @@
 
   function addPlayerToLineup(team, type) {
     const playerName = prompt('Введите имя игрока:');
-    if (!playerName) return;
+    if (!playerName) {return;}
     
     const playerNumber = prompt('Введите номер игрока (или оставьте пустым):');
     const playerPosition = prompt('Введите позицию (GK/DEF/MID/FWD):');
@@ -616,7 +616,7 @@
   function updateTeamLineup(team) {
     const inputId = `${team}-main-lineup-input`;
     const textarea = document.getElementById(inputId);
-    if (!textarea) return;
+    if (!textarea) {return;}
     
     const lines = textarea.value
       .split('\n')
@@ -655,7 +655,7 @@
   }
 
   function saveLineups() {
-    if (!currentMatchId) return;
+    if (!currentMatchId) {return;}
     
     // Готовим данные только с основными составами
     const lineupsToSave = {
@@ -678,7 +678,7 @@
       body: fd
     })
     .then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {throw new Error(`HTTP ${r.status}`);}
       return r.json();
     })
     .then(data => {
@@ -705,7 +705,7 @@
   function loadPlayers() {
     console.log('[Admin] Loading players...');
     const tbody = document.getElementById('players-table');
-    if (!tbody) return;
+    if (!tbody) {return;}
     
     tbody.innerHTML = '<tr><td colspan="6">Загрузка игроков...</td></tr>';
     
@@ -758,7 +758,7 @@
     try {
       if(window.subscribeTopic){
         window.subscribeTopic('admin_refresh', (evt)=>{
-          if(!evt || typeof evt !== 'object') return;
+          if(!evt || typeof evt !== 'object') {return;}
             if(evt.type==='progress'){
               const perc = evt.total ? Math.round((evt.index/evt.total)*100) : 0;
               if(evt.status==='start'){
@@ -785,7 +785,7 @@
       .finally(()=>{
         btn.disabled=false; btn.textContent=originalText;
         // Отписка
-        try{ if(window.unsubscribeTopic) window.unsubscribeTopic('admin_refresh'); }catch(_){ }
+        try{ if(window.unsubscribeTopic) {window.unsubscribeTopic('admin_refresh');} }catch(_){ }
       });
   }
 
@@ -802,7 +802,7 @@
     }catch(_){ const d=new Date(); day=d.getDate(); month=d.getMonth()+1; year=d.getFullYear(); }
     const yy = String(year).slice(-2);
     // Rule: if month <= 6 → single year (season in first half-year), else cross-year (YY-YY+1)
-    if (month <= 6) return yy;
+    if (month <= 6) {return yy;}
     const next = String((year+1)).slice(-2);
     return yy+'-'+next;
   }
@@ -810,7 +810,7 @@
   function parseStartDateForBackend(dmy){
     // Backend accepts DD.MM.YY or YYYY-MM-DD; keep as DD.MM.YYYY to match UI
     const v = String(dmy||'').trim();
-    if (/^\d{1,2}[.]\d{1,2}[.]\d{4}$/.test(v)) return v;
+    if (/^\d{1,2}[.]\d{1,2}[.]\d{4}$/.test(v)) {return v;}
     // try ISO
     const d=new Date(v);
     if(!isNaN(d)){
@@ -865,7 +865,7 @@
   function loadStats() {
     console.log('[Admin] Loading stats...');
     const container = document.getElementById('admin-stats-display');
-    if (!container) return;
+    if (!container) {return;}
     
     container.innerHTML = '<div class="status-text">Загрузка статистики...</div>';
     
@@ -876,7 +876,7 @@
   function seasonRollover(mode){
     const initData = window.Telegram?.WebApp?.initData || '';
     let url='/api/admin/season/rollover';
-    if(mode==='dry') url+='?dry=1'; else if(mode==='soft') url+='?soft=1';
+    if(mode==='dry') {url+='?dry=1';} else if(mode==='soft') {url+='?soft=1';}
     else if(mode==='full') {
       // Проверяем чекбокс deep
       const deepCb = document.getElementById('season-rollover-deep');
@@ -905,9 +905,9 @@
       if(!res.ok || res.d.error){ throw new Error(res.d.error||'Ошибка'); }
       if(logEl){ logEl.textContent=JSON.stringify(res.d,null,2); }
       const proceed = confirm('Выполнить откат сезона? Активным станет предыдущий турнир. Данные legacy, если были очищены ранее, не восстановятся.');
-      if(!proceed) return;
+      if(!proceed) {return;}
       const force = confirm('Принудительно выполнить откат даже если активный сезон не совпадает с последним из журнала? Нажмите Отмена для обычного отката.');
-      let url='/api/admin/season/rollback'; if(force) url+='?force=1';
+      let url='/api/admin/season/rollback'; if(force) {url+='?force=1';}
       if(logEl){ logEl.textContent+='\n\nВыполняю откат...'; }
       return fetch(url,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, status:r.status, d}))).then(res2=>{
         if(!res2.ok || res2.d.error){ throw new Error(res2.d.error||'Ошибка'); }
@@ -918,10 +918,10 @@
     }).catch(e=>{
       let hint='';
       const msg = e.message||'';
-      if(msg.includes('no_rollover_history')) hint='Нет записей в журнале season_rollovers. Сначала выполните «Полный сброс» (rollover).';
-      else if(msg.includes('active_mismatch')) hint='Активный турнир отличается от ожидаемого. Повторите с force=1.';
-      else if(msg.includes('tournament_not_found')) hint='Не найдены записи турниров по id. Проверьте БД.';
-      else if(msg.toLowerCase().includes('not found')) hint='Эндпоинт не найден. Обновите сервер до версии с /api/admin/season/rollback.';
+      if(msg.includes('no_rollover_history')) {hint='Нет записей в журнале season_rollovers. Сначала выполните «Полный сброс» (rollover).';}
+      else if(msg.includes('active_mismatch')) {hint='Активный турнир отличается от ожидаемого. Повторите с force=1.';}
+      else if(msg.includes('tournament_not_found')) {hint='Не найдены записи турниров по id. Проверьте БД.';}
+      else if(msg.toLowerCase().includes('not found')) {hint='Эндпоинт не найден. Обновите сервер до версии с /api/admin/season/rollback.';}
       if(logEl){ logEl.textContent='Ошибка: '+msg+(hint?"\nПодсказка: "+hint:''); }
       showToast('Ошибка: '+msg,'error',6000);
     });
@@ -931,7 +931,7 @@
   function loadSeasonsIntoPicker(refreshActive=false){
     const picker = document.getElementById('season-picker');
     const label = document.getElementById('active-season-label');
-    if(!picker) return;
+    if(!picker) {return;}
     fetch('/api/tournaments?status=all').then(r=>r.json()).then(data=>{
       const list = (data.tournaments||[]);
       // Fill options
@@ -944,9 +944,9 @@
       });
       // Active label
       const active = list.find(t=>t.status==='active');
-      if(label) label.textContent = active? (active.season||active.name||active.id) : '—';
+      if(label) {label.textContent = active? (active.season||active.name||active.id) : '—';}
       // Select active by default
-      if(active) picker.value = String(active.id);
+      if(active) {picker.value = String(active.id);}
     }).catch(()=>{
       if(picker) { picker.innerHTML = '<option>Ошибка загрузки</option>'; }
     });
@@ -957,7 +957,7 @@
     const id = picker && picker.value ? parseInt(picker.value,10) : 0;
     if(!id){ showToast('Выберите сезон','error'); return; }
     const confirmMsg = 'Сделать выбранный турнир активным? Текущий активный будет помечен завершённым.';
-    if(!confirm(confirmMsg)) return;
+    if(!confirm(confirmMsg)) {return;}
     const fd = new FormData();
     fd.append('initData', window.Telegram?.WebApp?.initData || '');
     // Эндпоинт минимальный: используем откат/ролловер в зависимости от ситуации не меняя схему.
@@ -978,7 +978,7 @@
       if(prev && prev.id===id){
         const url='/api/admin/season/rollback?force=1';
         return fetch(url,{method:'POST', body:fd}).then(r=>r.json().then(d=>({ok:r.ok,d}))).then(res=>{
-          if(!res.ok || res.d.error) throw new Error(res.d.error||'Ошибка');
+          if(!res.ok || res.d.error) {throw new Error(res.d.error||'Ошибка');}
           showToast('Активирован сезон: '+res.d.activated_season,'success');
           loadSeasonsIntoPicker(true);
         });
@@ -991,7 +991,7 @@
   function loadNews() {
     console.log('[Admin] Loading news...');
     const container = document.getElementById('news-list');
-    if (!container) return;
+    if (!container) {return;}
     
     container.innerHTML = '<div class="status-text">Загрузка новостей...</div>';
     
@@ -1001,7 +1001,7 @@
       method: 'GET'
     })
     .then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {throw new Error(`HTTP ${r.status}`);}
       return r.json();
     })
     .then(data => {
@@ -1082,7 +1082,7 @@
       method: 'GET'
     })
     .then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {throw new Error(`HTTP ${r.status}`);}
       return r.json();
     })
     .then(data => {
@@ -1132,7 +1132,7 @@
       body: JSON.stringify(data)
     })
     .then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {throw new Error(`HTTP ${r.status}`);}
       return r.json();
     })
     .then(data => {
@@ -1168,7 +1168,7 @@
       method: 'DELETE'
     })
     .then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {throw new Error(`HTTP ${r.status}`);}
       return r.json();
     })
     .then(data => {
@@ -1202,7 +1202,7 @@
     }
     
     const container = document.getElementById('admin-logs-display');
-    if (!container) return;
+    if (!container) {return;}
     
     // Показываем индикатор загрузки
     container.innerHTML = '<div class="loading-indicator">Загрузка логов...</div>';
@@ -1217,20 +1217,20 @@
       per_page: 20
     });
     
-    if (actionFilter) params.append('action', actionFilter);
-    if (statusFilter) params.append('status', statusFilter);
+    if (actionFilter) {params.append('action', actionFilter);}
+    if (statusFilter) {params.append('status', statusFilter);}
     
     const initData = window.Telegram?.WebApp?.initData || '';
-    if (initData) params.append('initData', initData);
+    if (initData) {params.append('initData', initData);}
     
     // Режим метрик: не запрашиваем /api/admin/logs, а показываем snapshot /health/perf
     if (statusFilter === 'metrics') {
       container.innerHTML = '<div class="loading-indicator">Загрузка метрик...</div>';
       const perfParams = new URLSearchParams();
-      if (initData) perfParams.append('initData', initData);
+      if (initData) {perfParams.append('initData', initData);}
       // use credentials include so admin cookie is sent when hosted cross-site
       fetch(`/health/perf?${perfParams.toString()}`, { credentials: 'include' })
-        .then(r => { if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(r => { if (!r.ok) {throw new Error('HTTP '+r.status);} return r.json(); })
         .then(data => {
           renderMetricsSnapshot(container, data);
         })
@@ -1239,7 +1239,7 @@
           container.innerHTML = '<div class="status-text">Ошибка загрузки метрик</div>';
         });
       const pag = document.getElementById('logs-pagination');
-      if (pag) pag.style.display = 'none';
+      if (pag) {pag.style.display = 'none';}
       toggleMetricsControls(true);
       return;
     }
@@ -1316,8 +1316,8 @@
   }
 
   function latencyClass(p95){
-    if(p95 < 250) return 'ok';
-    if(p95 < 600) return 'warn';
+    if(p95 < 250) {return 'ok';}
+    if(p95 < 600) {return 'warn';}
     return 'bad';
   }
   function metricsLegendHtml(){
@@ -1346,16 +1346,16 @@
   // Делегирование кликов по аккордеонам
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.metrics-accordion > .accordion-toggle');
-    if (!btn) return;
+    if (!btn) {return;}
     const wrap = btn.parentElement;
     const cnt = wrap.querySelector('.accordion-content');
     const ind = btn.querySelector('.acc-ind');
     if (cnt.style.display === 'none') {
       cnt.style.display = 'block';
-      if (ind) ind.textContent = '▲';
+      if (ind) {ind.textContent = '▲';}
     } else {
       cnt.style.display = 'none';
-      if (ind) ind.textContent = '▼';
+      if (ind) {ind.textContent = '▼';}
     }
   });
 
@@ -1364,36 +1364,36 @@
   function toggleMetricsControls(on) {
     const btn = document.getElementById('admin-metrics-refresh');
     const wrap = document.getElementById('metrics-autorefresh-wrapper');
-    if (!btn || !wrap) return;
+    if (!btn || !wrap) {return;}
     btn.style.display = on ? 'inline-block' : 'none';
     wrap.style.display = on ? 'flex' : 'none';
     if (!on) {
       if (metricsAutoTimer) { clearInterval(metricsAutoTimer); metricsAutoTimer = null; }
       const chk = document.getElementById('metrics-autorefresh');
-      if (chk) chk.checked = false;
+      if (chk) {chk.checked = false;}
     }
   }
   // События для кнопок
   (function initMetricsControls(){
     const btn = document.getElementById('admin-metrics-refresh');
-    if (btn) btn.addEventListener('click', () => loadAdminLogs());
+    if (btn) {btn.addEventListener('click', () => loadAdminLogs());}
     const chk = document.getElementById('metrics-autorefresh');
-    if (chk) chk.addEventListener('change', () => {
+    if (chk) {chk.addEventListener('change', () => {
       if (chk.checked) {
-        if (metricsAutoTimer) clearInterval(metricsAutoTimer);
+        if (metricsAutoTimer) {clearInterval(metricsAutoTimer);}
         metricsAutoTimer = setInterval(() => {
           const statusFilter = document.getElementById('logs-status-filter')?.value;
-          if (statusFilter === 'metrics') loadAdminLogs();
+          if (statusFilter === 'metrics') {loadAdminLogs();}
         }, 15000); // 15s
       } else {
         if (metricsAutoTimer) { clearInterval(metricsAutoTimer); metricsAutoTimer = null; }
       }
-    });
+    });}
   })();
 
   function displayLogs(logs) {
     const container = document.getElementById('admin-logs-display');
-    if (!container) return;
+    if (!container) {return;}
     
     if (!logs || logs.length === 0) {
       container.innerHTML = '<div class="status-text">Логи не найдены</div>';
@@ -1452,7 +1452,7 @@
   }
 
   function createExtraDetailsElement(log) {
-    if (!hasExtraDetails(log)) return '';
+    if (!hasExtraDetails(log)) {return '';}
     
     let details = '';
     
@@ -1476,7 +1476,7 @@
   }
 
   function formatJsonForDisplay(jsonStr) {
-    if (!jsonStr) return '';
+    if (!jsonStr) {return '';}
     
     try {
       const obj = JSON.parse(jsonStr);
@@ -1487,7 +1487,7 @@
   }
 
   function updateLogsPagination(pagination) {
-    if (!pagination) return;
+    if (!pagination) {return;}
     
     window.adminLogsTotalPages = pagination.total_pages;
     
@@ -1517,7 +1517,7 @@
 
   // Utility functions
   function escapeHtml(text) {
-    if (typeof text !== 'string') return '';
+    if (typeof text !== 'string') {return '';}
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;

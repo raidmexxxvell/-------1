@@ -89,7 +89,7 @@ class RealtimeUpdater {
     }
     
     setupEventHandlers() {
-        if (!this.socket) return;
+        if (!this.socket) {return;}
         
         // Глобальная отладка всех WS событий
         this.socket.onAny((eventName, ...args) => {
@@ -171,15 +171,15 @@ class RealtimeUpdater {
         // Событие завершения матча (содержит optional results_block для мгновенного UX)
         this.socket.on('match_finished', (payload) => {
             try {
-                if(!payload || !payload.home || !payload.away) return;
+                if(!payload || !payload.home || !payload.away) {return;}
                 const { home, away } = payload;
                 // Удаляем live-бейджи и кнопку на открытом экране (если админ)
                 try {
                     document.querySelectorAll('.live-badge').forEach(b=>{
                         const wrap = b.closest('#ufo-match-details');
-                        if(wrap) b.remove();
+                        if(wrap) {b.remove();}
                     });
-                    const btn=document.getElementById('md-finish-btn'); if(btn) btn.style.display='none';
+                    const btn=document.getElementById('md-finish-btn'); if(btn) {btn.style.display='none';}
                 } catch(_){}
                 // Мгновенно скрываем матч из расписания (плавно)
                 try {
@@ -264,7 +264,7 @@ class RealtimeUpdater {
     handleTopicUpdate(payload){
         try {
             console.log('[Реалтайм] Обработка topic_update:', payload);
-            if (!payload || typeof payload !== 'object') return;
+            if (!payload || typeof payload !== 'object') {return;}
             const reason = payload.reason || payload.change_type || '';
             const topic = payload.topic || '';
             console.log('[Реалтайм] Обрабатываем обновление топика - сущность:', payload.entity, 'топик:', topic, 'причина:', reason);
@@ -304,8 +304,8 @@ class RealtimeUpdater {
                     const toDel = [];
                     for (let i = 0; i < localStorage.length; i++) {
                         const k = localStorage.key(i);
-                        if (!k) continue;
-                        if (k.startsWith('voted:') || k.startsWith('voteAgg:')) toDel.push(k);
+                        if (!k) {continue;}
+                        if (k.startsWith('voted:') || k.startsWith('voteAgg:')) {toDel.push(k);}
                     }
                     toDel.forEach(k => { try { localStorage.removeItem(k); } catch(_){} });
                 } catch(_) {}
@@ -316,7 +316,7 @@ class RealtimeUpdater {
                         try {
                             const btns = wrap.querySelector('.vote-inline-btns');
                             const confirm = wrap.querySelector('.vote-confirm');
-                            if (confirm) confirm.textContent = '';
+                            if (confirm) {confirm.textContent = '';}
                             if (btns) {
                                 btns.style.display = '';
                                 btns.querySelectorAll('button').forEach(b => b.disabled = false);
@@ -327,7 +327,7 @@ class RealtimeUpdater {
                             const date = wrap.dataset.date || '';
                             if (window.__VoteAgg && typeof window.__VoteAgg.fetchAgg === 'function') {
                                 window.__VoteAgg.fetchAgg(home, away, date)
-                                    .then(agg => { try { if (typeof wrap.__applyAgg === 'function') wrap.__applyAgg(agg); } catch(_){} })
+                                    .then(agg => { try { if (typeof wrap.__applyAgg === 'function') {wrap.__applyAgg(agg);} } catch(_){} })
                                     .catch(()=>{});
                             }
                         } catch(_) {}
@@ -339,7 +339,7 @@ class RealtimeUpdater {
     
     handleDataPatch(patch) {
         // Патчи могут приходить без поля type (тип уже задан именем события 'data_patch')
-        if (!patch) return;
+        if (!patch) {return;}
         const { entity, id, fields } = patch;
         try {
             if (entity === 'match') {
@@ -377,7 +377,7 @@ class RealtimeUpdater {
                     date = id.date;
                 }
 
-                if (!home || !away) return;
+                if (!home || !away) {return;}
 
                 const incomingV = (fields && fields.odds_version != null) ? Number(fields.odds_version) : null;
                 if (incomingV != null) {
@@ -522,7 +522,7 @@ class RealtimeUpdater {
 
     handleLineupsUpdated(data){
         try {
-            if(!data) return;
+            if(!data) {return;}
             // Проверяем, есть ли на странице что-то связанное с матчем (ростер или карточка матча)
             const selectorMatchCard = `[data-match-home="${data.home}"][data-match-away="${data.away}"]`;
             const rosterPresent = document.querySelector('.roster-table') || document.querySelector(selectorMatchCard);
@@ -653,7 +653,7 @@ class RealtimeUpdater {
     // Новые topic-based подписки (за фиче-флагом)
     subscribeTopic(topic){
         try {
-            if(!topic || typeof topic!== 'string') return;
+            if(!topic || typeof topic!== 'string') {return;}
             console.log('[Реалтайм] Вызов subscribeTopic:', topic, 'топики включены:', this.topicEnabled, 'подключен:', this.isConnected);
             // Кладём в очередь всегда (на случай вызова до готовности socket)
             this.pendingTopics.add(topic);
@@ -670,7 +670,7 @@ class RealtimeUpdater {
                 this.socket.emit('subscribe', { topic });
                 this.subscribedTopics.add(topic);
                 console.log('[Реалтайм] Подписались на топик:', topic, 'Всего подписок:', this.subscribedTopics.size);
-                try { window.RealtimeStore && window.RealtimeStore.update(s => { if (!Array.isArray(s.topics)) s.topics = []; if (!s.topics.includes(topic)) s.topics.push(topic); }); } catch(_){}
+                try { window.RealtimeStore && window.RealtimeStore.update(s => { if (!Array.isArray(s.topics)) {s.topics = [];} if (!s.topics.includes(topic)) {s.topics.push(topic);} }); } catch(_){}
             } else {
                 console.log('[Реалтайм] Не можем подписаться сейчас - сокет:', !!this.socket, 'подключен:', this.isConnected, 'уже подписан:', this.subscribedTopics.has(topic));
             }
@@ -680,11 +680,11 @@ class RealtimeUpdater {
     }
     unsubscribeTopic(topic){
         try {
-            if(!topic || typeof topic!== 'string') return;
+            if(!topic || typeof topic!== 'string') {return;}
             try { this.pendingTopics.delete(topic); } catch(_) {}
             try { this.subscribedTopics.delete(topic); } catch(_) {}
             try { window.__PENDING_WS_TOPICS__?.delete?.(topic); } catch(_) {}
-            if(!this.topicEnabled) return;
+            if(!this.topicEnabled) {return;}
             if(this.socket && this.isConnected){ this.socket.emit('unsubscribe', { topic }); }
             try { window.RealtimeStore && window.RealtimeStore.update(s => { s.topics = (s.topics||[]).filter(t => t!==topic); }); } catch(_){}
         } catch(_) {}
@@ -696,7 +696,7 @@ class RealtimeUpdater {
     }
     hasTopic(topic){
         try {
-            if(!topic) return false;
+            if(!topic) {return false;}
             return (this.subscribedTopics && this.subscribedTopics.has(topic)) ||
                    (this.pendingTopics && this.pendingTopics.has(topic)) ||
                    (window.__PENDING_WS_TOPICS__ && typeof window.__PENDING_WS_TOPICS__.has === 'function' && window.__PENDING_WS_TOPICS__.has(topic));

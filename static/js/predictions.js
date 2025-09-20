@@ -3,7 +3,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const tg = window.Telegram?.WebApp || null;
     const wrap = document.getElementById('tab-predictions');
-    if (!wrap) return;
+    if (!wrap) {return;}
 
     const toursEl = document.getElementById('pred-tours');
     const myBetsEl = document.getElementById('my-bets');
@@ -11,40 +11,40 @@
     // --- STORE ADAPTERS: Odds/Predictions (no-op if TS store not compiled) ---
     function flattenAndUpdateOddsStoreForMatch(matchId, m, versionHint) {
       try {
-        if (!window.OddsStore || !window.OddsStore.update) return;
+        if (!window.OddsStore || !window.OddsStore.update) {return;}
         const now = Date.now();
         const v = (versionHint != null ? Number(versionHint) : (m?.odds_version != null ? Number(m.odds_version) : 0)) || 0;
         const apply = (key, val) => {
-          if (val == null || Number.isNaN(Number(val))) return;
+          if (val == null || Number.isNaN(Number(val))) {return;}
           window.OddsStore.update(s => {
-            if (!s.map) s.map = {};
+            if (!s.map) {s.map = {};}
             s.map[key] = { value: Number(val), version: v, lastUpdated: now };
           });
         };
         // 1x2
         if (m && m.odds) {
-          if (m.odds.home != null) apply(`${matchId}|1x2|home`, m.odds.home);
-          if (m.odds.draw != null) apply(`${matchId}|1x2|draw`, m.odds.draw);
-          if (m.odds.away != null) apply(`${matchId}|1x2|away`, m.odds.away);
+          if (m.odds.home != null) {apply(`${matchId}|1x2|home`, m.odds.home);}
+          if (m.odds.draw != null) {apply(`${matchId}|1x2|draw`, m.odds.draw);}
+          if (m.odds.away != null) {apply(`${matchId}|1x2|away`, m.odds.away);}
         }
         // Totals
         const totals = m?.markets?.totals;
         if (Array.isArray(totals)) {
           totals.forEach(row => {
             const line = (row && (row.line != null)) ? String(row.line) : null;
-            if (!line) return;
+            if (!line) {return;}
             const over = row?.odds?.over; const under = row?.odds?.under;
-            if (over != null) apply(`${matchId}|totals|over|${line}`, over);
-            if (under != null) apply(`${matchId}|totals|under|${line}`, under);
+            if (over != null) {apply(`${matchId}|totals|over|${line}`, over);}
+            if (under != null) {apply(`${matchId}|totals|under|${line}`, under);}
           });
         }
         // Specials
         const sp = m?.markets?.specials;
         if (sp && sp.penalty && sp.penalty.odds) {
-          const o = sp.penalty.odds; if (o.yes != null) apply(`${matchId}|penalty|yes`, o.yes); if (o.no != null) apply(`${matchId}|penalty|no`, o.no);
+          const o = sp.penalty.odds; if (o.yes != null) {apply(`${matchId}|penalty|yes`, o.yes);} if (o.no != null) {apply(`${matchId}|penalty|no`, o.no);}
         }
         if (sp && sp.redcard && sp.redcard.odds) {
-          const o = sp.redcard.odds; if (o.yes != null) apply(`${matchId}|redcard|yes`, o.yes); if (o.no != null) apply(`${matchId}|redcard|no`, o.no);
+          const o = sp.redcard.odds; if (o.yes != null) {apply(`${matchId}|redcard|yes`, o.yes);} if (o.no != null) {apply(`${matchId}|redcard|no`, o.no);}
         }
       } catch(_) {}
     }
@@ -53,7 +53,7 @@
         const ds = store?.data || store || {};
         const tours = Array.isArray(ds.tours) ? ds.tours : [];
         const version = store?.version || ds?.version || null;
-        if (!tours.length) return;
+        if (!tours.length) {return;}
         const items = [];
         tours.forEach(t => (t.matches||[]).forEach(m => {
           const d = (m.date || m.datetime || '').slice(0,10);
@@ -74,7 +74,7 @@
 
     // Вынесено в общий скоуп: вспомогательные функции, используемые и рендером, и глобальным обработчиком событий
     function setTextAnimated(btn, newText) {
-      if (!btn || btn.textContent === newText) return;
+      if (!btn || btn.textContent === newText) {return;}
       btn.textContent = newText;
       btn.classList.add('updated');
       setTimeout(() => btn.classList.remove('updated'), 500);
@@ -113,7 +113,7 @@
           function updateOddsUIFromStore(store) {
             try {
               const tours = store?.data?.tours || store?.tours || [];
-              if (!Array.isArray(tours) || tours.length === 0) return;
+              if (!Array.isArray(tours) || tours.length === 0) {return;}
               const map = new Map();
               tours.forEach(t => (t.matches||[]).forEach(m => {
                 const matchDate = (m.date || m.datetime || '').slice(0,10);
@@ -124,7 +124,7 @@
               cards.forEach(card => {
                 const id = card.getAttribute('data-match-id');
                 const entry = map.get(id);
-                if (!entry) return;
+                if (!entry) {return;}
                 updateCardOddsUI(card, entry.odds || {}, entry.markets || {});
               });
             } catch(_) {}
@@ -135,7 +135,7 @@
           const sp = markets.specials;
           const updYN = (mk) => {
             const o = sp[mk]?.odds || null;
-            if (!o) return;
+            if (!o) {return;}
             const yesBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="yes"]`);
             const noBtn = card.querySelector(`.bet-btn[data-market="${mk}"][data-side="no"]`);
             if (yesBtn && o.yes != null) {
@@ -163,24 +163,24 @@
         const key = btn.getAttribute('data-ptab');
         pTabs.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        Object.values(pMap).forEach(el => { if(el) el.style.display='none'; });
+        Object.values(pMap).forEach(el => { if(el) {el.style.display='none';} });
         if (pMap[key]) {
           pMap[key].style.display = '';
-          if (key === 'place') loadTours();
-          if (key === 'mybets') { try { if (wrap.__oddsPollCancel) wrap.__oddsPollCancel(); } catch(_){} loadMyBets(); }
+          if (key === 'place') {loadTours();}
+          if (key === 'mybets') { try { if (wrap.__oddsPollCancel) {wrap.__oddsPollCancel();} } catch(_){} loadMyBets(); }
         }
       });
     });
 
   let _toursLoading = false;
   function loadTours() {
-      if (!toursEl || _toursLoading) return;
+      if (!toursEl || _toursLoading) {return;}
       _toursLoading = true;
 
       // --- НОВЫЙ КОД: Подписка на WebSocket (с очередью тем, если realtimeUpdater ещё не готов) ---
       const enqueueTopic = (topic) => {
         try {
-          if (!topic) return;
+          if (!topic) {return;}
           if (window.realtimeUpdater && typeof window.realtimeUpdater.subscribeTopic === 'function') {
             window.realtimeUpdater.subscribeTopic(topic);
           } else {
@@ -199,11 +199,11 @@
       const hasAnyOddsMarkets = (store) => {
         try {
           const tours = store?.data?.tours || store?.tours || [];
-          if (!Array.isArray(tours)) return false;
+          if (!Array.isArray(tours)) {return false;}
           let hasOdds = false, hasMarkets = false;
           tours.forEach(t => (t.matches||[]).forEach(m => {
-            if (m?.odds && Object.keys(m.odds).length) hasOdds = true;
-            if (m?.markets && (Array.isArray(m.markets.totals) && m.markets.totals.length || m.markets.specials)) hasMarkets = true;
+            if (m?.odds && Object.keys(m.odds).length) {hasOdds = true;}
+            if (m?.markets && (Array.isArray(m.markets.totals) && m.markets.totals.length || m.markets.specials)) {hasMarkets = true;}
           }));
           return hasOdds && hasMarkets;
         } catch(_) { return false; }
@@ -221,7 +221,7 @@
       };
       const mergeOddsMarkets = (oldStore, newStore) => {
         try {
-          if (!oldStore) return newStore;
+          if (!oldStore) {return newStore;}
           const oldMap = indexMatches(oldStore);
           const ns = JSON.parse(JSON.stringify(newStore));
           const tours = ns?.data?.tours || ns?.tours || [];
@@ -230,18 +230,18 @@
               const d = (m.date || m.datetime || '').slice(0,10);
               const key = `${m.home}_${m.away}_${d}`;
               const prev = oldMap.get(key);
-              if (!prev) return;
+              if (!prev) {return;}
               // Если в новом нет odds/markets — подмешиваем из старого
-              if (!m.odds && prev.odds) m.odds = prev.odds;
-              if (!m.markets && prev.markets) m.markets = prev.markets;
+              if (!m.odds && prev.odds) {m.odds = prev.odds;}
+              if (!m.markets && prev.markets) {m.markets = prev.markets;}
               // Если есть, но пусто — тоже дополним
-              if (m.odds && prev.odds && Object.keys(m.odds).length === 0) m.odds = prev.odds;
+              if (m.odds && prev.odds && Object.keys(m.odds).length === 0) {m.odds = prev.odds;}
               if (m.markets && prev.markets) {
                 const mt = m.markets.totals; const pm = prev.markets;
                 if (!(Array.isArray(mt) && mt.length) && Array.isArray(pm.totals) && pm.totals.length) {
                   m.markets.totals = pm.totals;
                 }
-                if (!m.markets.specials && pm.specials) m.markets.specials = pm.specials;
+                if (!m.markets.specials && pm.specials) {m.markets.specials = pm.specials;}
               }
             } catch(_) {}
           }));
@@ -321,12 +321,12 @@
                 btnOver.setAttribute('data-throttle','1200');
                 btnUnder.setAttribute('data-throttle','1200');
                 btnOver.addEventListener('click', ()=> {
-                  if (btnOver.disabled) return;
+                  if (btnOver.disabled) {return;}
                   btnOver.disabled = true;
                   Promise.resolve(openStakeModal(t.tour, m, 'over', 'totals', row.line)).finally(()=>{ btnOver.disabled = false; });
                 });
                 btnUnder.addEventListener('click', ()=> {
-                  if (btnUnder.disabled) return;
+                  if (btnUnder.disabled) {return;}
                   btnUnder.disabled = true;
                   Promise.resolve(openStakeModal(t.tour, m, 'under', 'totals', row.line)).finally(()=>{ btnUnder.disabled = false; });
                 });
@@ -339,7 +339,7 @@
             // Спецрынки: пенальти/красная (Да/Нет)
             const specials = (m.markets && m.markets.specials) || {};
             const mkYN = (title, odds, marketKey) => {
-              if (!odds) return null;
+              if (!odds) {return null;}
               const rowEl = document.createElement('div'); rowEl.className = 'totals-row';
               const lbl = document.createElement('div'); lbl.className = 'totals-line'; lbl.textContent = title;
               const yesBtn = document.createElement('button'); yesBtn.className='bet-btn'; yesBtn.textContent = `Да (${Number(odds.yes).toFixed(2)})`;
@@ -350,12 +350,12 @@
               yesBtn.setAttribute('data-throttle','1200');
               noBtn.setAttribute('data-throttle','1200');
               yesBtn.addEventListener('click', ()=> {
-                if (yesBtn.disabled) return;
+                if (yesBtn.disabled) {return;}
                 yesBtn.disabled = true;
                 Promise.resolve(openStakeModal(t.tour, m, 'yes', marketKey)).finally(()=>{ yesBtn.disabled = false; });
               });
               noBtn.addEventListener('click', ()=> {
-                if (noBtn.disabled) return;
+                if (noBtn.disabled) {return;}
                 noBtn.disabled = true;
                 Promise.resolve(openStakeModal(t.tour, m, 'no', marketKey)).finally(()=>{ noBtn.disabled = false; });
               });
@@ -365,13 +365,13 @@
             if (specials.penalty?.available) {
               const block = document.createElement('div'); block.className = 'totals-table';
               const row = mkYN('Пенальти', specials.penalty.odds, 'penalty');
-              if (row) block.appendChild(row);
+              if (row) {block.appendChild(row);}
               extra.appendChild(block);
             }
             if (specials.redcard?.available) {
               const block = document.createElement('div'); block.className = 'totals-table';
               const row = mkYN('Красная карточка', specials.redcard.odds, 'redcard');
-              if (row) block.appendChild(row);
+              if (row) {block.appendChild(row);}
               extra.appendChild(block);
             }
 
@@ -446,16 +446,16 @@
           const incoming = Array.isArray(data?.tours) ? data.tours : Array.isArray(data?.data?.tours) ? data.data.tours : [];
           const cachedTours = Array.isArray(cached?.data?.tours) ? cached.data.tours : [];
           // Мержим с кэшем для сохранения имеющихся коэффициентов
-          if (cached) store = mergeOddsMarkets(cached, store);
+          if (cached) {store = mergeOddsMarkets(cached, store);}
           const writeable = incoming.length > 0 && (hasAnyOddsMarkets(store) || !cached || cachedTours.length === 0);
-          if (writeable) writeCache(store);
+          if (writeable) {writeCache(store);}
           try { updateStoresFromTours(store); } catch(_) {}
           return store;
         });
 
       // Fallback-пуллинг коэффициентов при отключённых/неподключённых WebSocket: обновляем кнопки П1/Х/П2 по ETag каждые ~3.5-4.7с
       const startOddsPolling = (initialVersion) => {
-        try { if (wrap.__oddsPollCancel) wrap.__oddsPollCancel(); } catch(_){}
+        try { if (wrap.__oddsPollCancel) {wrap.__oddsPollCancel();} } catch(_){}
         // используем пуллинг, если:
         // 1) WS выключен ИЛИ
         // 2) нет активного подключения ИЛИ
@@ -468,14 +468,14 @@
           hasPredTopic = !!(window.realtimeUpdater && typeof window.realtimeUpdater.hasTopic === 'function' && window.realtimeUpdater.hasTopic('predictions_page'));
         } catch(_) {}
         const needPolling = !window.__WEBSOCKETS_ENABLED__ || !wsConnected || !topicsOn || !hasPredTopic;
-        if (!needPolling) return;
+        if (!needPolling) {return;}
         let cancelled = false, busy = false, timer = null;
         let lastVersion = initialVersion || (cached && cached.version) || null;
-        wrap.__oddsPollCancel = () => { cancelled = true; try { if (timer) clearTimeout(timer); } catch(_){} };
+        wrap.__oddsPollCancel = () => { cancelled = true; try { if (timer) {clearTimeout(timer);} } catch(_){} };
         // Применяем данные стора к UI
-  const schedule = () => { if (cancelled) return; const base=3500, jitter=1200; timer = setTimeout(loop, base + Math.floor(Math.random()*jitter)); };
+  const schedule = () => { if (cancelled) {return;} const base=3500, jitter=1200; timer = setTimeout(loop, base + Math.floor(Math.random()*jitter)); };
         const loop = async () => {
-          if (cancelled) return;
+          if (cancelled) {return;}
           const placeVisible = pMap.place && pMap.place.style.display !== 'none' && wrap.style.display !== 'none';
           if (document.hidden || !placeVisible) { schedule(); return; }
           if (busy) { schedule(); return; }
@@ -484,7 +484,7 @@
             const store = await fetchWithETag(lastVersion).catch(()=>null);
             if (store) {
               const changed = store.version && store.version !== lastVersion;
-              if (changed) lastVersion = store.version;
+              if (changed) {lastVersion = store.version;}
               // Даже при неизменном ETag обновим UI — покрывает кейс свежего кэша без коэффициентов
               updateOddsUIFromStore(store);
               // И стор коэффициентов/предсказаний
@@ -512,7 +512,7 @@
           // Дополнительное обновление коэффициентов через небольшую задержку
           setTimeout(() => updateOddsUIFromStore(store), 200);
         }).catch(err => {
-          if (!cached || !__isFresh__) toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
+          if (!cached || !__isFresh__) {toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';}
         }).finally(()=>{ _toursLoading = false; });
       }
       if (cached && !(_toursLoading)) { /* уже отрисовали кэш; загрузка в фоне */ }
@@ -546,7 +546,7 @@
         const k = odds[key] != null ? ` (${Number(odds[key]).toFixed(2)})` : '';
         b.textContent = label + k; b.disabled = !!locked;
         b.addEventListener('click', ()=> {
-          if (b.disabled) return;
+          if (b.disabled) {return;}
           b.disabled = true;
           Promise.resolve(openStakeModal(tour, m, key)).finally(()=>{ b.disabled = false; });
         });
@@ -558,24 +558,24 @@
 
     function openStakeModal(tour, m, selection, market='1x2', line=null) {
       let selText = selection;
-      if(market==='1x2') selText = {'home':'П1','draw':'Х','away':'П2'}[selection]||selection;
-      else if(market==='totals') selText = (selection.startsWith('over')||selection.startsWith('under')) ? (selection.startsWith('over')?`Больше ${selection.split('_')[1]}`:`Меньше ${selection.split('_')[1]}`) : selText;
-      else if(market==='penalty' || market==='redcard') selText = {'yes':'Да','no':'Нет'}[selection]||selection;
+      if(market==='1x2') {selText = {'home':'П1','draw':'Х','away':'П2'}[selection]||selection;}
+      else if(market==='totals') {selText = (selection.startsWith('over')||selection.startsWith('under')) ? (selection.startsWith('over')?`Больше ${selection.split('_')[1]}`:`Меньше ${selection.split('_')[1]}`) : selText;}
+      else if(market==='penalty' || market==='redcard') {selText = {'yes':'Да','no':'Нет'}[selection]||selection;}
       // Покажем кастомную модалку вместо prompt
       return showStakeModal(`Ставка на ${m.home} vs ${m.away}`, `Исход: ${selText}. Введите сумму:`, '100')
         .then(stake => {
-          if (!stake) return Promise.resolve();
+          if (!stake) {return Promise.resolve();}
           const amt = parseInt(String(stake).replace(/[^0-9]/g,''), 10) || 0;
-          if (amt <= 0) return Promise.resolve();
+          if (amt <= 0) {return Promise.resolve();}
           if (!tg || !tg.initDataUnsafe?.user) { try { alert('Нужен Telegram WebApp'); } catch(_) {} return Promise.resolve(); }
           const fd = new FormData();
           fd.append('initData', tg.initData || '');
-          if (tour != null) fd.append('tour', String(tour));
+          if (tour != null) {fd.append('tour', String(tour));}
           fd.append('home', m.home || '');
           fd.append('away', m.away || '');
           fd.append('selection', selection);
-          if (market) fd.append('market', market);
-          if (market === 'totals' && line != null) fd.append('line', String(line));
+          if (market) {fd.append('market', market);}
+          if (market === 'totals' && line != null) {fd.append('line', String(line));}
           fd.append('stake', String(amt));
           return fetch('/api/betting/place', { method: 'POST', body: fd })
             .then(r => r.json())
@@ -584,10 +584,10 @@
               try { tg?.showAlert?.(`Ставка принята! Баланс: ${resp.balance}`); } catch(_) {}
               // Обновим профильные кредиты на экране
               const creditsEl = document.getElementById('credits');
-              if (creditsEl) creditsEl.textContent = (resp.balance||0).toLocaleString();
+              if (creditsEl) {creditsEl.textContent = (resp.balance||0).toLocaleString();}
               // обновим список ставок если открыт
               const myPane = document.getElementById('pred-pane-mybets');
-              if (myPane && myPane.style.display !== 'none') loadMyBets();
+              if (myPane && myPane.style.display !== 'none') {loadMyBets();}
             })
             .catch(err => {  try { tg?.showAlert?.('Ошибка размещения ставки'); } catch(_) {} });
         });
@@ -641,7 +641,7 @@
     }
 
     function loadMyBets() {
-      if (!myBetsEl) return;
+      if (!myBetsEl) {return;}
       if (!tg || !tg.initDataUnsafe?.user) { myBetsEl.textContent = 'Недоступно вне Telegram'; return; }
       
       // Используем PredictionsStore вместо прямого localStorage
@@ -667,9 +667,9 @@
           
           // Локализация статусов
           let statusText = b.status;
-          if (b.status === 'open') statusText = 'Открыта';
-          else if (b.status === 'won') statusText = 'Выиграна';
-          else if (b.status === 'lost') statusText = 'Проиграна';
+          if (b.status === 'open') {statusText = 'Открыта';}
+          else if (b.status === 'won') {statusText = 'Выиграна';}
+          else if (b.status === 'lost') {statusText = 'Проиграна';}
           
           // Добавляем сумму выигрыша для выигранных ставок
           if (b.status === 'won' && b.winnings) {
@@ -704,7 +704,7 @@
           render(data); 
         })
         .catch(err => {  
-          if (!cachedBets) myBetsEl.innerHTML = '<div class="schedule-error">Ошибка загрузки</div>'; 
+          if (!cachedBets) {myBetsEl.innerHTML = '<div class="schedule-error">Ошибка загрузки</div>';} 
         });
     }
 
@@ -752,11 +752,11 @@
     // --- НОВЫЙ КОД: Обработчик обновлений коэффициентов от WebSocket ---
     document.addEventListener('bettingOddsUpdate', (e) => {
       const { detail } = e;
-      if (!detail) return;
+      if (!detail) {return;}
       const homeTeam = detail.homeTeam || detail.home;
       const awayTeam = detail.awayTeam || detail.away;
       const date = detail.date || '';
-      if (!homeTeam || !awayTeam) return;
+      if (!homeTeam || !awayTeam) {return;}
 
       const matchId = `${homeTeam}_${awayTeam}_${date}`;
       let card = document.querySelector(`.match-card[data-match-id="${matchId}"]`);
@@ -764,7 +764,7 @@
       if (!card) {
         card = document.querySelector(`.match-card[data-home="${homeTeam}"][data-away="${awayTeam}"]`);
       }
-      if (!card) return;
+      if (!card) {return;}
 
       const fields = detail.odds ? detail : { odds: { ...detail } };
       const odds = fields.odds || {};

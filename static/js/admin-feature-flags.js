@@ -88,7 +88,7 @@
   // Кнопка управления feature flags в админ-панели
   function createFeatureFlagsControls() {
     const adminSections = document.querySelectorAll('.admin-section');
-    if (adminSections.length === 0) return;
+    if (adminSections.length === 0) {return;}
 
     const flagsSection = document.createElement('div');
     flagsSection.className = 'admin-section';
@@ -180,7 +180,7 @@
 
   // Глобальный перехват fetch запросов для опасных операций
   function interceptDangerousFetches() {
-    if (window.__ADMIN_FETCH_INTERCEPTED__) return;
+    if (window.__ADMIN_FETCH_INTERCEPTED__) {return;}
     window.__ADMIN_FETCH_INTERCEPTED__ = true;
 
     const originalFetch = window.fetch;
@@ -269,7 +269,7 @@
   function initAdminFeatureFlags() {
     // Проверяем, что мы в админ-панели
     const adminTab = document.getElementById('tab-admin');
-    if (!adminTab) return;
+    if (!adminTab) {return;}
 
     createFeatureFlagsControls();
     protectExistingOperations();

@@ -1,15 +1,15 @@
 // profile-achievements.js
 // Загрузка и рендер достижений
 (function(){
-  if (window.ProfileAchievements) return;
+  if (window.ProfileAchievements) {return;}
   const tg = window.Telegram?.WebApp || null;
   const badgesContainer = document.getElementById('badges');
   const achievementPlaceholder = document.getElementById('achievement-placeholder');
   let _loadedOnce = false;
 
   function renderAchievements(achievements){
-    if (achievementPlaceholder) achievementPlaceholder.remove();
-    if (!badgesContainer) return;
+    if (achievementPlaceholder) {achievementPlaceholder.remove();}
+    if (!badgesContainer) {return;}
     badgesContainer.innerHTML='';
     if(!achievements || !achievements.length){
       const empty=document.createElement('div'); empty.style.cssText='padding:12px; color:var(--gray); font-size:12px;'; empty.textContent='Пока нет достижений'; badgesContainer.appendChild(empty); return; }
@@ -17,13 +17,13 @@
     const stateFromTier = (a) => {
       // Показываем визуальный уровень по best_tier (перманентно достигнутый), если он есть
       const t = (typeof a.best_tier === 'number' && a.best_tier > 0) ? a.best_tier : ((typeof a.tier === 'number') ? a.tier : null);
-      if (a.unlocked === false || t === 0) return 'locked';
-      if (t === 1) return 'bronze';
-      if (t === 2) return 'silver';
-      if (t === 3) return 'gold';
-      if (a.icon === 'bronze') return 'bronze';
-      if (a.icon === 'silver') return 'silver';
-      if (a.icon === 'gold') return 'gold';
+      if (a.unlocked === false || t === 0) {return 'locked';}
+      if (t === 1) {return 'bronze';}
+      if (t === 2) {return 'silver';}
+      if (t === 3) {return 'gold';}
+      if (a.icon === 'bronze') {return 'bronze';}
+      if (a.icon === 'silver') {return 'silver';}
+      if (a.icon === 'gold') {return 'gold';}
       return a.unlocked ? 'bronze' : 'locked';
     };
     const setAchievementIcon = (imgEl, a) => {
@@ -31,13 +31,13 @@
       const base = '/static/img/achievements/';
       const state = stateFromTier(a);
       const candidates = [];
-      if (key) candidates.push(`${base}${slugify(key)}-${state}.png`);
-      if (key && a.icon) candidates.push(`${base}${slugify(key)}-${slugify(a.icon)}.png`);
+      if (key) {candidates.push(`${base}${slugify(key)}-${state}.png`);}
+      if (key && a.icon) {candidates.push(`${base}${slugify(key)}-${slugify(a.icon)}.png`);}
       candidates.push(`${base}${state}.png`);
       candidates.push(`${base}placeholder.png`);
       const svgFallbacks = candidates.map(p => p.replace(/\.png$/i, '.svg'));
-      svgFallbacks.forEach(s => { if(!candidates.includes(s)) candidates.push(s); });
-      let i=0; const next=()=>{ if(i>=candidates.length) return; imgEl.onerror=()=>{ i++; next(); }; imgEl.src=candidates[i]; }; next();
+      svgFallbacks.forEach(s => { if(!candidates.includes(s)) {candidates.push(s);} });
+      let i=0; const next=()=>{ if(i>=candidates.length) {return;} imgEl.onerror=()=>{ i++; next(); }; imgEl.src=candidates[i]; }; next();
     };
   const descFor = (a) => {
       try {
@@ -77,7 +77,7 @@
     };
     achievements.forEach(a => {
       const card = document.createElement('div'); card.className='achievement-card';
-      if(!a.unlocked) card.classList.add('locked');
+      if(!a.unlocked) {card.classList.add('locked');}
       const img=document.createElement('img'); img.alt=a.name||''; setAchievementIcon(img,a);
       const name=document.createElement('div'); name.className='badge-name'; name.textContent=a.name||'';
       const req=document.createElement('div'); req.className='badge-requirements'; 
@@ -127,7 +127,7 @@
             const t = Number(targets[i]);
             if (currentValue < t) { nextTarget = t; break; }
           }
-          if (nextTarget === undefined) nextTarget = null;
+          if (nextTarget === undefined) {nextTarget = null;}
         }
         // Лестница целей для подробностей (перенесено под кнопку "Подробнее")
         const ladderText = `Цели: ${targets.join('/')}`;
@@ -201,7 +201,7 @@
     if (hasFresh && !_loadedOnce){ _loadedOnce=true; renderAchievements(cached.data); }
     const etag = cached?.etag || null;
     const initData = tg?.initData || '';
-    const q = new URLSearchParams(); if (initData) q.set('initData', initData);
+    const q = new URLSearchParams(); if (initData) {q.set('initData', initData);}
     const url = '/api/achievements' + (q.toString() ? ('?'+q.toString()) : '');
     return fetch(url, { headers: etag ? { 'If-None-Match': etag } : {} })
       .then(r=>r.status===304 && cached ? { achievements: cached.data, version: etag } : r.json())
@@ -215,10 +215,10 @@
       .catch(err=>{ console.error('achievements load error', err); if(!_loadedOnce){ _loadedOnce=true; renderAchievements(cached?.data||[]); } return cached?.data||[]; });
   }
   // Автозагрузка при готовности профиля и при клике на вкладку "Достижения"
-  window.addEventListener('profile:user-loaded', ()=>{ try { const active = document.querySelector('.subtab-item.active[data-psub="badges"]'); if(active) fetchAchievements(); } catch(_) {} });
-  document.addEventListener('click', e=>{ const tab = e.target.closest('.subtab-item[data-psub="badges"]'); if(tab) setTimeout(()=>fetchAchievements(), 30); });
+  window.addEventListener('profile:user-loaded', ()=>{ try { const active = document.querySelector('.subtab-item.active[data-psub="badges"]'); if(active) {fetchAchievements();} } catch(_) {} });
+  document.addEventListener('click', e=>{ const tab = e.target.closest('.subtab-item[data-psub="badges"]'); if(tab) {setTimeout(()=>fetchAchievements(), 30);} });
   // Если вкладка активна сразу (по умолчанию)
-  document.addEventListener('DOMContentLoaded', ()=>{ const active = document.querySelector('.subtab-item.active[data-psub="badges"]'); if(active) fetchAchievements(); });
+  document.addEventListener('DOMContentLoaded', ()=>{ const active = document.querySelector('.subtab-item.active[data-psub="badges"]'); if(active) {fetchAchievements();} });
 
   window.ProfileAchievements = { fetchAchievements, renderAchievements, forceReload: ()=>{ _loadedOnce=false; return fetchAchievements(); } };
 })();

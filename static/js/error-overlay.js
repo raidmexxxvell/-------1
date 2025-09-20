@@ -1,7 +1,7 @@
 // error-overlay.js
 // Простая панель отладки: перехват глобальных ошибок и показ поверх приложения.
 (function(){
-  if (window.__ERROR_OVERLAY__) return;
+  if (window.__ERROR_OVERLAY__) {return;}
   const maxEntries = 100; // немного увеличим буфер
   let entries = [];
   let captureConsole = true;
@@ -9,7 +9,7 @@
   let warnCount = 0;
   let errorCount = 0;
 
-  function el(tag, css){ const n=document.createElement(tag); if(css) n.style.cssText=css; return n; }
+  function el(tag, css){ const n=document.createElement(tag); if(css) {n.style.cssText=css;} return n; }
 
   function ensureEl(){
     let host = document.getElementById('error-overlay');
@@ -53,8 +53,8 @@
   function btn(text,bg,border,fn){ const b=el('button',`background:${bg};border:1px solid ${border};color:#ddd;border-radius:4px;cursor:pointer;padding:2px 6px;font-size:12px;`); b.textContent=text; b.onclick=fn; return b; }
 
   function updateCounters(){
-    const w=document.getElementById('eo-warn'); if(w) w.textContent='W:'+warnCount;
-    const e=document.getElementById('eo-err'); if(e) e.textContent='E:'+errorCount;
+    const w=document.getElementById('eo-warn'); if(w) {w.textContent='W:'+warnCount;}
+    const e=document.getElementById('eo-err'); if(e) {e.textContent='E:'+errorCount;}
   }
 
   function renderEntry(entry){
@@ -75,7 +75,7 @@
 
   function applyFilter(){
     const q = (document.getElementById('eo-filter')?.value||'').toLowerCase();
-    const list=document.getElementById('error-overlay-list'); if(!list) return;
+    const list=document.getElementById('error-overlay-list'); if(!list) {return;}
     list.innerHTML='';
     entries.filter(e=>!q || (e.msg&&e.msg.toLowerCase().includes(q)) || (e.stack&&e.stack.toLowerCase().includes(q))).forEach(e=>{
       list.appendChild(renderEntry(e));
@@ -84,11 +84,11 @@
 
   function addEntry(entry){
     const host=ensureEl(); const list=host.querySelector('#error-overlay-list');
-    entries.push(entry); if (entries.length>maxEntries) entries.shift();
-    if(entry.level==='warn') warnCount++; else if(entry.level==='error') errorCount++;
+    entries.push(entry); if (entries.length>maxEntries) {entries.shift();}
+    if(entry.level==='warn') {warnCount++;} else if(entry.level==='error') {errorCount++;}
     updateCounters();
     list.appendChild(renderEntry(entry));
-    if (autoOpen) host.style.display='block';
+    if (autoOpen) {host.style.display='block';}
   }
 
   window.addEventListener('error', (e)=>{
@@ -104,8 +104,8 @@
   try {
     const origWarn = console.warn.bind(console);
     const origError = console.error.bind(console);
-    console.warn = function(){ origWarn.apply(console, arguments); if(!captureConsole) return; try { const m = Array.from(arguments).map(String).join(' '); addEntry({ level:'warn', time:new Date().toISOString().split('T')[1].replace('Z',''), msg:m, stack:'', raw:m }); } catch(_){} };
-    console.error = function(){ origError.apply(console, arguments); if(!captureConsole) return; try { const m = Array.from(arguments).map(String).join(' '); addEntry({ level:'error', time:new Date().toISOString().split('T')[1].replace('Z',''), msg:m, stack:'', raw:m }); } catch(_){} };
+    console.warn = function(){ origWarn.apply(console, arguments); if(!captureConsole) {return;} try { const m = Array.from(arguments).map(String).join(' '); addEntry({ level:'warn', time:new Date().toISOString().split('T')[1].replace('Z',''), msg:m, stack:'', raw:m }); } catch(_){} };
+    console.error = function(){ origError.apply(console, arguments); if(!captureConsole) {return;} try { const m = Array.from(arguments).map(String).join(' '); addEntry({ level:'error', time:new Date().toISOString().split('T')[1].replace('Z',''), msg:m, stack:'', raw:m }); } catch(_){} };
   } catch(_){}
 
   console.log('[error-overlay] initialized');

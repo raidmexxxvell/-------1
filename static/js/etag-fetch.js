@@ -4,7 +4,7 @@
 // fetchEtag('/api/achievements', { cacheKey:'achievements:v1', swrMs:30000, extract: j=>j.achievements||[] })
 //   .then(({data, etag, fromCache, updated}) => { /* ... */ });
 (function(){
-  if (window.fetchEtag) return; // уже определено
+  if (window.fetchEtag) {return;} // уже определено
 
   function safeParse(jsonText){ try { return JSON.parse(jsonText); } catch(_) { return null; } }
   function normalizeKey(url){
@@ -39,14 +39,14 @@
       onSuccess = null,
       onStale = null,
     } = options;
-    if(!cacheKey) throw new Error('fetchEtag: cacheKey required');
+    if(!cacheKey) {throw new Error('fetchEtag: cacheKey required');}
 
     // Собираем финальный URL (безопасно добавляем params)
     let finalUrl = url;
     if (params && typeof params === 'object'){
       try {
         const u = new URL(url, window.location.origin);
-        Object.entries(params).forEach(([k,v])=>{ if(v!==undefined && v!==null) u.searchParams.set(k, v); });
+        Object.entries(params).forEach(([k,v])=>{ if(v!==undefined && v!==null) {u.searchParams.set(k, v);} });
         finalUrl = u.pathname + u.search;
       } catch(_) { /* ignore */ }
     }
@@ -73,7 +73,7 @@
     // Быстрый возврат свежих данных (SWR) — сеть не идём
     if (isFresh && !forceRevalidate){
       const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
-      try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
+      try { if (typeof onSuccess === 'function') {onSuccess(result);} } catch(_) {}
       emit('etag:success', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
       emit('etag:cache_hit', { cacheKey: storeKey, url: normalizeKey(finalUrl), age: now - (cached.ts||0) });
       return Promise.resolve(result);
@@ -81,7 +81,7 @@
 
     // Сформировать заголовки (conditional запрос если есть ETag)
     const reqHeaders = Object.assign({}, headers);
-    if (cached && cached.etag) reqHeaders['If-None-Match'] = cached.etag;
+    if (cached && cached.etag) {reqHeaders['If-None-Match'] = cached.etag;}
 
     return fetch(finalUrl, { method, headers: reqHeaders })
       .then(async res => {
@@ -89,7 +89,7 @@
         if (res.status === 304 && cached){
           // Ничего не изменилось — возвращаем кэш и время обновления из заголовка
           const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw, headerUpdatedAt };
-          try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
+          try { if (typeof onSuccess === 'function') {onSuccess(result);} } catch(_) {}
           emit('etag:success', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
           emit('etag:not_modified', { cacheKey: storeKey, url: normalizeKey(finalUrl), etag: cached.etag });
           return result;
@@ -98,7 +98,7 @@
         try { json = await res.json(); } catch(e){
           if (cached){
             const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw, headerUpdatedAt };
-            try { if (typeof onStale === 'function') onStale(result); } catch(_) {}
+            try { if (typeof onStale === 'function') {onStale(result);} } catch(_) {}
             return result;
           }
           throw e;
@@ -108,7 +108,7 @@
         try { data = extract(json); } catch(e){ data = json; }
         try { localStorage.setItem(storeKey, JSON.stringify({ etag, ts: Date.now(), data, raw: json })); } catch(_) {}
         const result = { data, etag, fromCache: false, updated: true, raw: json, headerUpdatedAt };
-        try { if (typeof onSuccess === 'function') onSuccess(result); } catch(_) {}
+        try { if (typeof onSuccess === 'function') {onSuccess(result);} } catch(_) {}
         emit('etag:success', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
         emit('etag:cache_miss', { cacheKey: storeKey, url: normalizeKey(finalUrl), etag });
         return result;
@@ -118,7 +118,7 @@
         emit('etag:error', { cacheKey: storeKey, url: normalizeKey(finalUrl), error: err.message || 'Network error' });
         if (cached){
           const result = { data: cached.data, etag: cached.etag, fromCache: true, updated: false, raw: cached.raw };
-          try { if (typeof onStale === 'function') onStale(result); } catch(_) {}
+          try { if (typeof onStale === 'function') {onStale(result);} } catch(_) {}
           emit('etag:stale', { cacheKey: storeKey, url: normalizeKey(finalUrl), ...result });
           return result;
         }
@@ -129,7 +129,7 @@
   // Global cache management utilities
   window.fetchEtagUtils = {
     clearCache: function(pattern) {
-      if (!localStorage) return 0;
+      if (!localStorage) {return 0;}
       let count = 0;
       const keys = Object.keys(localStorage);
       for (const key of keys) {
@@ -142,7 +142,7 @@
     },
     
     getCacheStats: function() {
-      if (!localStorage) return { total: 0, etag: 0, size: 0 };
+      if (!localStorage) {return { total: 0, etag: 0, size: 0 };}
       const keys = Object.keys(localStorage);
       let etagCount = 0, totalSize = 0;
       
@@ -152,7 +152,7 @@
           if (value) {
             totalSize += value.length;
             // Heuristic: ETag cache entries usually have 'etag' property
-            if (value.includes('"etag"') || key.includes(':')) etagCount++;
+            if (value.includes('"etag"') || key.includes(':')) {etagCount++;}
           }
         } catch(_) {}
       }

@@ -1,13 +1,13 @@
 // Finish match admin button + full refresh logic
 (function(){
   function setup(match, refs){
-    const mdPane=refs.mdPane; if(!mdPane) return {cleanup(){}};
-    const topbar=mdPane.querySelector('.match-details-topbar'); if(!topbar) return {cleanup(){}};
+    const mdPane=refs.mdPane; if(!mdPane) {return {cleanup(){}};}
+    const topbar=mdPane.querySelector('.match-details-topbar'); if(!topbar) {return {cleanup(){}};}
     const adminId=document.body.getAttribute('data-admin');
     const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):'';
     const isAdmin=!!(adminId && currentId && String(adminId)===currentId);
-    if(!isAdmin) return {cleanup(){}};
-    const prev=topbar.querySelector('#md-finish-btn'); if(prev) prev.remove();
+    if(!isAdmin) {return {cleanup(){}};}
+    const prev=topbar.querySelector('#md-finish-btn'); if(prev) {prev.remove();}
     if(mdPane.__finishBtnTimer){ try { clearInterval(mdPane.__finishBtnTimer); } catch(_){} mdPane.__finishBtnTimer=null; }
     const btn=document.createElement('button'); btn.id='md-finish-btn'; btn.className='details-btn'; btn.textContent='Завершить матч'; btn.style.marginLeft='auto';
     const finStore=(window.__FINISHED_MATCHES=window.__FINISHED_MATCHES||{});
@@ -56,7 +56,7 @@
       isLive = !!badge;
     } catch(_) {}
     // Если нет бейджа, fallback к isLiveNow(match)
-    if(!isLive) isLive = isLiveNow(match);
+    if(!isLive) {isLive = isLiveNow(match);}
     if(!isLive) {
       const proceed = await new Promise(resolve => {
         let ov=document.querySelector('.modal-overlay');
@@ -69,15 +69,15 @@
           box.querySelector('#mf-ok').onclick=()=>{ ov.remove(); resolve(true); };
         } else { resolve(false); }
       });
-      if(!proceed) return;
+      if(!proceed) {return;}
     }
-    const ok=await confirmFinish(); if(!ok) return;
+    const ok=await confirmFinish(); if(!ok) {return;}
     const tg=window.Telegram?.WebApp||null; btn.disabled=true; const old=btn.textContent; btn.textContent='Завершаю...';
     try {
       const fd=new FormData(); fd.append('initData', tg?.initData||''); fd.append('home', match.home||''); fd.append('away', match.away||'');
       const r=await fetch('/api/match/settle',{ method:'POST', body:fd });
       const d=await r.json().catch(()=>({}));
-  if(!r.ok || d?.error) throw new Error(d?.error||'Ошибка завершения');
+  if(!r.ok || d?.error) {throw new Error(d?.error||'Ошибка завершения');}
   if(d.status==='finished'){ window.showAlert?.('Матч завершён','success'); } else { window.showAlert?.('Расчет выполнен','success'); }
       try { if(d && d.total_bets!==undefined){ const msg=`Ставки: всего ${d.total_bets}, открытых до расчёта ${d.open_before}, изменено ${d.changed||0}, выиграло ${d.won||0}, проиграло ${d.lost||0}`; window.showAlert?.(msg,'info'); } } catch(_){}
       try { const dateStr=(match?.datetime||match?.date||'').toString().slice(0,10); const key=`stream:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${dateStr}`; localStorage.removeItem(key); const sp=document.getElementById('md-pane-stream'); if(sp){ sp.style.display='none'; sp.innerHTML='<div class="stream-wrap"><div class="stream-skeleton">Трансляция недоступна</div></div>'; } } catch(_){}
@@ -89,7 +89,7 @@
       } catch(_){ }
       btn.style.display='none';
       try { finStore[mKey]=true; } catch(_){}
-      const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) statusEl.textContent='Матч завершен';
+      const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) {statusEl.textContent='Матч завершен';}
       // Кэш результатов обновим асинхронно (не блокируем UI)
       fullRefresh();
     } catch(e){
@@ -104,15 +104,15 @@
         if(window.realtimeUpdater && window.realtimeUpdater.socket){
           window.realtimeUpdater.socket.on('match_finished', (msg)=>{
             try {
-              if(!msg || msg.home!==match.home || msg.away!==match.away) return;
+              if(!msg || msg.home!==match.home || msg.away!==match.away) {return;}
               finStore[mKey]=true; btn.style.display='none';
               mdPane.querySelectorAll('.live-badge').forEach(b=>b.remove());
-              const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) statusEl.textContent='Матч завершен';
+              const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) {statusEl.textContent='Матч завершен';}
             } catch(_){}
           });
         } else {
           // fallback: попробуем позже
-          setTimeout(()=>{ try { if(window.realtimeUpdater && window.realtimeUpdater.socket){ window.realtimeUpdater.socket.on('match_finished',(msg)=>{ if(!msg || msg.home!==match.home || msg.away!==match.away) return; finStore[mKey]=true; btn.style.display='none'; mdPane.querySelectorAll('.live-badge').forEach(b=>b.remove()); const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) statusEl.textContent='Матч завершен'; }); } } catch(_){} }, 2000);
+          setTimeout(()=>{ try { if(window.realtimeUpdater && window.realtimeUpdater.socket){ window.realtimeUpdater.socket.on('match_finished',(msg)=>{ if(!msg || msg.home!==match.home || msg.away!==match.away) {return;} finStore[mKey]=true; btn.style.display='none'; mdPane.querySelectorAll('.live-badge').forEach(b=>b.remove()); const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) {statusEl.textContent='Матч завершен';} }); } } catch(_){} }, 2000);
         }
       }
     } catch(_){}

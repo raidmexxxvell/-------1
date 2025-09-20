@@ -24,14 +24,14 @@
     // Чтобы не блокировать триггер готовности приложения, помечаем достижения как уже загруженные.
     const elements = window.__PROFILE_ELEMENTS__ || {};
     const tg = window.Telegram?.WebApp || null;
-    let _achLoaded = true; // раньше выставлялось после рендера достижений
+    const _achLoaded = true; // раньше выставлялось после рендера достижений
 
     // handleCheckin вынесен в profile-checkin.js
 
     // Name change feature intentionally removed: name is taken from Telegram and cannot be changed in-app.
 
-    function showError(msg) { if (elements.checkinStatus) { elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color = 'var(--danger)'; setTimeout(()=>{ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; },3000);} else console.warn(msg); }
-    function showSuccessMessage(msg) { if (elements.checkinStatus) { elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color = 'var(--success)'; setTimeout(()=>{ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; },2000);} else console.log(msg); }
+    function showError(msg) { if (elements.checkinStatus) { elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color = 'var(--danger)'; setTimeout(()=>{ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; },3000);} else {console.warn(msg);} }
+    function showSuccessMessage(msg) { if (elements.checkinStatus) { elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color = 'var(--success)'; setTimeout(()=>{ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; },2000);} else {console.log(msg);} }
     
     // showRewardAnimation и updateUserStatsWithAnimation вынесены в profile-checkin.js
 
@@ -41,7 +41,7 @@
     if (elements.editName) { elements.editName.style.display = 'none'; }
         // помечаем элементы для троттлинга кликов
     // троттлинг чек-ина перенесён в profile-checkin.js
-        if (elements.editName) elements.editName.setAttribute('data-throttle', '1500');
+        if (elements.editName) {elements.editName.setAttribute('data-throttle', '1500');}
     // переключение вкладок нижнего меню
         const navItems = document.querySelectorAll('.nav-item');
     let _lastUfoTap = 0;
@@ -52,7 +52,7 @@
         navItems.forEach(item => {
             const tab = item.getAttribute('data-tab');
             // На НЛО отключаем троттлинг, иначе двойной тап не сработает
-            if (tab === 'ufo') item.setAttribute('data-throttle', '0'); else item.setAttribute('data-throttle', '600');
+            if (tab === 'ufo') {item.setAttribute('data-throttle', '0');} else {item.setAttribute('data-throttle', '600');}
             item.addEventListener('click', () => {
                 try { console.log('[nav-click]', tab); } catch(_) {}
                 const tab = item.getAttribute('data-tab');
@@ -62,20 +62,20 @@
                     const sched = document.getElementById('ufo-schedule');
                     if (mdPane && mdPane.style.display !== 'none') {
                         // Сбросить состояние трансляции при покидании экрана матча
-                        try { if (window.Streams && typeof window.Streams.resetOnLeave === 'function') window.Streams.resetOnLeave(mdPane); } catch(_) {}
+                        try { if (window.Streams && typeof window.Streams.resetOnLeave === 'function') {window.Streams.resetOnLeave(mdPane);} } catch(_) {}
                         mdPane.style.display = 'none';
-                        if (sched) sched.style.display = '';
-                        const st = document.getElementById('ufo-subtabs'); if (st) st.style.display = '';
+                        if (sched) {sched.style.display = '';}
+                        const st = document.getElementById('ufo-subtabs'); if (st) {st.style.display = '';}
                     }
                     // При смене вкладки скрываем экран команды, если он был открыт
                     const teamPane = document.getElementById('ufo-team');
                     if (teamPane && teamPane.style.display !== 'none') {
                         teamPane.style.display = 'none';
-                        const st = document.getElementById('ufo-subtabs'); if (st) st.style.display = '';
+                        const st = document.getElementById('ufo-subtabs'); if (st) {st.style.display = '';}
                     }
                 } catch(_) {}
                 // если уходим с профиля — вернуть верхнюю панель и общий отступ сверху
-                try { const cont = document.querySelector('.container'); if (cont) cont.classList.remove('profile-hide-top'); const ph = document.querySelector('.profile-header'); if (ph) ph.classList.remove('profile-centered'); document.body.classList.remove('profile-mode'); } catch(_) {}
+                try { const cont = document.querySelector('.container'); if (cont) {cont.classList.remove('profile-hide-top');} const ph = document.querySelector('.profile-header'); if (ph) {ph.classList.remove('profile-centered');} document.body.classList.remove('profile-mode'); } catch(_) {}
                 // Обработка двойного тапа для НЛО
         if (tab === 'ufo') {
                     const now = Date.now();
@@ -97,15 +97,15 @@
         const lead = document.getElementById('tab-leaderboard');
     const shop = document.getElementById('tab-shop');
     const admin = document.getElementById('tab-admin');
-    [home, prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
-    if (tab === 'home' && home) home.style.display = '';
+    [home, prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) {el.style.display = 'none';} });
+    if (tab === 'home' && home) {home.style.display = '';}
         if (tab === 'profile' && prof) {
                     prof.style.display = '';
                     try {
                         // спрячем общую шапку лиги и центрируем профиль для мобильного вида
                         const cont = document.querySelector('.container');
-                        if (cont) cont.classList.add('profile-hide-top');
-                        const ph = document.querySelector('.profile-header'); if (ph) ph.classList.add('profile-centered');
+                        if (cont) {cont.classList.add('profile-hide-top');}
+                        const ph = document.querySelector('.profile-header'); if (ph) {ph.classList.add('profile-centered');}
             // убираем верхний внутренний отступ у body для бесшовного фона
             document.body.classList.add('profile-mode');
                     } catch(_) {}
@@ -115,10 +115,10 @@
         // Показ контента по активной лиге (без автопоказа оверлея)
         try {
             const act = getActiveLeague();
-            if (act === 'BLB') selectBLBLeague(false); else selectUFOLeague(true, false);
+            if (act === 'BLB') {selectBLBLeague(false);} else {selectUFOLeague(true, false);}
             // При входе в НЛО — всегда показываем «Таблица» и скрываем детали матча
             const sub = document.querySelector('#ufo-subtabs .subtab-item[data-subtab="table"]');
-            if (sub) sub.click();
+            if (sub) {sub.click();}
         } catch(_) {}
     }
     if (tab === 'predictions' && preds) {
@@ -126,8 +126,8 @@
         // Если выбрана БЛБ, показываем пусто; иначе — стандартная логика
         if (window.__ACTIVE_LEAGUE__ === 'BLB') {
             const host = document.getElementById('pred-tours');
-            if (host) host.textContent = 'Скоро...';
-            const myb = document.getElementById('my-bets'); if (myb) myb.textContent = 'Скоро...';
+            if (host) {host.textContent = 'Скоро...';}
+            const myb = document.getElementById('my-bets'); if (myb) {myb.textContent = 'Скоро...';}
         } else {
             try { window.loadBetTours?.(); } catch(_) {}
         }
@@ -175,7 +175,7 @@
         try {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             const homeItem = document.querySelector('.nav-item[data-tab="home"]');
-            if (homeItem) homeItem.classList.add('active');
+            if (homeItem) {homeItem.classList.add('active');}
             const home = document.getElementById('tab-home');
             const prof = document.getElementById('tab-profile');
             const ufo = document.getElementById('tab-ufo');
@@ -183,8 +183,8 @@
             const lead = document.getElementById('tab-leaderboard');
             const shop = document.getElementById('tab-shop');
             const admin = document.getElementById('tab-admin');
-            [home, prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
-            if (home) home.style.display = '';
+            [home, prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) {el.style.display = 'none';} });
+            if (home) {home.style.display = '';}
         } catch(_) {}
 
     // Инициализация рекламной карусели на Главной
@@ -206,15 +206,15 @@
                 try {
                     const mdPane = document.getElementById('ufo-match-details');
                     const sched = document.getElementById('ufo-schedule');
-                    if (mdPane && mdPane.style.display !== 'none') { mdPane.style.display = 'none'; if (sched) sched.style.display=''; const st = document.getElementById('ufo-subtabs'); if (st) st.style.display=''; }
+                    if (mdPane && mdPane.style.display !== 'none') { mdPane.style.display = 'none'; if (sched) {sched.style.display='';} const st = document.getElementById('ufo-subtabs'); if (st) {st.style.display='';} }
                     // И скрываем экран команды при смене сабвкладки лиги
                     const teamPane = document.getElementById('ufo-team');
-                    if (teamPane && teamPane.style.display !== 'none') { teamPane.style.display = 'none'; const st = document.getElementById('ufo-subtabs'); if (st) st.style.display=''; }
+                    if (teamPane && teamPane.style.display !== 'none') { teamPane.style.display = 'none'; const st = document.getElementById('ufo-subtabs'); if (st) {st.style.display='';} }
                 } catch(_) {}
                 const key = btn.getAttribute('data-subtab');
                 subtabItems.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                Object.values(subtabMap).forEach(el => { if (el) el.style.display = 'none'; });
+                Object.values(subtabMap).forEach(el => { if (el) {el.style.display = 'none';} });
                 if (subtabMap[key]) {
                     subtabMap[key].style.display = '';
                     if (key === 'table') {
@@ -288,10 +288,10 @@
                 const key = btn.getAttribute('data-psub');
                 pTabs.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                Object.values(pMap).forEach(el => { if (el) el.style.display = 'none'; });
+                Object.values(pMap).forEach(el => { if (el) {el.style.display = 'none';} });
                 if (pMap[key]) {
                     pMap[key].style.display = '';
-                    if (key === 'ref') loadReferralInfo();
+                    if (key === 'ref') {loadReferralInfo();}
                 }
             });
         });
@@ -307,7 +307,7 @@
         const track = document.getElementById('ads-track');
         const dots = document.getElementById('ads-dots');
         const box = document.getElementById('ads-carousel');
-        if (!track || !dots || !box) return;
+        if (!track || !dots || !box) {return;}
         // Слайды можно задать глобально в index.html через window.__HOME_ADS__
         // Пример:
         // window.__HOME_ADS__ = [ { img:'/static/img/foto.png', title:'Здесь может быть ваша лига — нажми', action:'BLB' } ]
@@ -340,22 +340,22 @@
                     } else if (act === 'UFO') {
                         // Плавный переход и подсказка после завершения
                         let hinted = false;
-                        const onEnd = () => { if (hinted) return; hinted = true; try { showLeagueHint(); } catch(_) {} };
+                        const onEnd = () => { if (hinted) {return;} hinted = true; try { showLeagueHint(); } catch(_) {} };
                         window.addEventListener('league:transition-end', onEnd, { once: true });
                         setTimeout(onEnd, 3300);
                         selectUFOLeague(false, true);
                         // Переключим вкладку на НЛО
                         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                         const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
-                        if (navUfo) navUfo.classList.add('active');
+                        if (navUfo) {navUfo.classList.add('active');}
                         const elHome = document.getElementById('tab-home');
                         const elUfo = document.getElementById('tab-ufo');
                         const elPreds = document.getElementById('tab-predictions');
                         const elLead = document.getElementById('tab-leaderboard');
                         const elShop = document.getElementById('tab-shop');
                         const elAdmin = document.getElementById('tab-admin');
-                        [elHome, elUfo, elPreds, elLead, elShop, elAdmin].forEach(el => { if (el) el.style.display = 'none'; });
-                        if (elUfo) elUfo.style.display = '';
+                        [elHome, elUfo, elPreds, elLead, elShop, elAdmin].forEach(el => { if (el) {el.style.display = 'none';} });
+                        if (elUfo) {elUfo.style.display = '';}
                     }
                 } catch(_) {}
             });
@@ -374,14 +374,14 @@
             dlist.forEach((d,i) => d.classList.toggle('active', i===index));
         };
         let timer = null;
-    const arm = () => { if (slides.length <= 1) return; if (timer) clearInterval(timer); timer = setInterval(() => { index = (index + 1) % slides.length; apply(); }, 5000); };
+    const arm = () => { if (slides.length <= 1) {return;} if (timer) {clearInterval(timer);} timer = setInterval(() => { index = (index + 1) % slides.length; apply(); }, 5000); };
         arm();
         // Свайп-поддержка
         let startX = 0; let scx = 0; let dragging = false;
-        track.addEventListener('touchstart', (e) => { if (!e.touches || !e.touches[0]) return; startX = e.touches[0].clientX; scx = track.scrollLeft; dragging = true; if (timer) clearInterval(timer); }, { passive: true });
-        track.addEventListener('touchmove', (e) => { if (!dragging || !e.touches || !e.touches[0]) return; const dx = startX - e.touches[0].clientX; track.scrollLeft = scx + dx; }, { passive: true });
+        track.addEventListener('touchstart', (e) => { if (!e.touches || !e.touches[0]) {return;} startX = e.touches[0].clientX; scx = track.scrollLeft; dragging = true; if (timer) {clearInterval(timer);} }, { passive: true });
+        track.addEventListener('touchmove', (e) => { if (!dragging || !e.touches || !e.touches[0]) {return;} const dx = startX - e.touches[0].clientX; track.scrollLeft = scx + dx; }, { passive: true });
         track.addEventListener('touchend', (e) => {
-            if (!dragging) return; dragging = false;
+            if (!dragging) {return;} dragging = false;
             const w = box.clientWidth; const cur = Math.round(track.scrollLeft / Math.max(1,w));
             index = Math.max(0, Math.min(slides.length - 1, cur));
             apply(); arm();
@@ -395,7 +395,7 @@
     // ===== Новости =====
     async function loadNews() {
         const list = document.getElementById('news-list');
-        if (!list) return;
+        if (!list) {return;}
         list.classList.add('news-loading-state');
         // Если есть предзагруженные данные — сразу рендерим без состояния загрузки
         if (window.__NEWS_PRELOADED_DATA__ && Array.isArray(window.__NEWS_PRELOADED_DATA__.news)) {
@@ -416,7 +416,7 @@
         }
         try {
             const res = await fetch('/api/news?limit=5&_=' + Date.now());
-            if (!res.ok) throw new Error('HTTP ' + res.status);
+            if (!res.ok) {throw new Error('HTTP ' + res.status);}
             const data = await res.json();
             const items = data?.news || [];
             renderNewsFromData(items, list);
@@ -427,8 +427,8 @@
     }
 
     function renderNewsFromData(items, list){
-        if (!list) list = document.getElementById('news-list');
-        if(!list) return;
+        if (!list) {list = document.getElementById('news-list');}
+        if(!list) {return;}
         if (!items.length) { list.innerHTML = '<div class="news-empty">Пока нет новостей</div>'; return; }
         list.innerHTML = '';
         items.forEach(n => {
@@ -483,7 +483,7 @@
             // Показываем на Главной только для активной лиги (по ТЗ)
             if ((window.__ACTIVE_LEAGUE__ || 'UFO') !== 'UFO') {
                 const host = document.getElementById('home-pane');
-                if (host) host.innerHTML = '';
+                if (host) {host.innerHTML = '';}
                 return;
             }
             let m = null;
@@ -507,7 +507,7 @@
                 }
             }
             const host = document.getElementById('home-pane');
-            if (!host) return;
+            if (!host) {return;}
             host.innerHTML = '';
             if (!m) { host.innerHTML = '<div style="color: var(--gray);">Скоро анонс матча недели</div>'; return; }
             // Карточка
@@ -525,7 +525,7 @@
                         return dt.toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
                     }
                     if (m.date) {
-                        if (m.time) return `${m.date} ${m.time}`;
+                        if (m.time) {return `${m.date} ${m.time}`;}
                         return String(m.date);
                     }
                 } catch(_) {}
@@ -542,7 +542,7 @@
             // Если матч идёт — показываем счёт и обновляем
             try {
                 const stateKey = (()=>{ try { return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${String(m.date||m.datetime||'').slice(0,10)}`; } catch(_) { return `${m.home||''}__${m.away||''}`; } })();
-                try { const prev = window.MatchState?.get(stateKey); if (prev && prev.score) scoreEl.textContent = prev.score; } catch(_) {}
+                try { const prev = window.MatchState?.get(stateKey); if (prev && prev.score) {scoreEl.textContent = prev.score;} } catch(_) {}
                 const isLive = (window.MatchUtils ? window.MatchUtils.isLiveNow(m) : false);
                 if (isLive) {
                     scoreEl.textContent = '0 : 0';
@@ -550,7 +550,7 @@
                         try {
                             const r = await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`);
                             const d = await r.json();
-                            if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') { const txt = `${Number(d.score_home)} : ${Number(d.score_away)}`; if (scoreEl.textContent !== txt) scoreEl.textContent = txt; try { window.MatchState?.set(stateKey, { score: txt }); } catch(_) {} }
+                            if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') { const txt = `${Number(d.score_home)} : ${Number(d.score_away)}`; if (scoreEl.textContent !== txt) {scoreEl.textContent = txt;} try { window.MatchState?.set(stateKey, { score: txt }); } catch(_) {} }
                         } catch(_) {}
                     };
                     fetchScore();
@@ -568,12 +568,12 @@
                                 card.style.cursor = 'pointer';
                                 card.addEventListener('click', (e) => {
                                         // Не реагируем на клики по кнопкам внутри карточки
-                                        try { if (e?.target?.closest('button')) return; } catch(_) {}
+                                        try { if (e?.target?.closest('button')) {return;} } catch(_) {}
                                     // Переключаемся на вкладку НЛО, чтобы экран деталей был видим
                                     try {
                                         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                                         const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
-                                        if (navUfo) navUfo.classList.add('active');
+                                        if (navUfo) {navUfo.classList.add('active');}
                                         const elHome = document.getElementById('tab-home');
                                         const elUfo = document.getElementById('tab-ufo');
                                         const elUfoContent = document.getElementById('ufo-content');
@@ -581,9 +581,9 @@
                                         const elLead = document.getElementById('tab-leaderboard');
                                         const elShop = document.getElementById('tab-shop');
                                         const elAdmin = document.getElementById('tab-admin');
-                                        [elHome, elUfo, elPreds, elLead, elShop, elAdmin].forEach(el => { if (el) el.style.display = 'none'; });
-                                        if (elUfo) elUfo.style.display = '';
-                                        if (elUfoContent) elUfoContent.style.display = '';
+                                        [elHome, elUfo, elPreds, elLead, elShop, elAdmin].forEach(el => { if (el) {el.style.display = 'none';} });
+                                        if (elUfo) {elUfo.style.display = '';}
+                                        if (elUfoContent) {elUfoContent.style.display = '';}
                                     } catch(_) {}
                                                                                 const go = (store) => { try { window.openMatchScreen?.({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store); } catch(_) {} };
                                                                                 if (window.fetchMatchDetails) {
@@ -620,11 +620,11 @@
 
     let _leagueLoading = false;
     function loadLeagueTable() {
-        if (_leagueLoading) return;
+        if (_leagueLoading) {return;}
         const table = document.getElementById('league-table');
         const updatedWrap = document.getElementById('league-table-updated');
         const updatedText = document.getElementById('league-updated-text');
-        if (!table) return;
+        if (!table) {return;}
         _leagueLoading = true;
         // Если включён новый стор для UI, делегируем загрузку через стора и выходим,
         // чтобы избежать двойной перерисовки и мигания.
@@ -690,10 +690,10 @@
 
     let _statsLoading = false;
     function loadStatsTable() {
-        if (_statsLoading) return;
+        if (_statsLoading) {return;}
         const table = document.getElementById('stats-table');
         const updated = document.getElementById('stats-table-updated');
-        if (!table) return;
+        if (!table) {return;}
         // Если включён стор — делегируем загрузку и не очищаем tbody (устраняем мерцание)
         try {
             if (localStorage.getItem('feature:league_ui_store') === '1' && typeof window.loadStatsViaStore === 'function') {
@@ -705,12 +705,12 @@
         // Легаси-путь: очищаем tbody и скрываем до загрузки, чтобы не мигали старые строки
         const tbody = table.querySelector('tbody');
         if (tbody) { tbody.innerHTML = ''; tbody.style.display = 'none'; }
-        if (updated) updated.textContent = '';
+        if (updated) {updated.textContent = '';}
         _statsLoading = true;
         // Используем новый глобальный лидерборд (G+A) для заполнения таблицы статистики
         fetch('/api/leaderboard/goal-assist?limit=50') // берём с запасом, потом сами отсортируем и обрежем до 10
             .then(async (r) => {
-                if (!r.ok) throw new Error('leaderboard fetch failed');
+                if (!r.ok) {throw new Error('leaderboard fetch failed');}
                 const json = await r.json();
                 // Ожидаем json.items = [{ player_id, first_name, last_name, team, matches_played, goals, assists, goal_plus_assist }, ...]
                 let items = Array.isArray(json?.items) ? json.items.slice() : [];
@@ -718,13 +718,13 @@
                 items.sort((a,b)=>{
                     const at = (a.goal_plus_assist ?? (a.goals||0)+(a.assists||0));
                     const bt = (b.goal_plus_assist ?? (b.goals||0)+(b.assists||0));
-                    if (bt !== at) return bt - at; // больше — выше
+                    if (bt !== at) {return bt - at;} // больше — выше
                     const am = a.matches_played||0, bm = b.matches_played||0;
-                    if (am !== bm) return am - bm; // меньше матчей — выше
+                    if (am !== bm) {return am - bm;} // меньше матчей — выше
                     const ag = a.goals||0, bg = b.goals||0;
-                    if (bg !== ag) return bg - ag; // больше голов — выше
+                    if (bg !== ag) {return bg - ag;} // больше голов — выше
                     const aa = a.assists||0, ba = b.assists||0;
-                    if (ba !== aa) return ba - aa; // больше передач — выше
+                    if (ba !== aa) {return ba - aa;} // больше передач — выше
                     return 0;
                 });
                 items = items.slice(0,10);
@@ -740,13 +740,13 @@
                 try { window.League?.renderStatsTable?.(table, updated, payload); } catch(_) {}
             })
             .catch(err => { console.error('stats table load error (leaderboard)', err); })
-        .finally(() => { _statsLoading = false; if (tbody) tbody.style.display = ''; });
+        .finally(() => { _statsLoading = false; if (tbody) {tbody.style.display = '';} });
     }
 
     // --------- ЛИДЕРБОРД ---------
     let _leaderInited = false;
     function ensureLeaderboardInit() {
-        if (_leaderInited) return;
+        if (_leaderInited) {return;}
         _leaderInited = true;
         // подвкладки
         const tabs = document.querySelectorAll('#leader-subtabs .subtab-item');
@@ -780,16 +780,16 @@
         const LB_JITTER_MS = 4000; // небольшой джиттер
         let _leaderPrefetched = false;
         function prefetchLeaderboards() {
-            if (_leaderPrefetched) return;
+            if (_leaderPrefetched) {return;}
             _leaderPrefetched = true;
             try {
-                if (!window.fetchEtag) return;
+                if (!window.fetchEtag) {return;}
                 // небольшая задержка, чтобы не мешать первичной загрузке
                 setTimeout(() => {
                     const tryPrefetch = (cacheKey, url, swrMs) => {
                         try {
                             const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
-                            if (cached && cached.ts && (Date.now() - cached.ts) < swrMs) return; // свежо
+                            if (cached && cached.ts && (Date.now() - cached.ts) < swrMs) {return;} // свежо
                         } catch(_) {}
                         window.fetchEtag(url, { cacheKey, swrMs, extract: j => j }).catch(()=>{});
                     };
@@ -803,8 +803,8 @@
         }
         function isPaneVisible(key){
             const pane = panes[key];
-            if (!pane) return false;
-            if (document.hidden) return false;
+            if (!pane) {return false;}
+            if (document.hidden) {return false;}
             const cs = window.getComputedStyle(pane);
             return cs && cs.display !== 'none' && cs.visibility !== 'hidden';
         }
@@ -815,9 +815,9 @@
             const tick = async () => {
                 try {
                     if (isPaneVisible(lbActiveTab)) {
-                        if (lbActiveTab === 'predictors') loadLBPredictors({ forceRevalidate: true, skipIfNotUpdated: true });
-                        else if (lbActiveTab === 'rich') loadLBRich({ forceRevalidate: true, skipIfNotUpdated: true });
-                        else if (lbActiveTab === 'server') loadLBServer({ forceRevalidate: true, skipIfNotUpdated: true });
+                        if (lbActiveTab === 'predictors') {loadLBPredictors({ forceRevalidate: true, skipIfNotUpdated: true });}
+                        else if (lbActiveTab === 'rich') {loadLBRich({ forceRevalidate: true, skipIfNotUpdated: true });}
+                        else if (lbActiveTab === 'server') {loadLBServer({ forceRevalidate: true, skipIfNotUpdated: true });}
                         // prizes не требует частого обновления
                     }
                 } catch(_) {}
@@ -834,14 +834,14 @@
                 const key = btn.getAttribute('data-ltab');
                 tabs.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
-                if (panes[key]) panes[key].style.display = '';
-                if (key === 'predictors') loadLBPredictors();
-                else if (key === 'rich') loadLBRich();
-                else if (key === 'server') loadLBServer();
-                else if (key === 'prizes') loadLBPrizes();
+                Object.values(panes).forEach(p => { if (p) {p.style.display = 'none';} });
+                if (panes[key]) {panes[key].style.display = '';}
+                if (key === 'predictors') {loadLBPredictors();}
+                else if (key === 'rich') {loadLBRich();}
+                else if (key === 'server') {loadLBServer();}
+                else if (key === 'prizes') {loadLBPrizes();}
                 // перезапускаем пуллинг под активную вкладку
-                if (key === 'predictors' || key === 'rich' || key === 'server') startLbPolling(key); else stopLbPolling();
+                if (key === 'predictors' || key === 'rich' || key === 'server') {startLbPolling(key);} else {stopLbPolling();}
             });
         });
         // первичная загрузка
@@ -855,7 +855,7 @@
             } else {
                 // возобновляем только если панель лидеров видима
                 const visibleKey = lbActiveTab;
-                if (visibleKey === 'predictors' || visibleKey === 'rich' || visibleKey === 'server') startLbPolling(visibleKey);
+                if (visibleKey === 'predictors' || visibleKey === 'rich' || visibleKey === 'server') {startLbPolling(visibleKey);}
             }
         });
     }
@@ -865,14 +865,14 @@
         const ifNone = cached?.version ? { 'If-None-Match': cached.version } : {};
         return fetch(url, { headers: ifNone })
             .then(async r => {
-                if (r.status === 304 && cached) return cached; // валидный кэш
+                if (r.status === 304 && cached) {return cached;} // валидный кэш
                 const data = await r.json();
                 const version = data.version || r.headers.get('ETag') || null;
                 const store = { data, version, ts: Date.now() };
                 try { localStorage.setItem(cacheKey, JSON.stringify(store)); } catch(_) {}
                 return store;
             })
-            .catch(err => { if (cached) return cached; throw err; });
+            .catch(err => { if (cached) {return cached;} throw err; });
     }
 
     function loadLBPredictors(opts) {
@@ -880,7 +880,7 @@
         const skipIfNotUpdated = !!(opts && opts.skipIfNotUpdated);
         const table = document.querySelector('#lb-predictors tbody');
         const updated = document.getElementById('lb-predictors-updated');
-        if (!table) return;
+        if (!table) {return;}
         if (window.fetchEtag) {
             window.fetchEtag('/api/leaderboard/top-predictors', { cacheKey: 'lb:predictors', swrMs: 60000, extract: j => j, forceRevalidate })
                 .then(({ data, updated: isUpdated, headerUpdatedAt }) => {
@@ -892,9 +892,9 @@
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
                         const tr = document.createElement('tr');
-                        if (idx === 0) tr.classList.add('rank-1');
-                        if (idx === 1) tr.classList.add('rank-2');
-                        if (idx === 2) tr.classList.add('rank-3');
+                        if (idx === 0) {tr.classList.add('rank-1');}
+                        if (idx === 1) {tr.classList.add('rank-2');}
+                        if (idx === 2) {tr.classList.add('rank-3');}
                         tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.bets_total}</td><td>${it.bets_won}</td><td>${it.winrate}%</td>`;
                         table.appendChild(tr);
                     });
@@ -911,9 +911,9 @@
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
                         const tr = document.createElement('tr');
-                        if (idx === 0) tr.classList.add('rank-1');
-                        if (idx === 1) tr.classList.add('rank-2');
-                        if (idx === 2) tr.classList.add('rank-3');
+                        if (idx === 0) {tr.classList.add('rank-1');}
+                        if (idx === 1) {tr.classList.add('rank-2');}
+                        if (idx === 2) {tr.classList.add('rank-3');}
                         tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.bets_total}</td><td>${it.bets_won}</td><td>${it.winrate}%</td>`;
                         table.appendChild(tr);
                     });
@@ -930,7 +930,7 @@
         const skipIfNotUpdated = !!(opts && opts.skipIfNotUpdated);
         const table = document.querySelector('#lb-rich tbody');
         const updated = document.getElementById('lb-rich-updated');
-        if (!table) return;
+        if (!table) {return;}
         if (window.fetchEtag) {
             window.fetchEtag('/api/leaderboard/top-rich', { cacheKey: 'lb:rich', swrMs: 60000, extract: j => j, forceRevalidate })
                 .then(({ data, updated: isUpdated, headerUpdatedAt }) => {
@@ -942,9 +942,9 @@
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
                         const tr = document.createElement('tr');
-                        if (idx === 0) tr.classList.add('rank-1');
-                        if (idx === 1) tr.classList.add('rank-2');
-                        if (idx === 2) tr.classList.add('rank-3');
+                        if (idx === 0) {tr.classList.add('rank-1');}
+                        if (idx === 1) {tr.classList.add('rank-2');}
+                        if (idx === 2) {tr.classList.add('rank-3');}
                         tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${Number(it.gain||0).toLocaleString()}</td>`;
                         table.appendChild(tr);
                     });
@@ -961,9 +961,9 @@
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
                         const tr = document.createElement('tr');
-                        if (idx === 0) tr.classList.add('rank-1');
-                        if (idx === 1) tr.classList.add('rank-2');
-                        if (idx === 2) tr.classList.add('rank-3');
+                        if (idx === 0) {tr.classList.add('rank-1');}
+                        if (idx === 1) {tr.classList.add('rank-2');}
+                        if (idx === 2) {tr.classList.add('rank-3');}
                         tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${Number(it.gain||0).toLocaleString()}</td>`;
                         table.appendChild(tr);
                     });
@@ -980,7 +980,7 @@
         const skipIfNotUpdated = !!(opts && opts.skipIfNotUpdated);
         const table = document.querySelector('#lb-server tbody');
         const updated = document.getElementById('lb-server-updated');
-        if (!table) return;
+        if (!table) {return;}
         if (window.fetchEtag) {
             window.fetchEtag('/api/leaderboard/server-leaders', { cacheKey: 'lb:server', swrMs: 60000, extract: j => j, forceRevalidate })
                 .then(({ data, updated: isUpdated, headerUpdatedAt }) => {
@@ -992,9 +992,9 @@
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
                         const tr = document.createElement('tr');
-                        if (idx === 0) tr.classList.add('rank-1');
-                        if (idx === 1) tr.classList.add('rank-2');
-                        if (idx === 2) tr.classList.add('rank-3');
+                        if (idx === 0) {tr.classList.add('rank-1');}
+                        if (idx === 1) {tr.classList.add('rank-2');}
+                        if (idx === 2) {tr.classList.add('rank-3');}
                         tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.level}</td><td>${it.xp}</td><td>${it.streak}</td><td>${it.score}</td>`;
                         table.appendChild(tr);
                     });
@@ -1011,9 +1011,9 @@
                     table.innerHTML = '';
                     items.forEach((it, idx) => {
                         const tr = document.createElement('tr');
-                        if (idx === 0) tr.classList.add('rank-1');
-                        if (idx === 1) tr.classList.add('rank-2');
-                        if (idx === 2) tr.classList.add('rank-3');
+                        if (idx === 0) {tr.classList.add('rank-1');}
+                        if (idx === 1) {tr.classList.add('rank-2');}
+                        if (idx === 2) {tr.classList.add('rank-3');}
                         tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.level}</td><td>${it.xp}</td><td>${it.streak}</td><td>${it.score}</td>`;
                         table.appendChild(tr);
                     });
@@ -1028,17 +1028,17 @@
     function loadLBPrizes() {
         const host = document.getElementById('lb-prizes');
         const updated = document.getElementById('lb-prizes-updated');
-        if (!host) return;
+        if (!host) {return;}
         // Локальный кэш публичных профилей (5 минут)
         const PUB_CACHE_TTL = 5 * 60 * 1000;
         const nowMs = () => Date.now();
         const pubCacheGet = (uid) => {
             try {
                 const raw = localStorage.getItem('public:profile:' + uid);
-                if (!raw) return null;
+                if (!raw) {return null;}
                 const obj = JSON.parse(raw);
-                if (!obj || !obj.data || !obj.ts) return null;
-                if (nowMs() - obj.ts > PUB_CACHE_TTL) return null;
+                if (!obj || !obj.data || !obj.ts) {return null;}
+                if (nowMs() - obj.ts > PUB_CACHE_TTL) {return null;}
                 return obj.data;
             } catch(_) { return null; }
         };
@@ -1048,11 +1048,11 @@
         const tryFetchPublic = async (ids) => {
             try {
                 const r = await fetch('/api/users/public-batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_ids: ids }) });
-                if (!r.ok) throw new Error('no');
+                if (!r.ok) {throw new Error('no');}
                 const d = await r.json();
                 const items = d?.items || [];
                 const map = {};
-                items.forEach(it => { if (it?.user_id != null) map[String(it.user_id)] = it; });
+                items.forEach(it => { if (it?.user_id != null) {map[String(it.user_id)] = it;} });
                 // Кэшируем
                 Object.values(map).forEach(it => pubCacheSet(String(it.user_id), it));
                 return map;
@@ -1068,7 +1068,7 @@
                 close.addEventListener('click', () => { ov.style.display='none'; });
         const cnt = document.createElement('div'); cnt.className='pp-content'; cnt.style.display='grid'; cnt.style.gap='10px';
                 box.append(close, cnt); ov.appendChild(box); document.body.appendChild(ov);
-                ov.addEventListener('click', (e) => { if (e.target === ov) ov.style.display='none'; });
+                ov.addEventListener('click', (e) => { if (e.target === ov) {ov.style.display='none';} });
             }
             return ov;
         };
@@ -1082,10 +1082,10 @@
             const name = document.createElement('div'); name.style.fontWeight='800'; name.style.fontSize='16px'; name.textContent = data.display_name || 'Игрок';
             const meta = document.createElement('div'); meta.style.fontSize='12px'; meta.style.color='var(--gray)';
             const parts = [];
-            if (data.level != null) parts.push(`Уровень ${data.level}`);
-            if (data.current_xp != null && data.next_xp != null) parts.push(`${data.current_xp}/${data.next_xp} XP`);
-            else if (data.xp != null) parts.push(`${data.xp} XP`);
-            if (data.consecutive_days != null) parts.push(`Серия ${data.consecutive_days}`);
+            if (data.level != null) {parts.push(`Уровень ${data.level}`);}
+            if (data.current_xp != null && data.next_xp != null) {parts.push(`${data.current_xp}/${data.next_xp} XP`);}
+            else if (data.xp != null) {parts.push(`${data.xp} XP`);}
+            if (data.consecutive_days != null) {parts.push(`Серия ${data.consecutive_days}`);}
             meta.textContent = parts.join(' • ');
             info.append(name, meta);
             row.append(img, info);
@@ -1104,7 +1104,7 @@
                 ];
                 // загрузим аватарки победителей одним запросом
                 const allIds = new Set();
-                blocks.forEach(b => { (dataBlock[b.key]||[]).forEach(it => { if (it?.user_id) allIds.add(it.user_id); }); });
+                blocks.forEach(b => { (dataBlock[b.key]||[]).forEach(it => { if (it?.user_id) {allIds.add(it.user_id);} }); });
                 const idsParam = Array.from(allIds).join(',');
                 const render = (avatars) => {
                     blocks.forEach(b => {
@@ -1117,9 +1117,9 @@
                     order.forEach(i => {
                         const it = items[i];
                         const pl = document.createElement('div'); pl.className = 'podium-place';
-                        if (i === 0) pl.classList.add('gold');
-                        if (i === 1) pl.classList.add('silver');
-                        if (i === 2) pl.classList.add('bronze');
+                        if (i === 0) {pl.classList.add('gold');}
+                        if (i === 1) {pl.classList.add('silver');}
+                        if (i === 2) {pl.classList.add('bronze');}
                         const avatar = document.createElement('div'); avatar.className = 'podium-avatar';
                         const img = document.createElement('img'); img.alt = it?.display_name || '';
                         // Аватар с бэкенда, если есть; иначе заглушка
@@ -1170,7 +1170,7 @@
                     ];
                     // загрузим аватарки победителей одним запросом
                     const allIds = new Set();
-                    blocks.forEach(b => { (data[b.key]||[]).forEach(it => { if (it?.user_id) allIds.add(it.user_id); }); });
+                    blocks.forEach(b => { (data[b.key]||[]).forEach(it => { if (it?.user_id) {allIds.add(it.user_id);} }); });
                     const idsParam = Array.from(allIds).join(',');
                     const render = (avatars) => {
                         blocks.forEach(b => {
@@ -1183,9 +1183,9 @@
                             order.forEach(i => {
                                 const it = items[i];
                                 const pl = document.createElement('div'); pl.className = 'podium-place';
-                                if (i === 0) pl.classList.add('gold');
-                                if (i === 1) pl.classList.add('silver');
-                                if (i === 2) pl.classList.add('bronze');
+                                if (i === 0) {pl.classList.add('gold');}
+                                if (i === 1) {pl.classList.add('silver');}
+                                if (i === 2) {pl.classList.add('bronze');}
                                 const avatarUrl = (it && avatars && avatars[String(it.user_id)] && avatars[String(it.user_id)].avatar_url) || '';
                                 pl.innerHTML = `
                                     <div class="avatar"><img src="${avatarUrl || '/static/img/achievements/placeholder.png'}" alt=""></div>
@@ -1223,7 +1223,7 @@
     function waitForSummary(ms = 1200) {
         return new Promise((resolve) => {
             let timer = null;
-            const cleanup = () => { try { if (timer) clearTimeout(timer); } catch(_) {}; try { window.removeEventListener('preload:summary-ready', onReady); } catch(_) {} };
+            const cleanup = () => { try { if (timer) {clearTimeout(timer);} } catch(_) {}; try { window.removeEventListener('preload:summary-ready', onReady); } catch(_) {} };
             const onReady = () => { cleanup(); resolve('ready'); };
             try { window.addEventListener('preload:summary-ready', onReady, { once: true }); } catch(_) {}
             timer = setTimeout(() => { cleanup(); resolve('timeout'); }, ms);
@@ -1233,15 +1233,15 @@
     // --------- РАСПИСАНИЕ ---------
     let _scheduleLoading = false;
     async function loadSchedule() {
-        if (_scheduleLoading) return;
+        if (_scheduleLoading) {return;}
         const pane = document.getElementById('ufo-schedule');
-        if (!pane) return;
+        if (!pane) {return;}
         _scheduleLoading = true;
         const CACHE_KEY = 'schedule:tours';
         const FRESH_TTL = 10 * 60 * 1000; // 10 минут
         const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
         let cached = readCache();
-        if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
+        if (!cached) {pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';}
 
         // Если кэш пуст/протух и идёт прогрев summary — подождём немного
         try {
@@ -1292,7 +1292,7 @@
                 }
             }).catch(err => {
                 console.error('schedule load error', err);
-                if (!cached && pane.childElementCount === 0) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>';
+                if (!cached && pane.childElementCount === 0) {pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>';}
             }).finally(() => { _scheduleLoading = false; });
             return;
         }
@@ -1303,7 +1303,7 @@
         }
         const fetchWithETag = (etag) => fetch('/api/schedule', { headers: etag ? { 'If-None-Match': etag } : {} })
             .then(async r => {
-                if (r.status === 304 && cached) return cached;
+                if (r.status === 304 && cached) {return cached;}
                 const data = await r.json();
                 const version = data.version || r.headers.get('ETag') || null;
                 const store = { data, version, ts: Date.now() };
@@ -1315,22 +1315,22 @@
             });
         const p = (cached && cached.version) ? fetchWithETag(cached.version) : fetchWithETag(null);
         p.then(renderSchedule)
-         .catch(err => { console.error('schedule load error', err); if (!cached && pane.childElementCount === 0) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>'; })
+         .catch(err => { console.error('schedule load error', err); if (!cached && pane.childElementCount === 0) {pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>';} })
          .finally(() => { _scheduleLoading = false; });
     }
 
     // --------- РЕЗУЛЬТАТЫ ---------
     let _resultsLoading = false;
     async function loadResults() {
-        if (_resultsLoading) return;
+        if (_resultsLoading) {return;}
         const pane = document.getElementById('ufo-results');
-        if (!pane) return;
+        if (!pane) {return;}
         _resultsLoading = true;
         const CACHE_KEY = 'results:list';
         const FRESH_TTL = 10 * 60 * 1000; // 10 минут
         const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
         let cached = readCache();
-        if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';
+        if (!cached) {pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';}
 
         // Если кэш пуст/протух и идёт прогрев summary — подождём немного
         try {
@@ -1382,7 +1382,7 @@
                 }
             }).catch(err => {
                 console.error('results load error', err);
-                if (!cached) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>';
+                if (!cached) {pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>';}
             }).finally(() => {
                 _resultsLoading = false;
                 _resultsPreloaded = true; trySignalAllReady();
@@ -1394,21 +1394,21 @@
         const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
         const fetchWithETag = (etag) => fetch('/api/results', { headers: etag ? { 'If-None-Match': etag } : {} })
             .then(async r => {
-                if (r.status === 304 && cached) return cached;
+                if (r.status === 304 && cached) {return cached;}
                 const data = await r.json();
                 const version = data.version || r.headers.get('ETag') || null;
                 const store = { data, version, ts: Date.now() };
                 const incoming = Array.isArray(data?.results) ? data.results : Array.isArray(data?.data?.results) ? data.data.results : [];
                 const cachedList2 = Array.isArray(cached?.data?.results) ? cached.data.results : [];
                 const shouldWrite2 = incoming.length > 0 || !cached || cachedList2.length === 0;
-                if (shouldWrite2) writeCache(store);
+                if (shouldWrite2) {writeCache(store);}
                 return store;
             });
         const go = (store) => { renderResults(store?.data || store); _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); };
         if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
         else if (cached) { go(cached); }
-        if (cached && cached.version) fetchWithETag(cached.version).then(go).catch(()=>{});
-        else fetchWithETag(null).then(go).catch(err => { console.error('results load error', err); if (!cached) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>'; _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); });
+        if (cached && cached.version) {fetchWithETag(cached.version).then(go).catch(()=>{});}
+        else {fetchWithETag(null).then(go).catch(err => { console.error('results load error', err); if (!cached) {pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>';} _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); });}
     }
 
     ; // separator for parser safety
@@ -1437,20 +1437,20 @@
                 const raw = store.raw || store.data || {};
                 // Сохраним под уже используемыми ключами, но без version (чтобы не слать чужой ETag)
                 try {
-                    if (raw.schedule) localStorage.setItem('schedule:tours', JSON.stringify({ data: raw.schedule, version: null, ts: now }));
+                    if (raw.schedule) {localStorage.setItem('schedule:tours', JSON.stringify({ data: raw.schedule, version: null, ts: now }));}
                 } catch(_) {}
                 try {
-                    if (raw.results) localStorage.setItem('results:list', JSON.stringify({ data: raw.results, version: null, ts: now }));
+                    if (raw.results) {localStorage.setItem('results:list', JSON.stringify({ data: raw.results, version: null, ts: now }));}
                 } catch(_) {}
                 try {
-                    if (raw.tours) localStorage.setItem('betting:tours', JSON.stringify({ data: raw.tours, version: null, ts: now }));
+                    if (raw.tours) {localStorage.setItem('betting:tours', JSON.stringify({ data: raw.tours, version: null, ts: now }));}
                 } catch(_) {}
                 try {
                     const lb = raw.leaderboard || {};
-                    if (lb['top-predictors']) localStorage.setItem('lb:predictors', JSON.stringify({ etag: null, ts: now, data: lb['top-predictors'], raw: lb['top-predictors'] }));
-                    if (lb['top-rich']) localStorage.setItem('lb:rich', JSON.stringify({ etag: null, ts: now, data: lb['top-rich'], raw: lb['top-rich'] }));
-                    if (lb['server-leaders']) localStorage.setItem('lb:server', JSON.stringify({ etag: null, ts: now, data: lb['server-leaders'], raw: lb['server-leaders'] }));
-                    if (lb['prizes']) localStorage.setItem('lb:prizes', JSON.stringify({ etag: null, ts: now, data: lb['prizes'], raw: lb['prizes'] }));
+                    if (lb['top-predictors']) {localStorage.setItem('lb:predictors', JSON.stringify({ etag: null, ts: now, data: lb['top-predictors'], raw: lb['top-predictors'] }));}
+                    if (lb['top-rich']) {localStorage.setItem('lb:rich', JSON.stringify({ etag: null, ts: now, data: lb['top-rich'], raw: lb['top-rich'] }));}
+                    if (lb['server-leaders']) {localStorage.setItem('lb:server', JSON.stringify({ etag: null, ts: now, data: lb['server-leaders'], raw: lb['server-leaders'] }));}
+                    if (lb['prizes']) {localStorage.setItem('lb:prizes', JSON.stringify({ etag: null, ts: now, data: lb['prizes'], raw: lb['prizes'] }));}
                 } catch(_) {}
             }).catch(() => {
                 // Fallback: разнести на отдельные запросы ниже
@@ -1507,7 +1507,7 @@
     function getActiveLeague() {
         try {
             const mem = sessionStorage.getItem('activeLeague');
-            if (mem === 'BLB' || mem === 'UFO') return mem;
+            if (mem === 'BLB' || mem === 'UFO') {return mem;}
         } catch(_) {}
         return window.__ACTIVE_LEAGUE__ || 'UFO';
     }
@@ -1524,7 +1524,7 @@
     }
     function renderLeagueOverlay() {
         const overlay = document.getElementById('league-overlay');
-        if (!overlay) return;
+        if (!overlay) {return;}
         const act = getActiveLeague();
         const other = act === 'BLB' ? 'UFO' : 'BLB';
         const ico = other === 'UFO' ? '🛸' : '❔';
@@ -1561,9 +1561,9 @@
         const ufoTabs = document.getElementById('ufo-subtabs');
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
-        if (!overlay || !ufoTabs || !ufoContent || !blbBlock) return;
+        if (!overlay || !ufoTabs || !ufoContent || !blbBlock) {return;}
     // если уже открыт — не дублируем
-    if (overlay.style.display === 'block') return;
+    if (overlay.style.display === 'block') {return;}
         // Обновим содержимое оверлея и покажем
         renderLeagueOverlay();
         overlay.style.display = 'block';
@@ -1574,8 +1574,8 @@
                 if (ico) {
                     const key = ico.getAttribute('data-league');
             // Выбор из оверлея: включаем анимацию перехода
-            if (key === 'UFO') selectUFOLeague(false, true);
-            if (key === 'BLB') selectBLBLeague(true);
+            if (key === 'UFO') {selectUFOLeague(false, true);}
+            if (key === 'BLB') {selectBLBLeague(true);}
                     overlay.style.display = 'none';
                     return;
                 }
@@ -1583,13 +1583,13 @@
             // Клик вне оверлея — закрыть
             document.addEventListener('click', (e) => {
                 const isUfoNav = !!e.target.closest('.nav-item[data-tab="ufo"]');
-                if (!overlay || overlay.style.display === 'none') return;
-                if (e.target.closest('#league-overlay') || isUfoNav) return;
+                if (!overlay || overlay.style.display === 'none') {return;}
+                if (e.target.closest('#league-overlay') || isUfoNav) {return;}
                 overlay.style.display = 'none';
             });
             // При ресайзе/смене ориентации — скрыть
-            window.addEventListener('resize', () => { if (overlay) overlay.style.display = 'none'; });
-            window.addEventListener('orientationchange', () => { if (overlay) overlay.style.display = 'none'; });
+            window.addEventListener('resize', () => { if (overlay) {overlay.style.display = 'none';} });
+            window.addEventListener('orientationchange', () => { if (overlay) {overlay.style.display = 'none';} });
         }
         // На всякий случай пересчитать позицию после показа (рендер может занять тик)
         setTimeout(renderLeagueOverlay, 0);
@@ -1600,11 +1600,11 @@
         const ufoTabs = document.getElementById('ufo-subtabs');
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
-        if (!ufoTabs || !ufoContent || !blbBlock) return;
+        if (!ufoTabs || !ufoContent || !blbBlock) {return;}
     setActiveLeague('UFO');
         // Apply UFO theme
         document.body.classList.remove('blb-theme');
-        if (overlay) overlay.style.display = 'none';
+        if (overlay) {overlay.style.display = 'none';}
         blbBlock.style.display = 'none';
         ufoTabs.style.display = '';
         ufoContent.style.display = '';
@@ -1638,11 +1638,11 @@
         const ufoTabs = document.getElementById('ufo-subtabs');
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
-        if (!ufoTabs || !ufoContent || !blbBlock) return;
+        if (!ufoTabs || !ufoContent || !blbBlock) {return;}
         setActiveLeague('BLB');
         // Apply BLB theme
         document.body.classList.add('blb-theme');
-        if (overlay) overlay.style.display = 'none';
+        if (overlay) {overlay.style.display = 'none';}
         ufoTabs.style.display = 'none';
         ufoContent.style.display = 'none';
         blbBlock.style.display = '';
@@ -1664,7 +1664,7 @@
     function playLeagueTransition(to) {
         try {
             const layer = document.getElementById('league-transition');
-            if (!layer) return;
+            if (!layer) {return;}
             const content = document.createElement('div');
             content.className = 'lt-content';
             const img = document.createElement('img');
@@ -1687,9 +1687,9 @@
                     // Смена темы/топ-бара во время полной заливки (пользователь не видит)
                     document.body.classList.add('theme-blb');
                     const t = document.querySelector('.top-bar .league-title');
-                    if (t) t.textContent = 'Название лиги';
+                    if (t) {t.textContent = 'Название лиги';}
                     const logo = document.querySelector('.top-bar .league-logo');
-                    if (logo) logo.src = '/static/img/placeholderlogo.png';
+                    if (logo) {logo.src = '/static/img/placeholderlogo.png';}
                     // Пауза 1s
                     layer.classList.remove('lt-fill-bottom');
                     setTimeout(() => {
@@ -1716,9 +1716,9 @@
                     // Смена темы/топ-бара во время полной заливки
                     document.body.classList.remove('theme-blb');
                     const t = document.querySelector('.top-bar .league-title');
-                    if (t) t.textContent = 'Лига Обнинска';
+                    if (t) {t.textContent = 'Лига Обнинска';}
                     const logo = document.querySelector('.top-bar .league-logo');
-                    if (logo) logo.src = '/static/img/logo.png';
+                    if (logo) {logo.src = '/static/img/logo.png';}
                     // Пауза 1s
                     layer.classList.remove('lt-fill-top');
                     setTimeout(() => {
@@ -1738,7 +1738,7 @@
     // Красиво открывающаяся «полка» списка лиг из нижнего меню
     function ensureLeagueShelf() {
         let shelf = document.getElementById('league-shelf');
-        if (shelf) return shelf;
+        if (shelf) {return shelf;}
         shelf = document.createElement('div');
         shelf.id = 'league-shelf';
         shelf.className = 'league-shelf';
@@ -1757,7 +1757,7 @@
             tile.append(ic, nm);
             tile.addEventListener('click', () => {
                 try {
-                    if (code === 'UFO') selectUFOLeague(false, true); else selectBLBLeague(true);
+                    if (code === 'UFO') {selectUFOLeague(false, true);} else {selectBLBLeague(true);}
                 } catch(_) {}
                 closeLeagueShelf();
             });
@@ -1783,36 +1783,36 @@
     function openLeagueDrawer() {
         const drawer = document.getElementById('league-drawer');
         const nav = document.getElementById('bottom-nav');
-        if (!drawer) return;
+        if (!drawer) {return;}
         // скрыть нижнее меню быстро
     if (nav) { nav.style.transition = 'transform .12s ease, opacity .12s ease'; nav.style.transform = 'translateX(-50%) translateY(100%)'; nav.style.opacity = '0'; }
         drawer.style.display = 'block';
         requestAnimationFrame(() => { drawer.style.transform = 'translateX(0)'; drawer.setAttribute('aria-hidden', 'false'); });
         const onClick = (e) => {
             const btn = e.target.closest('.drawer-item');
-            if (!btn) return;
+            if (!btn) {return;}
             const key = btn.getAttribute('data-league');
             // анимация перехода
-            if (key === 'UFO') selectUFOLeague(false, true); else if (key === 'BLB') selectBLBLeague(true);
+            if (key === 'UFO') {selectUFOLeague(false, true);} else if (key === 'BLB') {selectBLBLeague(true);}
             // сразу закрываем drawer, чтобы не мешал анимации перехода
             closeLeagueDrawer();
         };
         drawer.addEventListener('click', onClick, { once: true });
         // клик вне — закрытие
-        const onDoc = (e) => { if (!drawer.contains(e.target)) closeLeagueDrawer(); };
+        const onDoc = (e) => { if (!drawer.contains(e.target)) {closeLeagueDrawer();} };
         setTimeout(() => document.addEventListener('click', onDoc, { capture: true, once: true }), 0);
     }
     function closeLeagueDrawer() {
         const drawer = document.getElementById('league-drawer');
         const nav = document.getElementById('bottom-nav');
-        if (!drawer) return;
+        if (!drawer) {return;}
         drawer.style.transform = 'translateX(100%)';
         setTimeout(() => { drawer.style.display = 'none'; drawer.setAttribute('aria-hidden', 'true'); }, 280);
         if (nav) {
             nav.style.transform = 'translateX(-50%) translateY(0)';
             nav.style.opacity = '1';
             // немного отложим сброс transition, чтобы анимация вернулась корректно
-            setTimeout(() => { if (nav) nav.style.transition = ''; }, 60);
+            setTimeout(() => { if (nav) {nav.style.transition = '';} }, 60);
         }
     }
 
@@ -1825,14 +1825,14 @@
             results: document.getElementById('blb-results')
         };
         tabs.forEach(btn => {
-            if (btn.__inited) return; btn.__inited = true;
+            if (btn.__inited) {return;} btn.__inited = true;
             btn.setAttribute('data-throttle', '600');
             btn.addEventListener('click', () => {
                 const key = btn.getAttribute('data-blbtab');
                 tabs.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
-                if (panes[key]) panes[key].style.display = '';
+                Object.values(panes).forEach(p => { if (p) {p.style.display = 'none';} });
+                if (panes[key]) {panes[key].style.display = '';}
             });
         });
     }
@@ -1841,11 +1841,11 @@
     function showLeagueHint() {
         try {
             // Только один раз для пользователя
-            try { if (localStorage.getItem('hint:league-shown') === '1') return; } catch(_) {}
-            if (document.getElementById('league-hint-tip')) return;
+            try { if (localStorage.getItem('hint:league-shown') === '1') {return;} } catch(_) {}
+            if (document.getElementById('league-hint-tip')) {return;}
             const target = document.querySelector('.nav-item[data-tab="ufo"]');
             const nav = document.querySelector('nav.nav');
-            if (!target || !nav) return;
+            if (!target || !nav) {return;}
             const r = target.getBoundingClientRect();
             const rn = nav.getBoundingClientRect();
             const tip = document.createElement('div');
@@ -1887,7 +1887,7 @@
             tip.appendChild(label);
             document.body.appendChild(tip);
             // Позиционирование по центру иконки лиги
-            let centerX = r.left + r.width / 2;
+            const centerX = r.left + r.width / 2;
             tip.style.left = `${Math.round(centerX)}px`;
             // Центрируем контейнер и затем ограничиваем с учётом реальной ширины
             tip.style.transform = 'translateX(-50%)';
@@ -1911,7 +1911,7 @@
                 try { tip.remove(); } catch(_) {}
                 document.removeEventListener('click', onDocClick, true);
             };
-            const onDocClick = (e) => { if (e.target.closest('nav.nav')) cleanup(); };
+            const onDocClick = (e) => { if (e.target.closest('nav.nav')) {cleanup();} };
             document.addEventListener('click', onDocClick, true);
             setTimeout(cleanup, 6000);
             // Встроенная keyframes-анимация
@@ -2004,8 +2004,8 @@ if(!window.openMatchScreen){
                 // загрузим текущий счёт
                 fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`)
                     .then(r=>r.json()).then(d => {
-                        if (typeof d.score_home === 'number') inpH.value = d.score_home;
-                        if (typeof d.score_away === 'number') inpA.value = d.score_away;
+                        if (typeof d.score_home === 'number') {inpH.value = d.score_home;}
+                        if (typeof d.score_away === 'number') {inpA.value = d.score_away;}
                     }).catch(()=>{});
                 btn.addEventListener('click', async () => {
                     const tg = window.Telegram?.WebApp || null;
@@ -2013,13 +2013,13 @@ if(!window.openMatchScreen){
                     fd.append('initData', tg?.initData || '');
                     fd.append('home', match.home || '');
                     fd.append('away', match.away || '');
-                    if (inpH.value !== '') fd.append('score_home', inpH.value);
-                    if (inpA.value !== '') fd.append('score_away', inpA.value);
+                    if (inpH.value !== '') {fd.append('score_home', inpH.value);}
+                    if (inpA.value !== '') {fd.append('score_away', inpA.value);}
                     btn.disabled = true; const old = btn.textContent; btn.textContent = 'Сохранение...';
                     try {
                         const r = await fetch('/api/match/score/set', { method: 'POST', body: fd });
                         const d = await r.json().catch(()=>({}));
-                        if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка сохранения счёта');
+                        if (!r.ok || d?.error) {throw new Error(d?.error || 'Ошибка сохранения счёта');}
                         try { window.showAlert?.('Счёт сохранён', 'success'); } catch(_) {}
                     } catch(e) {
                         console.error('score set error', e);
@@ -2057,7 +2057,7 @@ if(!window.openMatchScreen){
         };
 
         // начальный рендер
-        if (cachedEvents) applyData(cachedEvents);
+        if (cachedEvents) {applyData(cachedEvents);}
 
         // актуализируем с сервера
         const refresh = () => {
@@ -2110,10 +2110,10 @@ if(!window.openMatchScreen){
                     payload.append('away', match.away || '');
                     payload.append('team', form.querySelector('#ev-team').value);
                     const minute = minuteRaw!=='' ? String(parseInt(minuteRaw,10)) : '';
-                    if (minute!=='') payload.append('minute', minute);
+                    if (minute!=='') {payload.append('minute', minute);}
                     payload.append('player', form.querySelector('#ev-player').value.trim());
                     payload.append('type', form.querySelector('#ev-type').value);
-                    const noteVal = form.querySelector('#ev-note').value.trim(); if (noteVal) payload.append('note', noteVal);
+                    const noteVal = form.querySelector('#ev-note').value.trim(); if (noteVal) {payload.append('note', noteVal);}
                     btn.disabled = true; const old = btn.textContent; btn.textContent = 'Сохранение...';
                     fetch('/api/match/events/add', { method: 'POST', body: payload })
                         .then(r=>r.json())
@@ -2155,17 +2155,17 @@ if(!window.openMatchScreen){
     function updateNavLeagueIcon() {
         try {
             const item = document.querySelector('.nav-item[data-tab="ufo"]');
-            if (!item) return;
+            if (!item) {return;}
             const iconEl = item.querySelector('.nav-icon');
             const labelEl = item.querySelector('.nav-label');
             const act = getActiveLeague();
             if (act === 'BLB') {
-                if (iconEl) iconEl.textContent = '❔';
+                if (iconEl) {iconEl.textContent = '❔';}
             } else {
-                if (iconEl) iconEl.textContent = '🛸';
+                if (iconEl) {iconEl.textContent = '🛸';}
             }
             // Для последовательности и компактности внизу навигации показываем одинаковую метку
-            if (labelEl) labelEl.textContent = 'Лига';
+            if (labelEl) {labelEl.textContent = 'Лига';}
         } catch(_) {}
     }
 

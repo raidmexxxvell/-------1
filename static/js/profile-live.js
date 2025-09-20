@@ -1,7 +1,7 @@
 // profile-live.js
 // LiveWatcher: отслеживание старта live матчей и уведомления
 (function(){
-  if (window.ProfileLive) return;
+  if (window.ProfileLive) {return;}
   const isLive = (m) => (window.MatchUtils ? window.MatchUtils.isLiveNow(m) : false);
   const getKey = (m) => `${m.home||''}__${m.away||''}__${m.datetime||m.date||''}`;
   const getPair = (m) => `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
@@ -13,7 +13,7 @@
       const d = await r.json();
       const pairs = new Set();
       (d.items||[]).forEach(it => { pairs.add(`${(it.home||'').toLowerCase()}__${(it.away||'').toLowerCase()}`); });
-      if (!window.__LIVE_STATUS) window.__LIVE_STATUS = { pairs: new Set(), ts: 0 };
+      if (!window.__LIVE_STATUS) {window.__LIVE_STATUS = { pairs: new Set(), ts: 0 };}
       window.__LIVE_STATUS.pairs = pairs; window.__LIVE_STATUS.ts = Date.now();
       return pairs;
     } catch(_) {
@@ -21,10 +21,10 @@
     }
   }
   function notify(text, onClick){
-    if (window.NotificationSystem) window.NotificationSystem.show(text,'info',5000);
-    else if (window.showAlert) window.showAlert(text,'info');
-    else try { alert(text); } catch(_) {}
-    if (onClick) try { onClick(); } catch(_) {}
+    if (window.NotificationSystem) {window.NotificationSystem.show(text,'info',5000);}
+    else if (window.showAlert) {window.showAlert(text,'info');}
+    else {try { alert(text); } catch(_) {}}
+    if (onClick) {try { onClick(); } catch(_) {}}
   }
   async function scan(){
     try {
@@ -36,8 +36,8 @@
       tours.forEach(t => (t.matches||[]).forEach(m => {
         const live = isLive(m) || pairFlags.has(getPair(m));
         const key = getKey(m);
-        if (live) currentLive.add(key);
-        if (live && !lastLiveKeys.has(key) && initialized) nowStarted.push(m);
+        if (live) {currentLive.add(key);}
+        if (live && !lastLiveKeys.has(key) && initialized) {nowStarted.push(m);}
       }));
       nowStarted.forEach(m => {
         const title = `${m.home||'Команда 1'} — ${m.away||'Команда 2'}: матч начался`;
@@ -63,7 +63,7 @@
         notify(title, onClick);
       });
       lastLiveKeys = currentLive;
-      if (!initialized) initialized = true;
+      if (!initialized) {initialized = true;}
     } catch(_) {}
   }
   setInterval(scan, 30000);

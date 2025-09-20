@@ -375,7 +375,7 @@ class UIAnimations {
     static shake(element, intensity = 5, duration = 300) {
         return new Promise(resolve => {
             const originalTransform = element.style.transform;
-            let startTime = performance.now();
+            const startTime = performance.now();
             
             const animate = (currentTime) => {
                 const elapsed = currentTime - startTime;
@@ -415,7 +415,7 @@ if (!window.setTeamLogo && window.TeamUtils) {
 window.enhanceTeamNames = function(selector = '.team-name, .match-teams, .team-text') {
     document.querySelectorAll(selector).forEach(element => {
         const teamName = element.textContent.trim();
-        if (!teamName || element.querySelector('.team-logo')) return; // уже обработано
+        if (!teamName || element.querySelector('.team-logo')) {return;} // уже обработано
         
         // Создаем контейнер с логотипом
         const teamContainer = window.createTeamWithLogo(teamName, {
@@ -705,7 +705,7 @@ window.MatchNotifications = {
     
     showMatchStartNotification(match) {
         const matchKey = `${match.home}_${match.away}_${match.date}`;
-        if (this.shownMatches.has(matchKey)) return;
+        if (this.shownMatches.has(matchKey)) {return;}
         
         this.shownMatches.add(matchKey);
         

@@ -1,6 +1,6 @@
 // A11y утилиты для улучшения доступности
 (() => {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') {return;}
 
   class AccessibilityManager {
     constructor() {
@@ -18,7 +18,7 @@
     // Настройка доступности навигации
     setupNavigationA11y() {
       const nav = document.getElementById('bottom-nav');
-      if (!nav) return;
+      if (!nav) {return;}
 
       // Добавляем role и aria-атрибуты для основной навигации
       nav.setAttribute('role', 'navigation');

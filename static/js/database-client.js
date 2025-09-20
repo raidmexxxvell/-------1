@@ -115,8 +115,8 @@ class DatabaseAPI {
      */
     async getMatches(tournamentId = null, status = null) {
         const params = new URLSearchParams();
-        if (tournamentId) params.append('tournament_id', tournamentId);
-        if (status) params.append('status', status);
+        if (tournamentId) {params.append('tournament_id', tournamentId);}
+        if (status) {params.append('status', status);}
         
         const queryString = params.toString();
         return await this.get(`/matches${queryString ? '?' + queryString : ''}`);
@@ -194,7 +194,7 @@ class DataUtils {
      * Форматировать имя игрока
      */
     static formatPlayerName(player) {
-        if (typeof player === 'string') return player;
+        if (typeof player === 'string') {return player;}
         
         const firstName = player.first_name || '';
         const lastName = player.last_name || '';
@@ -304,7 +304,7 @@ class MatchDisplay {
     }
 
     renderMatches(matches) {
-        if (!this.container) return;
+        if (!this.container) {return;}
 
         if (matches.length === 0) {
             this.container.innerHTML = '<p class="no-data">Матчи не найдены</p>';
@@ -439,7 +439,7 @@ class PlayerRankings {
     }
 
     renderRankings(rankings) {
-        if (!this.container) return;
+        if (!this.container) {return;}
 
         if (rankings.length === 0) {
             this.container.innerHTML = '<p class="no-data">Статистика не найдена</p>';
