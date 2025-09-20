@@ -850,6 +850,14 @@ ACHIEVEMENT_TARGETS = {
     'weeks': [2, 5, 10],
 }
 
+# Бонусы за разблокировку тиров достижений (единые для всех групп)
+# Можно переопределить через переменные окружения позднее при необходимости
+ACHIEVEMENT_REWARDS = {
+    1: {'xp': 200, 'credits': 1000},   # Бронза
+    2: {'xp': 500, 'credits': 5000},   # Серебро
+    3: {'xp': 1000, 'credits': 10000}, # Золото
+}
+
 def _rate_limit(scope: str, limit: int, window_sec: int, identity: str | None = None, allow_pseudo: bool = False):
     """Returns a Flask response (429) if limited, else None. Sliding window in-memory.
     scope: logical bucket name (e.g., 'betting_place').
@@ -1809,6 +1817,20 @@ class MonthlyCreditBaseline(Base):
     period_start = Column(DateTime(timezone=True), primary_key=True)
     credits_base = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+# Логи выдачи наград за достижения (для идемпотентности)
+class UserAchievementReward(Base):
+    __tablename__ = 'user_achievement_rewards'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    group = Column(String(32), nullable=False)  # e.g., 'streak', 'credits', ...
+    tier = Column(Integer, nullable=False)      # 1..3
+    xp = Column(Integer, default=0)
+    credits = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    __table_args__ = (
+        Index('uq_user_reward_group_tier', 'user_id', 'group', 'tier', unique=True),
+    )
 
 # Персистентные достижения пользователя (перманентные tier'ы и даты открытия)
 class UserAchievement(Base):
@@ -3616,7 +3638,7 @@ if engine is not None:
         # Если включён флаг INIT_DATABASE_TABLES, обеспечить создание таблицы user_achievements
         try:
             if os.getenv('INIT_DATABASE_TABLES', '').lower() in ('1', 'true', 'yes'):
-                print('[INFO] INIT_DATABASE_TABLES enabled: ensuring user_achievements table')
+                print('[INFO] INIT_DATABASE_TABLES enabled: ensuring user_achievements and user_achievement_rewards tables')
                 try:
                     # Создаём только таблицу, соответствующую модели UserAchievement
                     if 'UserAchievement' in globals() and getattr(UserAchievement, '__table__', None) is not None:
@@ -3624,6 +3646,12 @@ if engine is not None:
                         print('[INFO] user_achievements table ensured via ORM')
                     else:
                         raise RuntimeError('UserAchievement model not available')
+                    # Создаём таблицу логов наград
+                    if 'UserAchievementReward' in globals() and getattr(UserAchievementReward, '__table__', None) is not None:
+                        UserAchievementReward.__table__.create(bind=engine, checkfirst=True)
+                        print('[INFO] user_achievement_rewards table ensured via ORM')
+                    else:
+                        raise RuntimeError('UserAchievementReward model not available')
                 except Exception as orm_err:
                     print(f"[WARN] ORM create for user_achievements failed: {orm_err}; falling back to SQL script if available")
                     try:
@@ -3637,6 +3665,17 @@ if engine is not None:
                             print('[INFO] user_achievements table ensured via SQL script')
                         else:
                             print(f"[WARN] SQL script not found at {sql_path}; user_achievements not ensured")
+                        # Rewards table fallback
+                        sql_path2 = os.path.join(os.path.dirname(__file__), 'scripts', 'create_user_achievement_rewards_table.sql')
+                        if os.path.exists(sql_path2):
+                            with open(sql_path2, 'r', encoding='utf-8') as f:
+                                sql2 = f.read()
+                            with engine.connect() as conn:
+                                conn.execute(text(sql2))
+                                conn.commit()
+                            print('[INFO] user_achievement_rewards table ensured via SQL script')
+                        else:
+                            print(f"[WARN] SQL script not found at {sql_path2}; user_achievement_rewards not ensured")
                     except Exception as sql_err:
                         print(f"[ERROR] Fallback SQL for user_achievements failed: {sql_err}")
         except Exception as flag_err:
@@ -8643,6 +8682,7 @@ def get_achievements():
                 if not ach_row:
                     ach_row = UserAchievement(user_id=int(user_id))
                     db.add(ach_row)
+                    db.flush()
                 # Рассчитываем текущие tier'ы
                 cur = {
                     'streak': int(streak_tier or 0),
@@ -8668,18 +8708,78 @@ def get_achievements():
                     ('weeks', 'best_weeks_tier', 'weeks_unlocked_at'),
                 ]
                 changed = False
+                # Список повышений для последующей выдачи наград
+                unlocked_events = []  # (group, new_tier, first_time:bool)
                 for key, tier_field, ts_field in mapping:
                     current = cur[key]
                     previous = int(getattr(ach_row, tier_field) or 0)
                     if current > previous:
                         setattr(ach_row, tier_field, current)
+                        first_time = False
                         if previous == 0:
                             # Первая разблокировка — фиксируем дату
                             setattr(ach_row, ts_field, now_dt)
+                            first_time = True
+                        unlocked_events.append((key, current, first_time))
                         changed = True
                 if changed:
                     ach_row.updated_at = now_dt
-                    db.commit()
+                    # Выдача наград с идемпотентностью
+                    # Готовим пользователя к обновлению XP/credits
+                    db_user = db.get(User, int(user_id))
+                    if db_user is None:
+                        return jsonify({'error': 'Пользователь не найден'}), 404
+                    total_xp_add = 0
+                    total_credits_add = 0
+                    for grp, new_tier, _first in unlocked_events:
+                        reward = ACHIEVEMENT_REWARDS.get(int(new_tier), {'xp':0, 'credits':0})
+                        if (reward.get('xp',0) or reward.get('credits',0)):
+                            # Проверяем по уникальному индексу, не выдавали ли уже (user_id, group, tier)
+                            already = db.query(UserAchievementReward.id).filter(
+                                UserAchievementReward.user_id==int(user_id),
+                                UserAchievementReward.group==grp,
+                                UserAchievementReward.tier==int(new_tier)
+                            ).first()
+                            if not already:
+                                # Копим сумму и запишем лог
+                                xp_add = int(reward.get('xp',0) or 0)
+                                cr_add = int(reward.get('credits',0) or 0)
+                                total_xp_add += xp_add
+                                total_credits_add += cr_add
+                                db.add(UserAchievementReward(user_id=int(user_id), group=grp, tier=int(new_tier), xp=xp_add, credits=cr_add))
+                    # Применяем начисления, если есть
+                    if total_xp_add or total_credits_add:
+                        # Добавляем XP поверх полосы уровня
+                        cur_level = int(db_user.level or 1)
+                        cur_xp = int(db_user.xp or 0)
+                        new_xp_total = cur_xp + total_xp_add
+                        new_level = cur_level
+                        # Повышаем уровень по той же формуле (стоимость уровня = level*100)
+                        while new_xp_total >= new_level * 100:
+                            new_xp_total -= new_level * 100
+                            new_level += 1
+                        db_user.xp = new_xp_total
+                        db_user.level = new_level
+                        db_user.credits = int(db_user.credits or 0) + total_credits_add
+                        db_user.updated_at = now_dt
+                    try:
+                        db.commit()
+                    except Exception as e:
+                        # Возможный гонка/дубликат (уникальный индекс) — игнорируем награды, фиксируем только достижения
+                        try:
+                            from sqlalchemy.exc import IntegrityError  # локальный импорт
+                        except Exception:
+                            IntegrityError = Exception
+                        db.rollback()
+                        app.logger.warning(f"Rewards commit failed (possibly duplicate): {e}")
+                        try:
+                            # Повторно зафиксируем только обновлённые tiers без повторной выдачи
+                            ach_row.updated_at = now_dt
+                            db.add(ach_row)
+                            db.commit()
+                        except Exception as e2:
+                            db.rollback()
+                            app.logger.error(f"Achievements commit after rewards failure also failed: {e2}")
                 # Присваиваем best_* для формирования ответа
                 best_streak_tier = int(ach_row.best_streak_tier or 0)
                 best_credits_tier = int(ach_row.best_credits_tier or 0)
