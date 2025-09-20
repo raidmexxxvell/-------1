@@ -19,9 +19,9 @@
     return streamPane;
   }
   function activate(streamPane, match){
-    if(!streamPane) return;
+    if(!streamPane) { return; }
     streamPane.style.display='';
-    try { if(window.Streams?.onStreamTabActivated) window.Streams.onStreamTabActivated(streamPane, match); } catch(_){ }
+    try { if(window.Streams?.onStreamTabActivated) { window.Streams.onStreamTabActivated(streamPane, match); } } catch(_){ }
     try { document.body.classList.add('allow-landscape'); } catch(_){ }
   }
   function deactivate(streamPane){

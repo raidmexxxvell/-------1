@@ -35,7 +35,7 @@
   }
 
   function buildIframeSrc(info){
-    if (!info) return '';
+    if (!info) { return ''; }
     if (info.vkVideoId) {
       const [oid, vid] = String(info.vkVideoId).split('_');
       return `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid||'')}&id=${encodeURIComponent(vid||'')}&hd=2&autoplay=${info.autoplay?1:0}`;
@@ -65,7 +65,7 @@
       pane.className = 'md-pane';
       pane.style.display = 'none';
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
-      if (body) body.appendChild(pane);
+      if (body) { body.appendChild(pane); }
       
     } else {
       // Если панель уже существует, убедимся, что она находится в текущем mdPane
@@ -85,7 +85,7 @@
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
       pane.setAttribute('data-match-key', key);
-      if(pane.style.display!=='none') pane.style.display='none';
+      if(pane.style.display!=='none') { pane.style.display='none'; }
     }
     return pane;
   }
@@ -97,12 +97,12 @@
       subtabs.appendChild(tab);
   
     }
-    if (match) tab.setAttribute('data-match-key', makeKey(match));
+    if (match) { tab.setAttribute('data-match-key', makeKey(match)); }
     return tab;
   }
 
   function buildStreamInto(pane, info, match){
-    if (!info || pane.__inited) return !!pane.__inited;
+    if (!info || pane.__inited) { return !!pane.__inited; }
   // Строим iframe с видео
   const host = document.createElement('div'); host.className = 'stream-wrap';
     const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
@@ -249,9 +249,9 @@
         const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
         if (isFullscreen) {
           
-          if (document.exitFullscreen) document.exitFullscreen();
-          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-          else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+          if (document.exitFullscreen) { document.exitFullscreen(); }
+          else if (document.webkitExitFullscreen) { document.webkitExitFullscreen(); }
+          else if (document.mozCancelFullScreen) { document.mozCancelFullScreen(); }
           return;
         }
       } catch(e) { 
@@ -299,7 +299,7 @@
         try {
           const cmk = window.__CURRENT_MATCH_KEY__ || '';
           const parts = cmk.split('__');
-          if (parts.length >= 3 && parts[2]) dateStr = parts[2];
+          if (parts.length >= 3 && parts[2]) { dateStr = parts[2]; }
         } catch(_) {}
       }
   
@@ -311,14 +311,14 @@
         try {
           const r1 = await fetch(url1, { cache: 'no-store' });
           ans = await r1.json();
-          if (ans && ans.available && (ans.vkVideoId || ans.vkPostUrl)) return ans;
+          if (ans && ans.available && (ans.vkVideoId || ans.vkPostUrl)) { return ans; }
         } catch(_) {}
       }
       // Вторая попытка: без даты (сервер теперь отдаёт последнюю свежую)
       try {
         const r2 = await fetch(base, { cache: 'no-store' });
         const ans2 = await r2.json();
-        if (ans2 && ans2.available && (ans2.vkVideoId || ans2.vkPostUrl)) return ans2;
+        if (ans2 && ans2.available && (ans2.vkVideoId || ans2.vkPostUrl)) { return ans2; }
       } catch(_) {}
     }catch(_){/* noop */}
     return null;
@@ -340,10 +340,10 @@
     const reqId = mdPane.__streamSetupSeq;
     mdPane.__streamSetupKey = expectedKey;
     fetchServerStream(match).then((ans)=>{
-      if (!ans) return; // оставляем скелет
+      if (!ans) { return; } // оставляем скелет
       const currentKey = mdPane.getAttribute('data-match-key') || expectedKey;
-      if (currentKey !== expectedKey) return;
-      if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== expectedKey) return;
+      if (currentKey !== expectedKey) { return; }
+      if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== expectedKey) { return; }
       pane.__streamInfo = ans;
       if (tab?.classList?.contains('active')) {
         try { buildStreamInto(pane, ans, match); } catch(_) {}
@@ -353,7 +353,7 @@
   }
 
   function onStreamTabActivated(pane, match){
-    if (!pane) return;
+  if (!pane) { return; }
   // Активирована вкладка «Трансляция»
     // Безопасность: проверяем, что pane относится к текущему матчу
     const key = makeKey(match);
@@ -376,7 +376,7 @@
         const reqId = pane.__streamTabSeq;
         fetchServerStream(match).then((ans)=>{
           // Проверяем, что мы всё ещё на этом матче
-          if (!ans) {  const sk=pane.querySelector('.stream-skeleton'); if (sk) sk.textContent='Трансляция недоступна'; return; }
+          if (!ans) {  const sk=pane.querySelector('.stream-skeleton'); if (sk) { sk.textContent='Трансляция недоступна'; } return; }
           const mdKey = (mdPaneFrom(pane)?.getAttribute('data-match-key') || expectedKey);
           if (mdKey !== expectedKey) {  return; }
           if (pane.__streamTabSeq !== reqId) {  return; }
@@ -399,7 +399,7 @@
   function resetOnLeave(mdPane){
     try {
       const pane = document.getElementById('md-pane-stream');
-      if (!pane) return;
+      if (!pane) { return; }
   
       // Остановить возможный поллинг комментариев
       try { typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll(); } catch(_) {}
@@ -416,7 +416,7 @@
       // ensurePane корректно поместит её в новый mdPane
       try {
         pane.removeAttribute('data-match-key');
-        if (pane.parentNode) pane.parentNode.removeChild(pane);
+        if (pane.parentNode) { pane.parentNode.removeChild(pane); }
         
       } catch(_) {}
     } catch(_) {}
@@ -492,14 +492,14 @@
     // автопрокрутка вниз, если почти внизу
     try {
       const nearBottom = (listEl.scrollTop + listEl.clientHeight + 30) >= listEl.scrollHeight;
-      if (nearBottom) listEl.scrollTop = listEl.scrollHeight;
+      if (nearBottom) { listEl.scrollTop = listEl.scrollHeight; }
     } catch(_) {}
   }
 
   window.initStreamComments = function(pane, match){
     try {
-      if (!match || !pane) return;
-      if (pane.__commentsInited) return;
+      if (!match || !pane) { return; }
+      if (pane.__commentsInited) { return; }
       const ui = createCommentsUI(pane, match);
       pane.__commentsInited = true;
       const state = { etag:null, dateStr:(match?.datetime||match?.date||'').toString().slice(0,10) };
@@ -510,16 +510,16 @@
       async function loadOnce(){
         const url = buildQuery();
         const hdrs = { 'Cache-Control':'no-cache' };
-        if (state.etag) hdrs['If-None-Match']=state.etag;
+        if (state.etag) { hdrs['If-None-Match']=state.etag; }
         try {
           const r = await fetch(url, { headers: hdrs });
-          if (r.status === 304) return; // не изменилось
-          const et = r.headers.get('ETag'); if (et) state.etag = et;
+          if (r.status === 304) { return; } // не изменилось
+          const et = r.headers.get('ETag'); if (et) { state.etag = et; }
           const d = await r.json().catch(()=>({}));
-          if (Array.isArray(d.items)) renderComments(ui.list, d.items);
+          if (Array.isArray(d.items)) { renderComments(ui.list, d.items); }
         } catch(_) {}
       }
-      pane.__startCommentsPoll = function(){ if (pane.__commentsTimer) return; loadOnce(); pane.__commentsTimer = setInterval(loadOnce, 10000); };
+      pane.__startCommentsPoll = function(){ if (pane.__commentsTimer) { return; } loadOnce(); pane.__commentsTimer = setInterval(loadOnce, 10000); };
       pane.__stopCommentsPoll = function(){ try { clearInterval(pane.__commentsTimer); } catch(_){} pane.__commentsTimer=null; };
       // Автостарт сразу после создания
       pane.__startCommentsPoll();
@@ -531,7 +531,7 @@
           const fd = new FormData();
           fd.append('initData', window.Telegram?.WebApp?.initData || '');
             fd.append('home', match.home||''); fd.append('away', match.away||'');
-            if (state.dateStr) fd.append('date', state.dateStr);
+            if (state.dateStr) { fd.append('date', state.dateStr); }
             fd.append('content', val);
           const r = await fetch('/api/match/comments/add', { method:'POST', body: fd });
           const d = await r.json().catch(()=>({}));

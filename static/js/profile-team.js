@@ -1,11 +1,11 @@
 // static/js/profile-team.js
 // Экран команды: загрузка Overview по ETag и делегирование кликов из лиги.
 (function(){
-  if (window.TeamPage) return;
+  if (window.TeamPage) { return; }
 
   function setUpdatedLabel(el, iso){
     try {
-      if (!iso || !el) return;
+      if (!iso || !el) { return; }
       const prevIso = el.getAttribute('data-updated-iso');
       const prevTs = prevIso ? Date.parse(prevIso) : 0;
       const nextTs = Date.parse(iso);
@@ -48,10 +48,10 @@
   }
 
   function renderRoster(host, payload){
-    if(!host) return;
+    if(!host) { return; }
     host.innerHTML='';
     const list = Array.isArray(payload?.players)? payload.players: [];
-    if(!list.length){ host.innerHTML = '<div style="padding:12px; color: var(--gray);">Состав пуст</div>'; return; }
+  if(!list.length){ host.innerHTML = '<div style="padding:12px; color: var(--gray);">Состав пуст</div>'; return; }
     const table = document.createElement('table'); table.className='team-roster-table'; table.style.width='100%'; table.style.borderCollapse='collapse';
     const thead=document.createElement('thead'); const trh=document.createElement('tr');
     const headers=['Игрок','Голы','Пасы','ЖК','КК'];
@@ -69,7 +69,7 @@
   }
 
   function renderOverview(host, payload){
-    if (!host) return;
+    if (!host) { return; }
     host.innerHTML = '';
     const stats = payload?.stats || { matches:0,wins:0,draws:0,losses:0,goals_for:0,goals_against:0,clean_sheets:0,last5:[] };
 
@@ -126,7 +126,7 @@
     const d = Math.max(0, stats.draws||0);
     const l = Math.max(0, stats.losses||0);
     let wn=w, dn=d, ln=l, sum = w+d+l;
-    if (total && sum && sum !== total){ const k= total/sum; wn=w*k; dn=d*k; ln=l*k; }
+  if (total && sum && sum !== total){ const k= total/sum; wn=w*k; dn=d*k; ln=l*k; }
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
   svg.setAttribute('width','140'); svg.setAttribute('height','60'); svg.setAttribute('viewBox','0 0 140 70');
   const centerX=70, centerY=65, radius=58; // центр чуть ниже, чтобы дуга компактно вписывалась
@@ -136,10 +136,10 @@
     track.setAttribute('class','track');
   svg.appendChild(track);
     // Подготовка сегментов
-    const segments = [];
-    if (wn>0) segments.push({label:'Победы', short:'W', value:w, adj:wn, colorClass:'seg-win'});
-    if (dn>0) segments.push({label:'Ничьи', short:'D', value:d, adj:dn, colorClass:'seg-draw'});
-    if (ln>0) segments.push({label:'Поражения', short:'L', value:l, adj:ln, colorClass:'seg-loss'});
+  const segments = [];
+  if (wn>0) { segments.push({label:'Победы', short:'W', value:w, adj:wn, colorClass:'seg-win'}); }
+  if (dn>0) { segments.push({label:'Ничьи', short:'D', value:d, adj:dn, colorClass:'seg-draw'}); }
+  if (ln>0) { segments.push({label:'Поражения', short:'L', value:l, adj:ln, colorClass:'seg-loss'}); }
     const usableAngle = 180;
     const gapDeg = segments.length>1 ? 4 : 0; // межсегментный визуальный зазор
     const totalGap = gapDeg * (segments.length - 1);
@@ -168,7 +168,12 @@
     // Текст по центру
   const gText = document.createElement('div'); gText.className='gauge-text';
   const gVal = document.createElement('div'); gVal.className='gauge-value'; gVal.textContent = String(total);
-    const pluralMatches = (n)=>{ n=Math.abs(n||0); if(n%10===1&&n%100!==11)return 'матч'; if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100)) return 'матча'; return 'матчей'; };
+    const pluralMatches = (n)=>{
+      n=Math.abs(n||0);
+      if(n%10===1&&n%100!==11){ return 'матч'; }
+      if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100)) { return 'матча'; }
+      return 'матчей';
+    };
   const gLab = document.createElement('div'); gLab.className='gauge-label'; gLab.textContent = pluralMatches(total);
   gText.append(gVal, gLab);
   gauge.append(gText);
@@ -185,7 +190,7 @@
         tip.style.opacity='0';
       }
     });
-    svg.addEventListener('mouseleave', ()=>{ tip.style.opacity='0'; });
+  svg.addEventListener('mouseleave', ()=>{ tip.style.opacity='0'; });
     left.appendChild(gauge);
     // Функция описания дуги (startAngle -> endAngle, углы в градусах, 0° справа, растёт по часовой стрелке)
     function describeArc(cx, cy, r, startAngle, endAngle){
@@ -234,7 +239,7 @@
   }
 
   async function openTeam(teamName){
-    if (!teamName) return;
+    if (!teamName) { return; }
     try { document.getElementById('ufo-schedule')?.setAttribute('aria-hidden','true'); } catch(_) {}
     const pane = document.getElementById('ufo-team');
     const subtabs = document.getElementById('ufo-subtabs');
@@ -242,16 +247,16 @@
     const title = document.getElementById('team-title');
     const logo = document.getElementById('team-logo');
     const ov = document.getElementById('team-pane-overview');
-    if (!pane || !nameEl || !title) return;
+  if (!pane || !nameEl || !title) { return; }
     // Показать экран
     const sched = document.getElementById('ufo-schedule');
     const res = document.getElementById('ufo-results');
     const table = document.getElementById('ufo-table');
     const stats = document.getElementById('ufo-stats');
   const mdPane = document.getElementById('ufo-match-details');
-    [sched,res,table,stats].forEach(el=>{ if (el) el.style.display='none'; });
-  if (mdPane) mdPane.style.display='none';
-    if (subtabs) subtabs.style.display = 'none';
+    [sched,res,table,stats].forEach(el=>{ if (el) { el.style.display='none'; } });
+  if (mdPane) { mdPane.style.display='none'; }
+    if (subtabs) { subtabs.style.display = 'none'; }
     pane.style.display = '';
     nameEl.textContent = teamName;
     title.textContent = 'Команда';
@@ -259,7 +264,7 @@
     // Активная вкладка — «Обзор»
     try {
       const tabs = document.querySelectorAll('#team-subtabs .subtab-item');
-      tabs.forEach(t=>t.classList.remove('active'));
+      tabs.forEach(t=>{ t.classList.remove('active'); });
       const ovBtn = document.querySelector('#team-subtabs .subtab-item[data-ttab="overview"]');
       ovBtn?.classList.add('active');
       document.getElementById('team-pane-overview')?.setAttribute('style','');
@@ -272,8 +277,8 @@
       const { data, headerUpdatedAt } = await fetchOverview(teamName);
       renderOverview(ov, data);
       const upd = document.getElementById('league-updated-text');
-      if (upd && (data?.updated_at || headerUpdatedAt)) setUpdatedLabel(upd, data?.updated_at || headerUpdatedAt);
-    } catch(e){ ov.innerHTML = '<div style="padding:12px; color: var(--danger);">Не удалось загрузить</div>'; }
+      if (upd && (data?.updated_at || headerUpdatedAt)) { setUpdatedLabel(upd, data?.updated_at || headerUpdatedAt); }
+  } catch(_e){ ov.innerHTML = '<div style="padding:12px; color: var(--danger);">Не удалось загрузить</div>'; }
   }
 
   function attachDelegation(){
@@ -311,24 +316,24 @@
     // Назад
     document.getElementById('team-back')?.addEventListener('click', () => {
       const pane = document.getElementById('ufo-team');
-      if (pane) pane.style.display = 'none';
+      if (pane) { pane.style.display = 'none'; }
       const ctx = window.__TEAM_BACK_CTX__ || { from: 'ufo', subtab: 'table' };
       // Возврат к источнику
       if (ctx.from === 'match'){
         // Вернуть экран деталей матча (subtabs оставляем скрытыми)
         try {
           const mdPane = document.getElementById('ufo-match-details');
-          if (mdPane) mdPane.style.display = '';
-          const sched = document.getElementById('ufo-schedule'); if (sched) sched.style.display='none';
-          const res = document.getElementById('ufo-results'); if (res) res.style.display='none';
-          const table = document.getElementById('ufo-table'); if (table) table.style.display='none';
-          const stats = document.getElementById('ufo-stats'); if (stats) stats.style.display='none';
-          const subtabs = document.getElementById('ufo-subtabs'); if (subtabs) subtabs.style.display='none';
+          if (mdPane) { mdPane.style.display = ''; }
+          const sched = document.getElementById('ufo-schedule'); if (sched) { sched.style.display='none'; }
+          const res = document.getElementById('ufo-results'); if (res) { res.style.display='none'; }
+          const table = document.getElementById('ufo-table'); if (table) { table.style.display='none'; }
+          const stats = document.getElementById('ufo-stats'); if (stats) { stats.style.display='none'; }
+          const subtabs = document.getElementById('ufo-subtabs'); if (subtabs) { subtabs.style.display='none'; }
         } catch(_) {}
       } else {
         // Вернуть соответствующую подвкладку UFO
         try {
-          const subtabs = document.getElementById('ufo-subtabs'); if (subtabs) subtabs.style.display='';
+          const subtabs = document.getElementById('ufo-subtabs'); if (subtabs) { subtabs.style.display=''; }
           const target = document.querySelector(`#ufo-subtabs .subtab-item[data-subtab="${ctx.subtab||'table'}"]`)
                         || document.querySelector('#ufo-subtabs .subtab-item[data-subtab="table"]');
           target?.click();
@@ -341,7 +346,7 @@
     const teamTabs = document.querySelectorAll('#team-subtabs .subtab-item');
     teamTabs.forEach(btn => {
       btn.addEventListener('click', () => {
-        teamTabs.forEach(b => b.classList.remove('active')); btn.classList.add('active');
+        teamTabs.forEach(b => { b.classList.remove('active'); }); btn.classList.add('active');
         const key = btn.getAttribute('data-ttab');
         const ov = document.getElementById('team-pane-overview');
         const mt = document.getElementById('team-pane-matches');
@@ -356,9 +361,9 @@
             const teamName = (document.getElementById('team-name')||{}).textContent || '';
             fetchRoster(teamName).then(data=>{
               if(data && !data.error){ renderRoster(rs, data); rs.setAttribute('data-loaded','1'); }
-              else rs.innerHTML = '<div style="padding:12px; color: var(--danger);">Не удалось загрузить</div>';
+              else { rs.innerHTML = '<div style="padding:12px; color: var(--danger);">Не удалось загрузить</div>'; }
               // SWR refresh параллельно (второй вызов fetchRoster отдаст cache сразу)
-              setTimeout(()=>{ fetchRoster(teamName).then(fresh=>{ if(fresh && !fresh.error) renderRoster(rs,fresh); }); }, 10);
+              setTimeout(()=>{ fetchRoster(teamName).then(fresh=>{ if(fresh && !fresh.error) { renderRoster(rs,fresh); } }); }, 10);
             }).catch(()=>{ rs.innerHTML = '<div style="padding:12px; color: var(--danger);">Ошибка загрузки</div>'; });
           }
         }

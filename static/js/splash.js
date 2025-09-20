@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.__SPLASH_LOGS = window.__SPLASH_LOGS || [];
             window.__SPLASH_LOGS.push(entry);
         } catch (_) { /* no-op */ }
-        if (!debugEnabled) return;
+    if (!debugEnabled) { return; }
         const line = `${LOG_PREFIX} ${t} ${level.toUpperCase()}: ${msg}`;
         const c = function(){}; // console disabled in production
         data !== undefined ? c(line, data) : c(line);
@@ -89,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (_) {}
     splash.style.opacity = '1';
     splash.style.display = 'flex';
-    if (appContent) appContent.style.display = 'none';
+    if (appContent) { appContent.style.display = 'none'; }
     // Запуск предзагрузки содержимого главной вкладки (рекламные щиты и "Игра недели")
     // делаем это прямо во время отображения заставки, чтобы главный экран
     // уже загружал данные и изображения пока виден сплеш.
@@ -120,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pid = setInterval(() => {
             tries += 1;
             const ok = tryStart();
-            if (ok || tries >= 6) clearInterval(pid);
+            if (ok || tries >= 6) { clearInterval(pid); }
         }, 300);
     })();
 
@@ -134,7 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     })();
     // мгновенно сдвинем прогресс с 0 чтобы избежать визуального залипания
     try {
-        if (loadingProgress) loadingProgress.style.width = '1%';
+    if (loadingProgress) { loadingProgress.style.width = '1%'; }
     } catch (_) {}
     try {
         const after = window.getComputedStyle ? window.getComputedStyle(splash) : null;
@@ -163,7 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
     info('Timer config', { intervalTime, baseMinMs, maxWaitMs, stepWait, stepFinish });
 
     const maybeHide = () => {
-        if (finished) return;
+        if (finished) { return; }
         finished = true;
         info('Start fade out');
         splash.style.opacity = '0';
@@ -201,9 +201,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const minElapsedReached = elapsed >= baseMinMs;
 
         // Этапное наращивание прогресса
-        let currentTarget = stageTargets.base;
-        if (stageProfileReady) currentTarget = stageTargets.profile;
-        if (stageDataReady) currentTarget = stageTargets.data;
+    let currentTarget = stageTargets.base;
+    if (stageProfileReady) { currentTarget = stageTargets.profile; }
+    if (stageDataReady) { currentTarget = stageTargets.data; }
         if (!ready) {
             // стремимся к текущему целевому порогу
             if (progress < currentTarget) {
@@ -217,10 +217,10 @@ document.addEventListener('DOMContentLoaded', () => {
             progress = Math.min(progress + stepFinish, 100);
         }
 
-    if (!isFinite(progress)) progress = 100;
+    if (!isFinite(progress)) { progress = 100; }
         progress = Math.min(Math.max(progress, 0), 100);
-    if (loadingProgress) loadingProgress.style.width = `${progress}%`;
-    if (loadingProgressText) loadingProgressText.textContent = `${Math.round(progress)}%`;
+    if (loadingProgress) { loadingProgress.style.width = `${progress}%`; }
+    if (loadingProgressText) { loadingProgressText.textContent = `${Math.round(progress)}%`; }
 
         if (progress - lastLogPct >= 10 || now - lastLogTime >= 500) {
             log('Progress', { progress: Math.round(progress), elapsed: Math.round(elapsed), ready, minElapsedReached });
@@ -240,7 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
         try {
             const cur = parseFloat((loadingProgress?.style?.width || '0').replace('%','')) || 0;
-            if (cur <= 0.1 && loadingProgress) loadingProgress.style.width = '5%';
+            if (cur <= 0.1 && loadingProgress) { loadingProgress.style.width = '5%'; }
         } catch (_) {}
     }, 400);
 

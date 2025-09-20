@@ -1,7 +1,7 @@
 // profile-user.js
 // Пользовательские данные: загрузка профиля, любимый клуб, withTeamCount
 (function(){
-  if (window.ProfileUser) return;
+  if (window.ProfileUser) { return; }
   const tg = window.Telegram?.WebApp || null;
   const elements = {
     userName: document.getElementById('user-name'),
@@ -23,9 +23,9 @@
   async function fetchTeamsAndCounts(force=false){
     try {
       const now = Date.now();
-      if(!force && _teamCountsCache.ts && (now - _teamCountsCache.ts) < 5*60*1000) return _teamCountsCache;
+      if(!force && _teamCountsCache.ts && (now - _teamCountsCache.ts) < 5*60*1000) { return _teamCountsCache; }
       const res = await fetch('/api/teams');
-      if(!res.ok) return _teamCountsCache;
+      if(!res.ok) { return _teamCountsCache; }
       const data = await res.json();
       _teamCountsCache = { byTeam: data.counts||{}, teams: data.teams||[], ts: Date.now() };
       return _teamCountsCache;
@@ -37,14 +37,14 @@
   }
   try { window.withTeamCount = withTeamCount; } catch(_) {}
   function renderFavoriteSelect(current){
-    if(!favoriteTeamSelect) return;
+    if(!favoriteTeamSelect) { return; }
     favoriteTeamSelect.innerHTML='';
     const ph=document.createElement('option'); ph.value=''; ph.textContent='— выбрать —'; favoriteTeamSelect.appendChild(ph);
     // Нормализуем: если элемент объект, пробуем поля name/title/team
     const raw = Array.isArray(_teamCountsCache.teams)? _teamCountsCache.teams : [];
     const norm = raw.map(t => {
-      if (t == null) return '';
-      if (typeof t === 'string') return t.trim();
+      if (t == null) { return ''; }
+      if (typeof t === 'string') { return t.trim(); }
       if (typeof t === 'object'){
         return (t.name || t.title || t.team || t.team_name || '').toString().trim();
       }
@@ -54,7 +54,7 @@
     const seen = new Set();
     const ordered = [];
     norm.forEach(n=>{ if(!seen.has(n)){ seen.add(n); ordered.push(n); } });
-    ordered.forEach(teamName=>{ const opt=document.createElement('option'); opt.value=teamName; opt.textContent=teamName; if(current && String(current)===teamName) opt.selected=true; favoriteTeamSelect.appendChild(opt); });
+    ordered.forEach(teamName=>{ const opt=document.createElement('option'); opt.value=teamName; opt.textContent=teamName; if(current && String(current)===teamName) { opt.selected=true; } favoriteTeamSelect.appendChild(opt); });
   }
   async function initFavoriteTeamUI(user){ await fetchTeamsAndCounts(); renderFavoriteSelect(user && (user.favorite_team||user.favoriteTeam)); }
   async function saveFavoriteTeam(value){
@@ -68,7 +68,10 @@
             const desc = document.getElementById('confirm-modal-desc');
             const btnOk = document.getElementById('confirm-ok');
             const btnCancel = document.getElementById('confirm-cancel');
-            try { if (title) title.textContent = 'Подтвердите выбор'; if (desc) desc.textContent = 'Сменить любимый клуб можно только один раз. Подтвердить выбор?'; } catch(_){}
+            try {
+              if (title) { title.textContent = 'Подтвердите выбор'; }
+              if (desc) { desc.textContent = 'Сменить любимый клуб можно только один раз. Подтвердить выбор?'; }
+            } catch(_){}
             confirmModal.style.display='block'; confirmModal.classList.add('show');
             function cleanup(result){ try{ confirmModal.classList.remove('show'); confirmModal.style.display='none'; }catch(_){} resolve(result); btnOk.removeEventListener('click', onOk); btnCancel.removeEventListener('click', onCancel); confirmModal.querySelector('.modal-backdrop')?.removeEventListener('click', onCancel); }
             function onOk(){ cleanup(true); }
@@ -77,9 +80,9 @@
             btnCancel.addEventListener('click', onCancel);
             confirmModal.querySelector('.modal-backdrop')?.addEventListener('click', onCancel);
           });
-          if (!ok) return false;
+          if (!ok) { return false; }
         } else {
-          const ok = confirm('Сменить любимый клуб можно только один раз. Подтвердить выбор?'); if(!ok) return false;
+          const ok = confirm('Сменить любимый клуб можно только один раз. Подтвердить выбор?'); if(!ok) { return false; }
         }
       }
       const fd = new FormData(); fd.append('initData', (tg?.initData || '')); fd.append('team', value||'');
@@ -92,22 +95,23 @@
 
   let _lastUser = null;
   function renderUserProfile(user){
-    if(!user) return; let avatarLoaded=false;
-    const tryDispatch = () => { if(!avatarLoaded) return; if(elements.userName && elements.userName.textContent && elements.userName.textContent !== 'Загрузка...'){ window.dispatchEvent(new CustomEvent('app:profile-ready')); } };
+    if(!user) { return; } let avatarLoaded=false;
+    const tryDispatch = () => { if(!avatarLoaded) { return; } if(elements.userName && elements.userName.textContent && elements.userName.textContent !== 'Загрузка...'){ window.dispatchEvent(new CustomEvent('app:profile-ready')); } };
     if (elements.userAvatarImg && tg?.initDataUnsafe?.user?.photo_url){
       elements.userAvatarImg.onload = () => { avatarLoaded=true; tryDispatch(); };
       elements.userAvatarImg.onerror = () => { avatarLoaded=true; tryDispatch(); };
       elements.userAvatarImg.src = tg.initDataUnsafe.user.photo_url;
     } else { avatarLoaded=true; }
-    if (elements.userName) elements.userName.textContent = user.display_name || 'User';
+    if (elements.userName) { elements.userName.textContent = user.display_name || 'User'; }
     tryDispatch();
-    if (elements.credits) elements.credits.textContent = (user.credits||0).toLocaleString();
+    if (elements.credits) { elements.credits.textContent = (user.credits||0).toLocaleString(); }
   // Анти‑регресс отрисовки: не показываем ниже, чем уже было отрисовано (уровень/XP)
   const prev = _lastUser || {};
   const incomingLevel = user.level || 1;
   const safeLevel = Math.max(incomingLevel, prev.level || 1);
-  if (elements.level) elements.level.textContent = safeLevel;
-  const lvl = safeLevel; if (elements.currentLevel) elements.currentLevel.textContent = lvl;
+  if (elements.level) { elements.level.textContent = safeLevel; }
+  const lvl = safeLevel;
+  if (elements.currentLevel) { elements.currentLevel.textContent = lvl; }
     // Используем производные поля, если они пришли с бэкенда; иначе считаем через XPUtils
     let cur = (user.current_xp != null) ? user.current_xp : (user.xp || 0);
     let need = (user.next_xp != null) ? user.next_xp : (window.XPUtils ? XPUtils.threshold(lvl) : (lvl*100));
@@ -118,10 +122,10 @@
     if (window.XPUtils && (user.current_xp == null || user.next_xp == null)){
       const p = XPUtils.getProgress(lvl, user.xp||0); cur = p.cur; need = p.need;
     }
-    if (elements.xp) elements.xp.textContent = `${cur}/${need}`;
-    if (elements.currentXp) elements.currentXp.textContent = cur;
-    if (elements.xpNeeded) elements.xpNeeded.textContent = need;
-    if (elements.xpProgress) elements.xpProgress.style.width = `${Math.min(Math.max(need ? (cur/need)*100 : 0,0),100)}%`;
+  if (elements.xp) { elements.xp.textContent = `${cur}/${need}`; }
+  if (elements.currentXp) { elements.currentXp.textContent = cur; }
+  if (elements.xpNeeded) { elements.xpNeeded.textContent = need; }
+  if (elements.xpProgress) { elements.xpProgress.style.width = `${Math.min(Math.max(need ? (cur/need)*100 : 0,0),100)}%`; }
   _lastUser = Object.assign({}, user, { level: lvl, current_xp: cur, next_xp: need });
     try { window.dispatchEvent(new CustomEvent('profile:user-loaded',{ detail: user })); } catch(_) {}
   }
@@ -143,16 +147,16 @@
     try {
       const adminId = document.body.getAttribute('data-admin');
       const currentId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : '';
-      if (!adminId || !currentId || String(adminId) !== currentId) return; // не админ
+      if (!adminId || !currentId || String(adminId) !== currentId) { return; } // не админ
       const navItem = document.getElementById('nav-admin');
-      if (navItem && navItem.style.display === 'none') navItem.style.display = '';
+      if (navItem && navItem.style.display === 'none') { navItem.style.display = ''; }
       // Кнопка обновления таблиц (если уже прогружено содержимое)
       const refreshBtn = document.getElementById('league-refresh-btn');
-      if (refreshBtn && refreshBtn.style.display === 'none') refreshBtn.style.display='';
+      if (refreshBtn && refreshBtn.style.display === 'none') { refreshBtn.style.display=''; }
     } catch(_) {}
   }
   // Попытка периодического отображения (на случай поздней инициализации Telegram SDK)
-  let _adminTries = 0; const _adminTimer = setInterval(()=>{ try { ensureAdminUI(); } catch(_) {} if(++_adminTries>=10) clearInterval(_adminTimer); }, 800);
+  let _adminTries = 0; const _adminTimer = setInterval(()=>{ try { ensureAdminUI(); } catch(_) {} if(++_adminTries>=10) { clearInterval(_adminTimer); } }, 800);
   window.ProfileUser = { fetchUserData, renderUserProfile, initFavoriteTeamUI, withTeamCount, getLastUser };
   try { window.ensureAdminUI = ensureAdminUI; } catch(_) {}
 })();
@@ -183,9 +187,9 @@
     }
 
   // load saved shade or default preset
-  try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) applyShade(saved); else { try { applyShade(PRESETS[0]); } catch(_){} } } catch(_){}
+  try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) { applyShade(saved); } else { try { applyShade(PRESETS[0]); } catch(_){} } } catch(_){ }
 
-    if (!btn || !modal) return;
+    if (!btn || !modal) { return; }
     // preset shades (jpg). Add your files to /static/img/profile-shades/ and they will appear here.
     const PRESETS = [
       '/static/img/profile-shades/shade1.jpg',
@@ -207,7 +211,7 @@
         });
         // if nothing selected, select first preset
         if (!document.querySelector('#shade-list img.selected')) {
-          const first = shadeList.querySelector('img'); if (first) first.classList.add('selected');
+          const first = shadeList.querySelector('img'); if (first) { first.classList.add('selected'); }
         }
       } catch(_){}
     }
