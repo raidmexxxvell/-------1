@@ -135,6 +135,18 @@
       });
     }
 
+    function selectPreviewItem(items){
+      try {
+        const arr = Array.isArray(items) ? items : [];
+        if (!arr.length) return null;
+        const priority = ['streak','credits','level','invited'];
+        const byGroup = new Map();
+        arr.forEach(it => { const g = (it.group||'').toLowerCase(); if (g) byGroup.set(g, it); });
+        for (const g of priority){ if (byGroup.has(g)) return byGroup.get(g); }
+        return arr[0];
+      } catch(_) { return (items && items[0]) || null; }
+    }
+
     async function showPending(custom){
       const pending = custom || readPending();
       if (!pending) return;
@@ -143,7 +155,7 @@
       let subtitle = '';
       let img = '';
       try {
-        const first = pending.items && pending.items[0];
+        const first = selectPreviewItem(pending.items);
         if (pending.items?.length > 1) {
           title = 'Новые достижения!';
           subtitle = pending.items.map(it => `${it.name || it.group} (${it.tier})`).slice(0,3).join(', ');
