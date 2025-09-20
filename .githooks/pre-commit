@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+# Pre-commit hook: format JS/TS with Prettier in static/js
+# Skips if prettier is not available (e.g., in environments without Node)
+
+# Find repo root
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+cd "$REPO_ROOT" || exit 0
+
+# Only run if package.json exists and prettier is available
+if [ -f package.json ]; then
+  if command -v npx >/dev/null 2>&1; then
+    echo "[pre-commit] Running Prettier formatting..."
+    npx prettier --write "static/js/**/*.{js,ts}" || exit 1
+    echo "[pre-commit] Prettier complete."
+  else
+    echo "[pre-commit] npx not found; skipping Prettier."
+  fi
+fi
+
+exit 0

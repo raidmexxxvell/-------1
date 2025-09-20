@@ -346,6 +346,26 @@
       refreshAllBtn.addEventListener('click', refreshAllData);
     }
 
+    // Health sync viewer
+    const healthSyncBtn = document.getElementById('admin-health-sync-refresh');
+    if (healthSyncBtn) {
+      healthSyncBtn.addEventListener('click', () => {
+        const out = document.getElementById('admin-health-sync-view');
+        if (out) out.textContent = 'Загрузка...';
+        fetch('/health/sync', { cache: 'no-store' })
+          .then(r => r.json().then(d => ({ ok: r.ok, d })))
+          .then(res => {
+            if (!res.ok) throw new Error('HTTP ' + (res.d?.status || r.status));
+            if (out) out.textContent = JSON.stringify(res.d, null, 2);
+          })
+          .catch(err => {
+            if (out) out.textContent = 'Ошибка загрузки: ' + (err && err.message || String(err));
+          });
+      });
+      // auto-load once
+      try { healthSyncBtn.click(); } catch(_) {}
+    }
+
     // Season controls
     const btnGenSoft = document.getElementById('admin-season-generate-soft');
     if (btnGenSoft) {

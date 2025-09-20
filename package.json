@@ -13,7 +13,8 @@
     "format:check": "prettier --check \"static/js/**/*.{js,ts}\"",
     "type-check": "tsc --noEmit",
     "build:ts": "tsc -p tsconfig.json",
-    "prebuild": "npm run build:ts"
+    "prebuild": "npm run build:ts",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "repository": {
     "type": "git",

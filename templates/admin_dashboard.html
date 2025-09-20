@@ -320,6 +320,14 @@
                     <p class="help-text">Пересчитывает таблицу, статистику, расписание и результаты.</p>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;"></div>
                 </div>
+                <div class="admin-section" style="border-color:#2d3748;">
+                    <h3>Статус фонового синка</h3>
+                    <div class="admin-controls" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <button id="admin-health-sync-refresh" class="action-btn" style="background:#2d3748;">Обновить статус</button>
+                        <span class="help-text">Просмотр /health/sync (метрики синхронизации и квоты Sheets)</span>
+                    </div>
+                    <pre id="admin-health-sync-view" style="margin-top:8px; max-height:220px; overflow:auto; background:#0f0f0f; color:#ddd; border:1px solid #333; padding:8px; border-radius:6px;">—</pre>
+                </div>
                 <div class="admin-section">
                     <h3>Сезон</h3>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
