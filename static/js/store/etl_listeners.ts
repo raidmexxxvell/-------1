@@ -41,10 +41,12 @@ declare global {
       } catch(_) {}
     }
 
-    // Map: league stats
+    // Map: league stats (не затирать UI пустыми массивами — сохраняем последнюю удачную выборку)
     if (cacheKey === 'league:stats' && window.LeagueStore){
       try {
         const stats = Array.isArray(data) ? data : (data?.stats || []);
+        // Если пришёл пустой массив — пропускаем обновление (оставляем прежние данные)
+        if (!Array.isArray(stats) || stats.length === 0) return;
         window.LeagueStore.update(s => { s.stats = stats; });
       } catch(_) {}
     }

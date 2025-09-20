@@ -225,12 +225,16 @@
     const rows = data?.values || [];
     const MAX_ROWS = 10; // показываем максимум 10
     const nodes = [];
+    const isEmpty = !Array.isArray(rows) || rows.length === 0;
     for (let i = 0; i < MAX_ROWS; i++) {
       const r = rows[i] || [];
       const tr = document.createElement('tr');
       for (let j = 0; j < 5; j++) { // 5 колонок: Name, Matches, Goals, Assists, Total
         const td = document.createElement('td');
-        td.textContent = (r[j] ?? '').toString();
+        let val = (r[j] ?? '').toString();
+        // Если данных нет — рендерим стабильный скелет: имя пусто, числовые колонки = 0
+        if (isEmpty && j > 0) val = '0';
+        td.textContent = val;
         tr.appendChild(td);
       }
       if (i === 0) tr.classList.add('rank-1');
@@ -240,7 +244,14 @@
     }
     batchAppend(tbody, nodes, 10);
     raf(() => {
-      try { if (updatedEl && data?.updated_at) updatedEl.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {}
+      try { 
+        if (updatedEl && data?.updated_at) updatedEl.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; 
+      } catch(_) {}
+      try {
+        // Проставляем сигнатуру первых 10 строк для дедупликации дальнейших рендеров
+        const sig = JSON.stringify((rows||[]).slice(0,10));
+        if (tableEl.dataset) tableEl.dataset.sig = sig;
+      } catch(_) {}
     });
   }
 
