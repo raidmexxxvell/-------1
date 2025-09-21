@@ -150,6 +150,92 @@ def finalize_match_core(
         except Exception:
             pass
 
+    # 1b. Зеркалирование финального счёта в таблицу matches (новая схема)
+    #     Правки важны для экрана команды (team/overview), который агрегирует по matches.
+    try:
+        # Импортируем модели из новой схемы только здесь, чтобы избежать жёстких зависимостей при отсутствии пакета
+        from database.database_models import Team as _TeamModel, Match as _MatchModel
+        # Узнаём id команд по имени
+        teams = db.query(_TeamModel).filter(_TeamModel.name.in_([home, away])).all()
+        name_to_id = {t.name: t.id for t in teams}
+        hid = name_to_id.get(home)
+        aid = name_to_id.get(away)
+        if hid and aid:
+            # Пытаемся уточнить дату матча из расписания, чтобы выбрать нужную запись среди возможных нескольких
+            target_dt = None
+            try:
+                meta = build_match_meta(home, away) if callable(build_match_meta) else None
+                dt_str = (meta or {}).get('datetime') or ''
+                if dt_str:
+                    # ISO или близкий формат
+                    from datetime import datetime as _dt
+                    try:
+                        target_dt = _dt.fromisoformat(dt_str.replace('Z', '+00:00'))
+                    except Exception:
+                        target_dt = None
+            except Exception:
+                target_dt = None
+
+            q = db.query(_MatchModel).filter(
+                _MatchModel.home_team_id == hid,
+                _MatchModel.away_team_id == aid
+            )
+            candidates = q.all()
+            chosen = None
+            if candidates:
+                # Выбираем запись:
+                # 1) если известна целевая дата — ближайшая по |match_date - target_dt|
+                # 2) иначе приоритет по статусу: live -> scheduled -> finished (последняя по дате)
+                from datetime import datetime as _dt, timezone as _tz
+                now_dt = _dt.now(_tz.utc)
+                def _score(candidate):
+                    md = getattr(candidate, 'match_date', None)
+                    st = (getattr(candidate, 'status', '') or '').lower()
+                    # Близость к целевой дате, затем к текущему времени, затем по статусу
+                    if target_dt and md:
+                        try:
+                            diff = abs((md - target_dt).total_seconds())
+                        except Exception:
+                            diff = 10**12
+                    elif md:
+                        try:
+                            diff = abs((md - now_dt).total_seconds()) + 10**6  # штраф за отсутствие target_dt
+                        except Exception:
+                            diff = 10**12
+                    else:
+                        diff = 10**12
+                    st_rank = {'live': 0, 'scheduled': 1, 'finished': 2}.get(st, 3)
+                    return (diff, st_rank, -(getattr(candidate, 'id', 0) or 0))
+                chosen = sorted(candidates, key=_score)[0]
+            if chosen is not None:
+                # Устанавливаем итоговый счёт и статус finished, если известен счёт
+                if (score_h is not None) and (score_a is not None):
+                    try:
+                        chosen.home_score = int(score_h)
+                    except Exception:
+                        pass
+                    try:
+                        chosen.away_score = int(score_a)
+                    except Exception:
+                        pass
+                # Если статус ещё не finished — проставим
+                try:
+                    st = (chosen.status or 'scheduled').lower()
+                    if st != 'finished' and (score_h is not None) and (score_a is not None):
+                        chosen.status = 'finished'
+                except Exception:
+                    pass
+                try:
+                    chosen.updated_at = datetime.now(timezone.utc)
+                except Exception:
+                    pass
+                db.commit()
+    except Exception as e:
+        try:
+            logger.warning(f"finalize: mirror to matches failed {home} vs {away}: {e}")
+        except Exception:
+            pass
+
     # 2. Specials автофикс
     try:
         spec_row = db.query(MatchSpecials).filter(MatchSpecials.home == home, MatchSpecials.away == away).first()

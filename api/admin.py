@@ -54,6 +54,103 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
             pass
         return False
 
+    @admin_bp.route('/backfill/scores', methods=['POST'])
+    def api_admin_backfill_scores():
+        """Перенос финальных счетов из legacy match_scores в таблицу matches.
+        Условия обновления: ищем пары (home, away), находим в новой схеме матч со статусом 'finished'
+        и нулевым счётом (0:0), либо пустым, и проставляем значения из legacy, если они заданы.
+        Требует прав администратора."""
+        try:
+            if not _is_admin_request():
+                return jsonify({'error': 'Недействительные данные'}), 401
+            if SessionLocal is None:
+                return jsonify({'error': 'БД недоступна'}), 500
+            # Попытка импортировать legacy модель из app.py
+            try:
+                from app import MatchScore as _LegacyMatchScore
+            except Exception:
+                _LegacyMatchScore = None
+            if _LegacyMatchScore is None:
+                return jsonify({'error': 'Legacy match_scores не доступны'}), 500
+            db = get_db()
+            updated = 0; scanned = 0
+            try:
+                from database.database_models import Team as _Team, Match as _Match
+                rows = db.query(_LegacyMatchScore).all()
+                from datetime import datetime, timezone
+                name_to_id = {}
+                for r in rows:
+                    scanned += 1
+                    home = (r.home or '').strip(); away = (r.away or '').strip()
+                    if not home or not away:
+                        continue
+                    sh = r.score_home; sa = r.score_away
+                    if sh is None or sa is None:
+                        # Нет достоверного счёта в legacy — пропускаем
+                        continue
+                    # Получаем id команд с кэшем
+                    if home not in name_to_id:
+                        t = db.query(_Team).filter(_Team.name == home).first()
+                        name_to_id[home] = (t and t.id) or None
+                    if away not in name_to_id:
+                        t = db.query(_Team).filter(_Team.name == away).first()
+                        name_to_id[away] = (t and t.id) or None
+                    hid = name_to_id.get(home); aid = name_to_id.get(away)
+                    if not (hid and aid):
+                        continue
+                    # Ищем завершённые матчи этой пары с нулевым счётом для безопасного апдейта
+                    cand = db.query(_Match).filter(
+                        _Match.home_team_id == hid,
+                        _Match.away_team_id == aid,
+                        _Match.status == 'finished'
+                    ).order_by(_Match.match_date.desc()).all()
+                    target = None
+                    for m in cand:
+                        try:
+                            hs0 = int(m.home_score or 0)
+                            as0 = int(m.away_score or 0)
+                        except Exception:
+                            hs0 = 0; as0 = 0
+                        # Обновляем, если в matches 0:0 (частый случай отсутствия записи)
+                        if hs0 == 0 and as0 == 0:
+                            target = m
+                            break
+                    if not target and cand:
+                        # Если нет 0:0, но хотим синхронизировать (например, реальный 0:0) — пропускаем, чтобы не ломать.
+                        continue
+                    if target:
+                        target.home_score = int(sh)
+                        target.away_score = int(sa)
+                        target.updated_at = datetime.now(timezone.utc)
+                        updated += 1
+                if updated:
+                    db.commit()
+            finally:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+            # Инвалидация team-overview ETag ключей
+            try:
+                from app import _ETAG_CACHE as _EC
+            except Exception:
+                _EC = None
+            if _EC is None:
+                try:
+                    from app import _ETAG_HELPER_CACHE as _EC
+                except Exception:
+                    _EC = None
+            if _EC is not None:
+                try:
+                    for k in list(_EC.keys()):
+                        if str(k).startswith('team-overview:'):
+                            _EC.pop(k, None)
+                except Exception:
+                    pass
+            return jsonify({'ok': True, 'scanned': scanned, 'updated': updated})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
     @admin_bp.route('/match/status/set', methods=['POST'])
     def api_match_status_set():
         """Установка статуса матча админом: scheduled|live|finished"""
