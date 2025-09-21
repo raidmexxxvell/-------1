@@ -396,6 +396,8 @@
     async function loadNews() {
         const list = document.getElementById('news-list');
         if (!list) {return;}
+        // Если активирована новая карусель новостей, не рендерим список здесь
+        try { if (document.getElementById('news-track')) { return; } } catch(_) {}
         list.classList.add('news-loading-state');
         // Если есть предзагруженные данные — сразу рендерим без состояния загрузки
         if (window.__NEWS_PRELOADED_DATA__ && Array.isArray(window.__NEWS_PRELOADED_DATA__.news)) {

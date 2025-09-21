@@ -141,7 +141,13 @@
                 <!-- Новости -->
                 <div class="ufo-pane" id="news-pane" style="margin-top:12px;">
                     <h3 class="news-title">Новости</h3>
-                    <div id="news-list" class="news-list" aria-live="polite">
+                    <!-- Карусель новостей (использует стили рекламного щита) -->
+                    <div class="ads-carousel" id="news-carousel" aria-label="Слайдер новостей" aria-live="polite">
+                        <div class="ads-track" id="news-track"></div>
+                        <div class="ads-dots" id="news-dots"></div>
+                    </div>
+                    <!-- Легаси-список (fallback). Скрыт, чтобы не мешал основной карусели -->
+                    <div id="news-list" class="news-list" style="display:none;" aria-live="polite">
                         <div class="news-loading" id="news-loading">Загрузка новостей...</div>
                     </div>
                 </div>
@@ -713,6 +719,8 @@
     <script src="/static/js/profile-core.js?v={{ static_version }}"></script>
     <script src="/static/js/profile.js?v={{ static_version }}"></script>
     <script src="/static/js/profile-scorers.js?v={{ static_version }}"></script>
+    <!-- Карусель новостей -->
+    <script src="/static/js/news-carousel.js?v={{ static_version }}"></script>
     <!-- Индикатор новых достижений и анимация при входе в профиль -->
     <script src="/static/js/achievements-notify.js?v={{ static_version }}"></script>
     <script src="/static/js/nav-fallback.js?v={{ static_version }}"></script>
