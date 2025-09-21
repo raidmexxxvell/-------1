@@ -5135,7 +5135,6 @@ def api_team_overview():
                             if tgf > tga: last5.append('W')
                             elif tgf == tga: last5.append('D')
                             else: last5.append('L')
-                            # недавние 2 матча: дата, соперник, счёт и результат
                             if len(recent) < 2:
                                 opp_id = a_id if is_home else h_id
                                 opp_name_row = db.execute(text("SELECT name FROM teams WHERE id=:id"), { 'id': opp_id }).first()
@@ -5150,8 +5149,61 @@ def api_team_overview():
                                 recent.append({ 'date': dt_iso, 'opponent': opp_name, 'score': score_text, 'result': ('W' if tgf>tga else ('D' if tgf==tga else 'L')) })
                         except Exception:
                             continue
+                # Если team_id отсутствует (искали по имени), достроим last5/recent по join-у с teams
+                if not team_id and not last_rows:
+                    try:
+                        last_by_name_sql = text(
+                            """
+                            SELECT m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.updated_at,
+                                   th.name AS home_name, ta.name AS away_name
+                            FROM matches m
+                            JOIN teams th ON th.id = m.home_team_id
+                            JOIN teams ta ON ta.id = m.away_team_id
+                            WHERE m.status='finished' AND (lower(th.name)=lower(:nm) OR lower(ta.name)=lower(:nm))
+                            ORDER BY m.updated_at DESC NULLS LAST, m.match_date DESC NULLS LAST
+                            LIMIT 5
+                            """
+                        )
+                        rows_by_name = db.execute(last_by_name_sql, { 'nm': name_final }).fetchall()
+                        for r in rows_by_name:
+                            try:
+                                h_id, a_id, hs, as_, upd_at, h_name, a_name = int(r[0] or 0), int(r[1] or 0), int(r[2] or 0), int(r[3] or 0), r[4], r[5], r[6]
+                                nm_low = name_final.lower()
+                                is_home = (str(h_name or '').lower() == nm_low)
+                                tgf = hs if is_home else as_
+                                tga = as_ if is_home else hs
+                                last5.append('W' if tgf>tga else ('D' if tgf==tga else 'L'))
+                                if len(recent) < 2:
+                                    opp_name = a_name if is_home else h_name
+                                    score_text = f"{tgf}:{tga}"
+                                    dt_iso = None
+                                    try:
+                                        if hasattr(upd_at, 'isoformat'): dt_iso = upd_at.isoformat()
+                                        else: dt_iso = str(upd_at)
+                                    except Exception:
+                                        dt_iso = None
+                                    recent.append({ 'date': dt_iso, 'opponent': opp_name, 'score': score_text, 'result': ('W' if tgf>tga else ('D' if tgf==tga else 'L')) })
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
                 # updated_at: возьмём из max(updated_at) матчей этой команды
-                upd_row = db.execute(text("SELECT max(updated_at) FROM matches WHERE status='finished'" + (" AND (home_team_id=:tid OR away_team_id=:tid)" if team_id else "")), ({'tid': team_id} if team_id else {})).first()
+                upd_row = None
+                if team_id:
+                    upd_row = db.execute(text("SELECT max(updated_at) FROM matches WHERE status='finished' AND (home_team_id=:tid OR away_team_id=:tid)"), {'tid': team_id}).first()
+                else:
+                    try:
+                        upd_row = db.execute(text(
+                            """
+                            SELECT max(m.updated_at)
+                            FROM matches m
+                            JOIN teams th ON th.id = m.home_team_id
+                            JOIN teams ta ON ta.id = m.away_team_id
+                            WHERE m.status='finished' AND (lower(th.name)=lower(:nm) OR lower(ta.name)=lower(:nm))
+                            """
+                        ), { 'nm': name_final }).first()
+                    except Exception:
+                        upd_row = None
                 updated_at = (upd_row and (upd_row[0].isoformat() if hasattr(upd_row[0], 'isoformat') else str(upd_row[0]))) or datetime.now(timezone.utc).isoformat()
                 # Подсчёт карточек
                 cards = { 'yellow': 0, 'red': 0 }

@@ -54,14 +54,14 @@
   if(!list.length){ host.innerHTML = '<div style="padding:12px; color: var(--gray);">Состав пуст</div>'; return; }
     const table = document.createElement('table'); table.className='team-roster-table'; table.style.width='100%'; table.style.borderCollapse='collapse';
     const thead=document.createElement('thead'); const trh=document.createElement('tr');
-    const headers=['Игрок','Голы','Пасы','ЖК','КК'];
+    const headers=['Игрок','И','Голы','Пасы','ЖК','КК'];
     headers.forEach(h=>{ const th=document.createElement('th'); th.textContent=h; th.style.padding='6px 8px'; th.style.fontWeight='600'; th.style.fontSize='12px'; th.style.textAlign='left'; th.style.background='var(--surface-alt,rgba(255,255,255,0.05))'; th.style.borderBottom='1px solid rgba(255,255,255,0.15)'; trh.appendChild(th); });
     thead.appendChild(trh); table.appendChild(thead);
     const tbody=document.createElement('tbody');
     list.forEach(p=>{
       const tr=document.createElement('tr'); tr.style.borderBottom='1px solid rgba(255,255,255,0.07)';
       const full = `${p.first_name||''} ${p.last_name||''}`.trim();
-      const cells=[full, p.goals??0, p.assists??0, (p.yellow_cards??0), (p.red_cards??0)];
+      const cells=[full, p.matches_played??0, p.goals??0, p.assists??0, (p.yellow_cards??0), (p.red_cards??0)];
       cells.forEach((c,i)=>{ const td=document.createElement('td'); td.style.padding='6px 8px'; td.style.fontSize='12px'; td.style.textAlign = i===0?'left':'center'; td.textContent=c; tr.appendChild(td); });
       tbody.appendChild(tr);
     });
