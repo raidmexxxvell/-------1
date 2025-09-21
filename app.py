@@ -4878,8 +4878,8 @@ def _team_overview_from_results_snapshot(db: Session, team_name: str) -> dict:
             continue
     # последние 5 в порядке убывания времени уже примерно соблюдаются в снапшоте; ограничим
     last5 = last5[-5:]
-    # recent: берём из буфера последние (по порядку добавления считаем хронологию входного снапшота) 2 матча, реверс чтобы самые свежие первыми
-    recent = list(reversed(recent_buf[-2:])) if recent_buf else []
+    # recent: берём из буфера последние (по порядку добавления считаем хронологию входного снапшота) 5 матчей, реверс чтобы самые свежие первыми
+    recent = list(reversed(recent_buf[-5:])) if recent_buf else []
     return {
         'team': {'id': None, 'name': name},
         'stats': {'matches':matches,'wins':w,'draws':d,'losses':l,'goals_for':gf,'goals_against':ga,'clean_sheets':cs,'last5':last5},
@@ -5008,7 +5008,7 @@ def api_team_overview():
                             if tgf > tga: last5.append('W')
                             elif tgf == tga: last5.append('D')
                             else: last5.append('L')
-                            if len(recent) < 2:
+                            if len(recent) < 5:
                                 opp_id = a_id if is_home else h_id
                                 opp_name_row = db.execute(text("SELECT name FROM teams WHERE id=:id"), { 'id': opp_id }).first()
                                 opp_name = opp_name_row[0] if opp_name_row else None
@@ -5046,7 +5046,7 @@ def api_team_overview():
                                 tgf = hs if is_home else as_
                                 tga = as_ if is_home else hs
                                 last5.append('W' if tgf>tga else ('D' if tgf==tga else 'L'))
-                                if len(recent) < 2:
+                                if len(recent) < 5:
                                     opp_name = a_name if is_home else h_name
                                     score_text = f"{tgf}:{tga}"
                                     dt_iso = None
@@ -5078,22 +5078,36 @@ def api_team_overview():
                     except Exception:
                         upd_row = None
                 updated_at = (upd_row and (upd_row[0].isoformat() if hasattr(upd_row[0], 'isoformat') else str(upd_row[0]))) or datetime.now(timezone.utc).isoformat()
-                # Подсчёт карточек
+                # Подсчёт карточек: приоритет — динамические таблицы team_stats_<id>, затем match_events, затем TeamPlayerStats
                 cards = { 'yellow': 0, 'red': 0 }
                 try:
                     if team_id:
-                        cr = db.execute(text("""
-                            SELECT event_type, COUNT(*) FROM match_events 
-                            WHERE team_id=:tid AND event_type IN ('yellow_card','red_card')
-                            GROUP BY event_type
-                        """), { 'tid': team_id }).fetchall()
-                        for et, cnt in cr:
-                            if str(et) == 'yellow_card': cards['yellow'] = int(cnt or 0)
-                            if str(et) == 'red_card': cards['red'] = int(cnt or 0)
-                        # Если событий нет, попробуем заполнить из TeamPlayerStats (сумма по игрокам этой команды)
+                        # 1) Попробуем динамическую таблицу team_stats_<id>
+                        try:
+                            table = f"team_stats_{int(team_id)}"
+                            row = db.execute(text(f"SELECT COALESCE(SUM(yellow_cards),0), COALESCE(SUM(red_cards),0) FROM {table}"))
+                            agg = row.first() if row else None
+                            if agg:
+                                cards['yellow'] = int(agg[0] or 0)
+                                cards['red'] = int(agg[1] or 0)
+                        except Exception:
+                            pass
+                        # 2) Если нули — посчитаем по событиям
+                        if cards['yellow'] == 0 and cards['red'] == 0:
+                            try:
+                                cr = db.execute(text("""
+                                    SELECT event_type, COUNT(*) FROM match_events 
+                                    WHERE team_id=:tid AND event_type IN ('yellow_card','red_card')
+                                    GROUP BY event_type
+                                """), { 'tid': team_id }).fetchall()
+                                for et, cnt in cr:
+                                    if str(et) == 'yellow_card': cards['yellow'] = int(cnt or 0)
+                                    if str(et) == 'red_card': cards['red'] = int(cnt or 0)
+                            except Exception:
+                                pass
+                        # 3) Если всё ещё нули — fallback на агрегат TeamPlayerStats по имени
                         if cards['yellow'] == 0 and cards['red'] == 0 and 'TeamPlayerStats' in globals():
                             try:
-                                # Получим имя команды по id и агрегируем
                                 trow = db.execute(text("SELECT name FROM teams WHERE id=:id"), { 'id': team_id }).first()
                                 tname = (trow and trow[0]) or None
                                 if tname:

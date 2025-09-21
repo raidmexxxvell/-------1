@@ -73,12 +73,12 @@
     host.innerHTML = '';
     const stats = payload?.stats || { matches:0,wins:0,draws:0,losses:0,goals_for:0,goals_against:0,clean_sheets:0,last5:[] };
 
-    // Раздел: Форма (2 последних матча)
+    // Раздел: Форма (последние 5 матчей в одну строку)
     const section = document.createElement('div'); section.className = 'team-overview-section';
     const title = document.createElement('div'); title.className = 'section-title'; title.textContent = 'Форма';
     const form = document.createElement('div'); form.className = 'team-form';
-  const last2 = Array.isArray(payload?.recent) && payload.recent.length ? payload.recent.slice(0,2) : (stats.last5||[]).slice(0,2);
-    last2.forEach((r) => {
+  const last5List = Array.isArray(payload?.recent) && payload.recent.length ? payload.recent.slice(0,5) : (stats.last5||[]).slice(0,5);
+    last5List.forEach((r) => {
       const cell = document.createElement('div'); cell.className='form-cell';
       const dt = document.createElement('div'); dt.className='form-date';
       const item = document.createElement('div'); item.className='form-item';
@@ -90,16 +90,13 @@
         (window.setTeamLogo||window.TeamUtils?.setTeamLogo)?.(logo, logoTeam);
       } catch(_) {}
       const scoreOverlay = document.createElement('div'); scoreOverlay.className='score-badge';
-      const score = document.createElement('div'); score.className='score';
       const badge = document.createElement('div'); badge.className = 'badge';
       if (typeof r === 'string') {
-        score.textContent = r==='W'?'3:2':(r==='D'?'1:1':'0:2');
         badge.className += ' ' + (r==='W'?'badge-win':(r==='D'?'badge-draw':'badge-loss'));
         badge.textContent = r;
         dt.textContent = '';
-        scoreOverlay.textContent = score.textContent;
+        scoreOverlay.textContent = '';
       } else {
-        score.textContent = r?.score || '—';
         const rr = r?.result || 'D';
         badge.className += ' ' + (rr==='W'?'badge-win':(rr==='D'?'badge-draw':'badge-loss'));
         badge.textContent = rr;
@@ -107,7 +104,8 @@
         scoreOverlay.textContent = r?.score || '';
       }
       logoWrap.append(logo, scoreOverlay);
-      item.append(logoWrap, score, badge);
+      // Убираем крупный дубль счёта — оставляем только маленький на лого
+      item.append(logoWrap, badge);
       cell.append(dt, item);
       form.appendChild(cell);
     });
@@ -195,11 +193,11 @@
     left.appendChild(gauge);
     // Функция описания дуги (startAngle -> endAngle, углы в градусах, 0° справа, растёт по часовой стрелке)
     function describeArc(cx, cy, r, startAngle, endAngle){
-      // Рисуем по часовой стрелке (sweep=1) чтобы визуально шло слева направо сверху
+      // Рисуем дуги верхней половины слева направо; используем sweep=0, чтобы исключить нижнюю полуокружность
       const start = polar(cx, cy, r, startAngle);
       const end = polar(cx, cy, r, endAngle);
       const large = Math.abs(startAngle - endAngle) > 180 ? 1 : 0;
-      const sweep = 1; // по часовой
+      const sweep = 0; // против часовой, чтобы дуга шла по верхнему полукругу
       return `M ${start.x} ${start.y} A ${r} ${r} 0 ${large} ${sweep} ${end.x} ${end.y}`;
     }
     function polar(cx, cy, r, deg){
