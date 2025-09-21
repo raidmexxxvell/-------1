@@ -122,10 +122,42 @@ declare global {
     }
   }
 
+  function convertEventsToStats(events: any): any {
+    if (!events) return null;
+    
+    try {
+      const homeEvents = events.home || [];
+      const awayEvents = events.away || [];
+      
+      // Подсчитываем статистику из событий
+      const stats = {
+        home: {
+          goals: homeEvents.filter((e: any) => e.type === 'goal').length,
+          yellow_cards: homeEvents.filter((e: any) => e.type === 'yellow').length,
+          red_cards: homeEvents.filter((e: any) => e.type === 'red').length,
+          assists: homeEvents.filter((e: any) => e.type === 'assist').length
+        },
+        away: {
+          goals: awayEvents.filter((e: any) => e.type === 'goal').length,
+          yellow_cards: awayEvents.filter((e: any) => e.type === 'yellow').length,
+          red_cards: awayEvents.filter((e: any) => e.type === 'red').length,
+          assists: awayEvents.filter((e: any) => e.type === 'assist').length
+        }
+      };
+      
+      console.log('[Bridge] Converted events to stats:', stats);
+      return stats;
+    } catch(e) {
+      console.warn('[Bridge] Failed to convert events to stats:', e);
+      return null;
+    }
+  }
+
   function renderStatsFromStore(host: HTMLElement, match: any): boolean {
     console.log('[Bridge] renderStatsFromStore called', {
       matchesStoreAPIExists: !!(window as any).MatchesStoreAPI,
       matchesStoreExists: !!window.MatchesStore,
+      matchEventsRegistryExists: !!(window as any).__MatchEventsRegistry,
       currentNames: currentNames(),
       match,
       matchHome: match?.home,
@@ -134,13 +166,32 @@ declare global {
     
     if(!host) return false;
     
-    // Пытаемся получить статистику через новый API
+    // Пытаемся получить статистику через разные источники данных
     let stats: any = null;
     let hasStoreData = false;
     
-    if ((window as any).MatchesStoreAPI && match?.home && match?.away) {
+    // ПРИОРИТЕТ 1: __MatchEventsRegistry (стабильный источник из коммита 9764968)
+    if ((window as any).__MatchEventsRegistry && match?.home && match?.away) {
       try {
-        // Используем данные из объекта match, а не currentNames (которые могут не совпадать)
+        const registry = (window as any).__MatchEventsRegistry;
+        const matchKey = registry.getMatchKey(match.home, match.away);
+        const cachedEvents = registry.eventsCache?.get(matchKey);
+        
+        if (cachedEvents && (cachedEvents.home || cachedEvents.away)) {
+          console.log('[Bridge] Found data in MatchEventsRegistry:', cachedEvents);
+          // Преобразуем события в статистику
+          stats = convertEventsToStats(cachedEvents);
+          hasStoreData = !!(stats && (stats.home || stats.away));
+          console.log('[Bridge] MatchEventsRegistry stats:', { stats, hasStoreData });
+        }
+      } catch(e) {
+        console.warn('[Bridge] MatchEventsRegistry error:', e);
+      }
+    }
+    
+    // ПРИОРИТЕТ 2: MatchesStoreAPI (если нет данных в Registry)
+    if (!hasStoreData && (window as any).MatchesStoreAPI && match?.home && match?.away) {
+      try {
         const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(match.home, match.away);
         console.log('[Bridge] Found match key:', matchKey);
         
@@ -154,7 +205,7 @@ declare global {
       }
     }
     
-    // Fallback на старый MatchesStore
+    // ПРИОРИТЕТ 3: Legacy MatchesStore
     if (!hasStoreData && window.MatchesStore) {
       try {
         const st = window.MatchesStore.get();
@@ -355,11 +406,29 @@ declare global {
   function renderRostersFromStore(match: any, mdPane: any, els: any) {
     if(!els.homePane || !els.awayPane) return;
     
-    // Получаем данные из стора
+    // Получаем данные из разных источников по приоритету
     let storeData: any = null;
     let hasStoreData = false;
     
-    if ((window as any).MatchesStoreAPI && match?.home && match?.away) {
+    // ПРИОРИТЕТ 1: __MatchEventsRegistry (стабильный источник из коммита 9764968)
+    if ((window as any).__MatchEventsRegistry && match?.home && match?.away) {
+      try {
+        const registry = (window as any).__MatchEventsRegistry;
+        const matchKey = registry.getMatchKey(match.home, match.away);
+        const cachedEvents = registry.eventsCache?.get(matchKey);
+        
+        if (cachedEvents && (cachedEvents.home || cachedEvents.away)) {
+          console.log('[Bridge] Found events in MatchEventsRegistry:', cachedEvents);
+          storeData = { events: cachedEvents };
+          hasStoreData = true;
+        }
+      } catch(e) {
+        console.warn('[Bridge] MatchEventsRegistry error:', e);
+      }
+    }
+    
+    // ПРИОРИТЕТ 2: MatchesStoreAPI
+    if (!hasStoreData && (window as any).MatchesStoreAPI && match?.home && match?.away) {
       try {
         const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(match.home, match.away);
         if (matchKey) {
@@ -371,7 +440,7 @@ declare global {
       }
     }
     
-    // Fallback на старый MatchesStore
+    // ПРИОРИТЕТ 3: Legacy MatchesStore
     if (!hasStoreData) {
       const st = (window as any).MatchesStore?.get();
       if (st) {
@@ -384,7 +453,7 @@ declare global {
       }
     }
     
-    // Если нет данных в сторе, используем последний кэш или пустые данные
+    // Извлекаем данные с fallback на кэш
     const rosters = storeData?.rosters || mdPane.__lastRosters || { home: [], away: [] };
     const events = storeData?.events || mdPane.__lastEvents || { home: [], away: [] };
     const score = storeData?.score;
@@ -394,14 +463,19 @@ declare global {
     mdPane.__lastEvents = events;
     if (score) {
       mdPane.__lastScore = score;
-      // Обновляем счет в UI если элементы доступны
+      // КРИТИЧНО: Обновляем счет БЕЗ МЕРЦАНИЯ (принцип из стабильного коммита)
       try {
         const scoreEl = document.getElementById('md-score');
         if (scoreEl && typeof score.home === 'number' && typeof score.away === 'number') {
           const newScoreText = `${score.home} : ${score.away}`;
-          // Только обновляем если счет действительно изменился
-          if (scoreEl.textContent !== newScoreText) {
+          // Проверяем что счет действительно изменился (избегаем ненужных DOM операций)
+          if (scoreEl.textContent?.trim() !== newScoreText) {
             scoreEl.textContent = newScoreText;
+            // Добавляем анимацию обновления как в стабильном коммите
+            scoreEl.classList.add('score-updated');
+            setTimeout(() => { 
+              try { scoreEl.classList.remove('score-updated'); } catch(_) {} 
+            }, 2000);
           }
         }
       } catch(_) {}

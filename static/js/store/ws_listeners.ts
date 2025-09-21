@@ -31,6 +31,106 @@ interface OddsState {
     } catch(_) {}
   });
 
+  // Data patch events - интеграция с __MatchEventsRegistry (стабильный источник)
+  window.addEventListener('ws:data_patch', (e: Event) => {
+    try {
+      const patch = (e as CustomEvent).detail || {};
+      console.log('[WS Listeners] Processing data_patch:', patch);
+      
+      // Обработка патчей матчей
+      if (patch.entity === 'match' && patch.id?.home && patch.id?.away) {
+        const { home, away } = patch.id;
+        const fields = patch.fields || {};
+        
+        // КРИТИЧНО: Обновляем __MatchEventsRegistry если есть события
+        if ((fields.events || fields.rosters) && (window as any).__MatchEventsRegistry) {
+          try {
+            const registry = (window as any).__MatchEventsRegistry;
+            if (fields.events) {
+              console.log('[WS Listeners] Updating MatchEventsRegistry cache:', fields.events);
+              registry.updateEventsCache(home, away, fields.events);
+            }
+          } catch(e) {
+            console.warn('[WS Listeners] Failed to update MatchEventsRegistry:', e);
+          }
+        }
+        
+        // Обновляем счет БЕЗ МЕРЦАНИЯ (принцип из стабильного коммита)
+        if (fields.score_home !== undefined || fields.score_away !== undefined) {
+          try {
+            const sh = fields.score_home;
+            const sa = fields.score_away;
+            if (typeof sh === 'number' && typeof sa === 'number') {
+              // Находим все элементы счета для данного матча
+              const matchElements = document.querySelectorAll(`[data-match-home="${home}"][data-match-away="${away}"]`);
+              const newScoreText = `${sh} : ${sa}`;
+              
+              matchElements.forEach((element: Element) => {
+                const scoreElement = element.querySelector('.match-score') || element.querySelector('.score');
+                if (scoreElement && scoreElement.textContent?.trim() !== newScoreText) {
+                  scoreElement.textContent = newScoreText;
+                  // Добавляем анимацию как в стабильном коммите
+                  scoreElement.classList.add('score-updated');
+                  setTimeout(() => { 
+                    try { scoreElement.classList.remove('score-updated'); } catch(_) {} 
+                  }, 2000);
+                }
+              });
+              
+              // Также обновляем основной элемент счета в деталях матча
+              const scoreEl = document.getElementById('md-score');
+              if (scoreEl && scoreEl.textContent?.trim() !== newScoreText) {
+                scoreEl.textContent = newScoreText;
+              }
+            }
+          } catch(_) {}
+        }
+        
+        // Обновляем MatchesStore для совместимости
+        try {
+          if ((window as any).MatchesStoreAPI) {
+            const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(home, away);
+            if (matchKey && fields) {
+              (window as any).MatchesStoreAPI.updateMatch(matchKey, fields);
+            }
+          }
+        } catch(_) {}
+      }
+      
+      // Обработка событий матчей (match_events, match_rosters)
+      if ((patch.entity === 'match_events' || patch.entity === 'match_rosters') && patch.home && patch.away) {
+        const { home, away } = patch;
+        
+        // Обновляем __MatchEventsRegistry
+        if ((window as any).__MatchEventsRegistry && patch.events) {
+          try {
+            const registry = (window as any).__MatchEventsRegistry;
+            console.log('[WS Listeners] Updating events cache from patch:', patch.events);
+            registry.updateEventsCache(home, away, patch.events);
+          } catch(e) {
+            console.warn('[WS Listeners] Failed to update events cache:', e);
+          }
+        }
+        
+        // Отправляем событие для UI компонентов
+        const event = new CustomEvent('eventsRegistryUpdate', {
+          detail: {
+            home,
+            away,
+            type: patch.entity,
+            reason: patch.reason || 'ws_patch',
+            timestamp: Date.now(),
+            events: patch.events || {}
+          }
+        });
+        document.dispatchEvent(event);
+      }
+      
+    } catch(error) {
+      console.error('[WS Listeners] Error processing data_patch:', error);
+    }
+  });
+
   // Topic updates (optional topics array maintenance)
   window.addEventListener('ws:topic_update', (e: Event) => {
     try {
