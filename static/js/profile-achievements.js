@@ -31,10 +31,16 @@
       const base = '/static/img/achievements/';
       const state = stateFromTier(a);
       const candidates = [];
-      if (key) {candidates.push(`${base}${slugify(key)}-${state}.png`);}
-      if (key && a.icon) {candidates.push(`${base}${slugify(key)}-${slugify(a.icon)}.png`);}
+      // 1) Приоритет: явный URL с бэкенда
+      if (a.icon_url) { candidates.push(a.icon_url); }
+      // 2) Групповые спрайты вида group-state
+      if (key) {candidates.push(`${base}${slugify(key)}-${state}.png`);}    
+      if (key && a.icon) {candidates.push(`${base}${slugify(key)}-${slugify(a.icon)}.png`);}    
+      // 3) Общие bronze/silver/gold/locked
       candidates.push(`${base}${state}.png`);
+      // 4) Плейсхолдер
       candidates.push(`${base}placeholder.png`);
+      // 5) SVG варианты
       const svgFallbacks = candidates.map(p => p.replace(/\.png$/i, '.svg'));
       svgFallbacks.forEach(s => { if(!candidates.includes(s)) {candidates.push(s);} });
       let i=0; const next=()=>{ if(i>=candidates.length) {return;} imgEl.onerror=()=>{ i++; next(); }; imgEl.src=candidates[i]; }; next();

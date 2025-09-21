@@ -8807,6 +8807,11 @@ def get_achievements():
                     display_name = list(name_map.values())[0]
                     display_icon = icon_map.get(1, 'bronze')
                     display_target = targets[0] if targets else None
+                # Явный URL иконки для конкретной группы и достигнутого тира
+                try:
+                    icon_url = f"/static/img/achievements/{group}-{display_icon}.png"
+                except Exception:
+                    icon_url = None
                 achievements.append({
                     'group': group,
                     'tier': int(best_tier),
@@ -8817,9 +8822,15 @@ def get_achievements():
                     'next_target': _next_target_by_value(value, targets),
                     'all_targets': targets,
                     'icon': display_icon,
+                    'icon_url': icon_url,
                     'unlocked': True
                 })
             else:
+                # Для закрытого достижения иконка — "locked"
+                try:
+                    icon_url = f"/static/img/achievements/{group}-locked.png"
+                except Exception:
+                    icon_url = None
                 achievements.append({
                     'group': group,
                     'tier': 0,
@@ -8830,6 +8841,7 @@ def get_achievements():
                     'next_target': _next_target_by_value(value, targets),
                     'all_targets': targets,
                     'icon': icon_map.get(1, 'bronze'),
+                    'icon_url': icon_url,
                     'unlocked': False
                 })
         add('streak', best_streak_tier, {1:'Бронза',2:'Серебро',3:'Золото'}, user['consecutive_days'], streak_targets, {1:'bronze',2:'silver',3:'gold'})
