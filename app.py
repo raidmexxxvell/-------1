@@ -2571,8 +2571,22 @@ def api_admin_matches_upcoming():
             except Exception as e:
                 app.logger.error(f"admin matches upcoming: failed to load snapshot: {e}")
         now = datetime.now()
-        out = []
+        
+        # Группируем матчи по турам
+        tours_out = []
+        tours_dict = {}
+        
         for t in tours or []:
+            tour_number = t.get('tour')
+            tour_title = t.get('title') or f"Тур {tour_number}" if tour_number else "Ближайшие матчи"
+            
+            if tour_number not in tours_dict:
+                tours_dict[tour_number] = {
+                    'tour': tour_number,
+                    'title': tour_title,
+                    'matches': []
+                }
+            
             # Поддержка разных форматов тура: t может быть словарём с ключом matches или сам быть матчем
             tour_matches = []
             if isinstance(t, dict):
@@ -2582,6 +2596,7 @@ def api_admin_matches_upcoming():
                     tour_matches = [t]
             elif isinstance(t, list):
                 tour_matches = t
+                
             for m in tour_matches or []:
                 # фильтруем только будущие или сегодняшние матчи
                 match_date = m.get('date')
@@ -2657,16 +2672,21 @@ def api_admin_matches_upcoming():
                         import hashlib
                         key = f"{home or ''}|{away or ''}|{match_date}"
                         mid = hashlib.sha1(key.encode('utf-8')).hexdigest()[:12]
-                    out.append({
+                    
+                    match_obj = {
                         'id': mid,
                         'home_team': home,
                         'away_team': away,
                         'match_date': dt_iso or match_date,
                         'lineups': lineups
-                    })
-        # отсортируем по дате
-        out.sort(key=lambda x: x.get('match_date') or '')
-        return _json_response({'matches': out})
+                    }
+                    tours_dict[tour_number]['matches'].append(match_obj)
+        
+        # Удаляем туры без матчей и преобразуем в список
+        tours_out = [tour for tour in tours_dict.values() if tour['matches']]
+        tours_out.sort(key=lambda x: x.get('tour') or 999)
+        
+        return _json_response({'tours': tours_out})
     except Exception as e:
         app.logger.error(f"admin matches upcoming error: {e}")
         return jsonify({'error': 'internal'}), 500

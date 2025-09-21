@@ -459,20 +459,23 @@
 
   function createMatchElement(match) {
     const matchEl = document.createElement('div');
-    matchEl.className = 'match-item';
+    matchEl.className = 'match-card';
     
     const lineupStatus = getLineupStatus(match.lineups);
-    const matchDate = new Date(match.match_date).toLocaleString('ru-RU');
+    const matchDate = new Date(match.match_date).toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
     
     matchEl.innerHTML = `
-      <div class="match-info">
-        <div class="match-main">
-          <div class="match-teams">${match.home_team} vs ${match.away_team}</div>
-          <div class="match-date">${matchDate}</div>
-        </div>
+      <div class="match-header">
+        <div class="match-teams">${match.home_team} vs ${match.away_team}</div>
         <div class="lineup-status ${lineupStatus.class}">${lineupStatus.text}</div>
       </div>
-      <div class="match-actions">
+      <div class="match-footer">
+        <div class="match-date">${matchDate}</div>
         <button class="edit-lineup-btn" onclick="window.AdminEnhanced.openMatchModal('${match.id}', '${match.home_team}', '${match.away_team}')">
           Составы
         </button>
@@ -508,18 +511,38 @@
       const res = await fetch('/api/admin/matches/upcoming', { method: 'POST', body: fd, credentials: 'include' });
       const data = await res.json();
       if(!res.ok || data.error){ throw new Error(data.error || `HTTP ${res.status}`); }
-      const matches = Array.isArray(data.matches) ? data.matches : [];
+      const tours = Array.isArray(data.tours) ? data.tours : [];
       container.innerHTML = '';
-      if(matches.length === 0){
+      if(tours.length === 0){
         container.innerHTML = '<div class="status-text">Нет ближайших матчей</div>';
         return;
       }
-      matches.forEach(m => container.appendChild(createMatchElement(m)));
+      tours.forEach(tour => container.appendChild(createTourElement(tour)));
     } catch(err){
       console.error('[Admin] loadMatches error', err);
       container.innerHTML = '<div class="status-text">Ошибка загрузки матчей</div>';
       showToast('Ошибка загрузки матчей: ' + err.message, 'error');
     }
+  }
+
+  function createTourElement(tour) {
+    const tourEl = document.createElement('div');
+    tourEl.className = 'tour-container';
+    
+    const tourTitle = document.createElement('h4');
+    tourTitle.className = 'tour-title';
+    tourTitle.textContent = tour.title || `Тур ${tour.tour}`;
+    tourEl.appendChild(tourTitle);
+    
+    const matchesGrid = document.createElement('div');
+    matchesGrid.className = 'matches-grid';
+    
+    tour.matches.forEach(match => {
+      matchesGrid.appendChild(createMatchElement(match));
+    });
+    
+    tourEl.appendChild(matchesGrid);
+    return tourEl;
   }
 
   // Modal functions
