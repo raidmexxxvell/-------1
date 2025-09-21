@@ -712,6 +712,23 @@
   const formatDateTime = (d,t) => (window.MatchUtils? window.MatchUtils.formatDateTime(d,t): (d||'') );
   const isLiveNow = (m) => (window.MatchUtils? window.MatchUtils.isLiveNow(m): false);
 
+    // Реакция на глобальный topic_update: если пришло обновление туров ставок — очищаем кэш и перезагружаем
+    document.addEventListener('ws:topic_update', (e) => {
+      try {
+        const p = e && e.detail ? e.detail : e;
+        const entity = p && (p.entity || p.change_type || p.type);
+        if (entity === 'betting_tours') {
+          try { localStorage.removeItem('betting:tours'); } catch(_) {}
+          // Мягкий рефетч если вкладка видна
+          const predTab = document.querySelector('.nav-item[data-tab="predictions"]');
+          const isPredActive = predTab && predTab.classList.contains('active');
+          if (isPredActive && wrap && !wrap.hidden) {
+            loadTours();
+          }
+        }
+      } catch(_) {}
+    });
+
     // Автозагрузка при входе во вкладку (каждый раз, не только первый)
     document.addEventListener('click', (e) => {
       const item = e.target.closest('.nav-item[data-tab="predictions"]');

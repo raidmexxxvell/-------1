@@ -1372,37 +1372,95 @@ def api_betting_place():
             pass
     match_dt = None
     found = False
+
+    def _norm(s: str) -> str:
+        try:
+            return (s or '').strip().lower().replace('ё', 'е')
+        except Exception:
+            return (s or '')
+
+    hn = _norm(home)
+    an = _norm(away)
+
+    # 1) Пробуем найти в указанном туре (если передан)
     for t in tours:
         if tour is not None and t.get('tour') != tour:
             continue
-        for m in t.get('matches', []):
-            if (m.get('home') == home and m.get('away') == away) or (m.get('home') == home and not away):
-                found = True
-                try:
-                    if m.get('datetime'):
-                        match_dt = datetime.fromisoformat(m['datetime'])
-                    else:
-                        d = None; tm = None
-                        if m.get('date'):
-                            try:
-                                d = datetime.fromisoformat(str(m['date'])[:10]).date()
-                            except Exception:
-                                d = None
-                        if m.get('time'):
-                            ts = str(m['time']).strip()
-                            # поддержка HH:MM и HH:MM:SS
-                            for fmt in ("%H:%M:%S", "%H:%M"):
+        for m in t.get('matches', []) or []:
+            try:
+                if _norm(m.get('home')) == hn and _norm(m.get('away')) == an:
+                    found = True
+                    # Зафиксируем фактический тур
+                    try:
+                        if t.get('tour') is not None:
+                            tour = int(t.get('tour'))
+                    except Exception:
+                        pass
+                    try:
+                        if m.get('datetime'):
+                            match_dt = datetime.fromisoformat(m['datetime'])
+                        else:
+                            d = None; tm = None
+                            if m.get('date'):
                                 try:
-                                    tm = datetime.strptime(ts, fmt).time(); break
+                                    d = datetime.fromisoformat(str(m['date'])[:10]).date()
                                 except Exception:
-                                    tm = None
-                        if d is not None:
-                            match_dt = datetime.combine(d, tm or datetime.min.time())
-                except Exception:
-                    match_dt = None
-                break
+                                    d = None
+                            if m.get('time'):
+                                ts = str(m['time']).strip()
+                                for fmt in ("%H:%M:%S", "%H:%M"):
+                                    try:
+                                        tm = datetime.strptime(ts, fmt).time(); break
+                                    except Exception:
+                                        tm = None
+                            if d is not None:
+                                match_dt = datetime.combine(d, tm or datetime.min.time())
+                    except Exception:
+                        match_dt = None
+                    break
+            except Exception:
+                continue
         if found:
             break
+
+    # 2) Fallback: если не нашли (например, тур устарел) — ищем по всем турам
+    if not found:
+        for t in tours:
+            for m in t.get('matches', []) or []:
+                try:
+                    if _norm(m.get('home')) == hn and _norm(m.get('away')) == an:
+                        found = True
+                        try:
+                            if t.get('tour') is not None:
+                                tour = int(t.get('tour'))
+                        except Exception:
+                            pass
+                        try:
+                            if m.get('datetime'):
+                                match_dt = datetime.fromisoformat(m['datetime'])
+                            else:
+                                d = None; tm = None
+                                if m.get('date'):
+                                    try:
+                                        d = datetime.fromisoformat(str(m['date'])[:10]).date()
+                                    except Exception:
+                                        d = None
+                                if m.get('time'):
+                                    ts = str(m.get('time')).strip()
+                                    for fmt in ("%H:%M:%S", "%H:%M"):
+                                        try:
+                                            tm = datetime.strptime(ts, fmt).time(); break
+                                        except Exception:
+                                            tm = None
+                                if d is not None:
+                                    match_dt = datetime.combine(d, tm or datetime.min.time())
+                        except Exception:
+                            match_dt = None
+                        break
+                except Exception:
+                    continue
+            if found:
+                break
     if not found:
         return jsonify({'error': 'Матч не найден'}), 404
     if match_dt:
@@ -6156,6 +6214,21 @@ def _sync_schedule():
         _metrics_set('last_sync_duration_ms', 'schedule', int((time.time()-t0)*1000))
         if invalidator:
             invalidator.invalidate_for_change('schedule_update', {})
+        # Дополнительно: почистим ETag кэш для betting:tours и нотифицируем predictions_page
+        try:
+            _ETAG_HELPER_CACHE.pop('betting:tours', None)
+        except Exception:
+            pass
+        try:
+            inv = globals().get('invalidator')
+            if inv is not None:
+                inv.publish_topic('predictions_page', 'topic_update', {
+                    'entity': 'betting_tours',
+                    'reason': 'schedule_update',
+                    'updated_at': datetime.now(timezone.utc).isoformat()
+                }, priority=1)
+        except Exception:
+            pass
     except Exception as e:
         app.logger.warning(f"Schedule sync failed: {e}")
         _metrics_set('last_sync_status', 'schedule', 'error')
@@ -6204,6 +6277,21 @@ def _sync_betting_tours():
         # Централизованная инвалидация betting_tours через SmartInvalidator
         if invalidator:
             invalidator.invalidate_for_change('betting_tours_update', {})
+        # Почистим локальный ETag кэш и нотифицируем predictions_page об обновлении туров
+        try:
+            _ETAG_HELPER_CACHE.pop('betting:tours', None)
+        except Exception:
+            pass
+        try:
+            inv = globals().get('invalidator')
+            if inv is not None:
+                inv.publish_topic('predictions_page', 'topic_update', {
+                    'entity': 'betting_tours',
+                    'reason': 'tours_sync',
+                    'updated_at': datetime.now(timezone.utc).isoformat()
+                }, priority=1)
+        except Exception:
+            pass
     except Exception as e:
         app.logger.warning(f"Betting tours sync failed: {e}")
         _metrics_set('last_sync_status', 'betting-tours', 'error')
