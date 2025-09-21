@@ -46,7 +46,6 @@ body {
     margin: 0;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     touch-action: manipulation; /* отключаем pinch-zoom на поддерживаемых браузерах */
-    text-align: center;
 }
 
 /* В режиме профиля убираем верхний отступ, чтобы фон шапки был без зазора сверху */

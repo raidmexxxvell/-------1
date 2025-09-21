@@ -2892,10 +2892,20 @@ def api_admin_match_update(match_id: int):
             m.notes = new_notes
         db.commit()
         db.refresh(m)
+        # Пересоберём snapshot расписания из matches
+        try:
+            _update_schedule_snapshot_from_matches(db, app.logger)
+        except Exception:
+            pass
         # Централизованная инвалидация schedule через SmartInvalidator
         try:
             if invalidator:
                 invalidator.invalidate_for_change('schedule_update', {})
+        except Exception:
+            pass
+        # Почистим ETag для /api/schedule, чтобы клиенты сразу увидели изменения
+        try:
+            _ETAG_HELPER_CACHE.pop('schedule', None)
         except Exception:
             pass
         return jsonify({'match': {
@@ -6204,16 +6214,28 @@ def _sync_schedule():
     try:
         _metrics_inc('bg_runs_total', 1)
         t0 = time.time()
-        # Больше не читаем Sheets в фоне. Полагаться на admin импорт.
-        # Если хотим auto-refresh — можно оставить предыдущий снапшот без изменений.
-        snap_prev = (_snapshot_get(db, Snapshot, 'schedule', app.logger) or {})
-        schedule_payload = snap_prev.get('payload') or {'tours': []}
-        _snapshot_set(db, Snapshot, 'schedule', schedule_payload, app.logger)
+        # Пересобираем снапшот расписания из текущей таблицы matches (DB-first, без Sheets)
+        try:
+            _update_schedule_snapshot_from_matches(db, app.logger)
+        except Exception as _ss_err:
+            app.logger.warning(f"Schedule snapshot rebuild in sync failed: {_ss_err}")
+            # Fallback: оставим предыдущий снапшот без изменений
+            try:
+                snap_prev = (_snapshot_get(db, Snapshot, 'schedule', app.logger) or {})
+                schedule_payload = snap_prev.get('payload') or {'tours': []}
+                _snapshot_set(db, Snapshot, 'schedule', schedule_payload, app.logger)
+            except Exception:
+                pass
         _metrics_set('last_sync', 'schedule', datetime.now(timezone.utc).isoformat())
         _metrics_set('last_sync_status', 'schedule', 'ok')
         _metrics_set('last_sync_duration_ms', 'schedule', int((time.time()-t0)*1000))
         if invalidator:
             invalidator.invalidate_for_change('schedule_update', {})
+        # Очистим ETag-кэш для schedule, чтобы клиенты получили свежую версию немедленно
+        try:
+            _ETAG_HELPER_CACHE.pop('schedule', None)
+        except Exception:
+            pass
         # Дополнительно: почистим ETag кэш для betting:tours и нотифицируем predictions_page
         try:
             _ETAG_HELPER_CACHE.pop('betting:tours', None)
