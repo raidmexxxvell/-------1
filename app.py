@@ -10793,14 +10793,10 @@ def api_match_score_set():
                 inv = globals().get('invalidator')
                 if ws and score_changed:
                     # НОВОЕ: Прямое live_update уведомление для мгновенного отображения счета
-                    ws.emit('live_update', {
-                        'home': home,
-                        'away': away,
-                        'data': {
-                            'score_home': row.score_home,
-                            'score_away': row.score_away,
-                            'updated_at': datetime.now(timezone.utc).isoformat()
-                        }
+                    ws.notify_match_live_update(home, away, {
+                        'score_home': row.score_home,
+                        'score_away': row.score_away,
+                        'updated_at': datetime.now(timezone.utc).isoformat()
                     })
                     
                     # Дополнительно обновляем версию коэффициентов если нужно
