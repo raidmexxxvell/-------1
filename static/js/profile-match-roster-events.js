@@ -86,9 +86,84 @@
         box.append(sel,icon); td.appendChild(box); return td;
       } else { // yellow/red прежняя бинарная логика
   const box=document.createElement('div'); box.style.display='flex'; box.style.gap='6px'; box.style.alignItems='center'; box.style.justifyContent='center'; const sel=document.createElement('select'); const optNo=document.createElement('option'); optNo.value='0'; optNo.textContent='—'; const optYes=document.createElement('option'); optYes.value='1'; optYes.textContent='ДА'; sel.append(optNo,optYes); sel.value= count>0? '1':'0'; const icon=document.createElement('img'); icon.style.width='18px'; icon.style.height='18px'; icon.style.objectFit='contain'; icon.style.opacity=count>0?'1':'0.25'; const srcHint=(type==='yellow')?'/static/img/icons/yellow.png':'/static/img/icons/red.png'; const candidates=[vUrl(srcHint), vUrl('/static/img/icons/placeholder.png'), vUrl('/static/img/placeholderlogo.png')]; let ic=0; const nextI=()=>{ if(ic>=candidates.length){return;} icon.onerror=()=>{ ic++; nextI(); }; icon.src=candidates[ic]; }; nextI();
-  // pending gate
+  // pending gate + enhanced sync
   window.__adminEventPending = window.__adminEventPending || new Set();
-  sel.addEventListener('change',async()=>{ const want = sel.value==='1'; const has = getCount(key,type)>0; if(want===has) {return;} const pendKey = `${(match.home||'').toLowerCase()}__${(match.away||'').toLowerCase()}__${side}:${(player||'').toLowerCase()}:${type}`; if(window.__adminEventPending.has(pendKey)) { return; } window.__adminEventPending.add(pendKey); sel.disabled=true; const fd=new FormData(); fd.append('initData', tg?.initData||''); fd.append('home',match.home||''); fd.append('away',match.away||''); fd.append('team',side); fd.append('player',player||''); fd.append('type',type); try { const url= want? '/api/match/events/add':'/api/match/events/remove'; const r=await fetch(url,{method:'POST', body:fd}); const d=await r.json(); if(d?.error){ window.showAlert?.(d.error,'error'); sel.value= has? '1':'0'; return; } if(!evIdx.has(key)) {evIdx.set(key,{goal:0,assist:0,yellow:0,red:0});} evIdx.get(key)[type]= want?1:0; icon.style.opacity= want? '1':'0.25'; highlightRow(trRef,key); try { const host=document.getElementById('ufo-match-details'); if(host) {host.setAttribute('data-admin-last-change-ts', String(Date.now()));} } catch(_){} } catch(e){ console.error('events yellow/red',e); window.showAlert?.('Ошибка сохранения','error'); sel.value= has? '1':'0'; } finally { window.__adminEventPending.delete(pendKey); sel.disabled=false; } }); box.append(sel,icon); td.appendChild(box); return td; }
+  sel.addEventListener('change',async()=>{ 
+    const want = sel.value==='1'; 
+    const has = getCount(key,type)>0; 
+    if(want===has) {return;} 
+    
+    const pendKey = `${(match.home||'').toLowerCase()}__${(match.away||'').toLowerCase()}__${side}:${(player||'').toLowerCase()}:${type}`; 
+    if(window.__adminEventPending.has(pendKey)) { 
+      console.warn('[RosterEvents] Операция уже выполняется:', pendKey);
+      return; 
+    } 
+    
+    window.__adminEventPending.add(pendKey); 
+    sel.disabled=true; 
+    
+    try { 
+      // Используем новую систему синхронизации если доступна
+      if (window.__MatchEventsRegistry && typeof window.__MatchEventsRegistry.performEventOperation === 'function') {
+        console.log('[RosterEvents] Используем улучшенную систему синхронизации');
+        const operation = want ? 'add' : 'remove';
+        const result = await window.__MatchEventsRegistry.performEventOperation(
+          match.home, match.away, side, player, type, operation
+        );
+        
+        if (result.error) {
+          window.showAlert?.(result.error,'error'); 
+          sel.value= has? '1':'0'; 
+          return;
+        }
+        
+        // Обновляем локальный индекс
+        if(!evIdx.has(key)) {evIdx.set(key,{goal:0,assist:0,yellow:0,red:0});}
+        evIdx.get(key)[type]= want?1:0; 
+        icon.style.opacity= want? '1':'0.25'; 
+        highlightRow(trRef,key);
+        
+      } else {
+        // Fallback к старому методу
+        console.log('[RosterEvents] Используем стандартный метод');
+        const fd=new FormData(); 
+        fd.append('initData', tg?.initData||''); 
+        fd.append('home',match.home||''); 
+        fd.append('away',match.away||''); 
+        fd.append('team',side); 
+        fd.append('player',player||''); 
+        fd.append('type',type); 
+        
+        const url= want? '/api/match/events/add':'/api/match/events/remove'; 
+        const r=await fetch(url,{method:'POST', body:fd}); 
+        const d=await r.json(); 
+        
+        if(d?.error){ 
+          window.showAlert?.(d.error,'error'); 
+          sel.value= has? '1':'0'; 
+          return; 
+        } 
+        
+        if(!evIdx.has(key)) {evIdx.set(key,{goal:0,assist:0,yellow:0,red:0});} 
+        evIdx.get(key)[type]= want?1:0; 
+        icon.style.opacity= want? '1':'0.25'; 
+        highlightRow(trRef,key);
+      }
+      
+      try { 
+        const host=document.getElementById('ufo-match-details'); 
+        if(host) {host.setAttribute('data-admin-last-change-ts', String(Date.now()));} 
+      } catch(_){} 
+      
+    } catch(e){ 
+      console.error('events yellow/red',e); 
+      window.showAlert?.('Ошибка сохранения','error'); 
+      sel.value= has? '1':'0'; 
+    } finally { 
+      window.__adminEventPending.delete(pendKey); 
+      sel.disabled=false; 
+    } 
+  }); box.append(sel,icon); td.appendChild(box); return td; }
     };
     table.appendChild(thead); if(!players||players.length===0){ const tr=document.createElement('tr'); const td=document.createElement('td'); td.colSpan=5; td.style.padding='10px'; td.style.textAlign='center'; td.style.border='1px solid rgba(255,255,255,0.15)'; td.textContent='Нет данных'; tr.appendChild(td); tbody.appendChild(tr); } else { players.forEach(pName=>{ const tr=document.createElement('tr'); const tdName=document.createElement('td'); tdName.style.border='1px solid rgba(255,255,255,0.15)'; tdName.style.padding='6px'; tdName.style.textAlign='left'; tdName.textContent=pName; const tdY=createCell(pName,'yellow',tr); const tdR=createCell(pName,'red',tr); const tdA=createCell(pName,'assist',tr); const tdG=createCell(pName,'goal',tr); tr.append(tdName,tdY,tdR,tdA,tdG); const key=(pName||'').trim().toLowerCase(); highlightRow(tr,key); tbody.appendChild(tr); }); }
   table.appendChild(tbody); pane.appendChild(table); if(side==='home'){ const btnWrap=document.createElement('div'); btnWrap.style.display='flex'; btnWrap.style.justifyContent='center'; btnWrap.style.marginTop='8px'; const btn=document.createElement('button'); btn.className='details-btn'; btn.textContent='Обновить составы'; btn.style.fontSize='12px'; btn.style.padding='6px 10px'; btn.style.borderRadius='8px'; const mkKey=()=>{ try { const dRaw=(match?.datetime||match?.date||'').toString(); const d=dRaw?dRaw.slice(0,10):''; return `roster:refresh:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${d}`; } catch(_) { return 'roster:refresh'; } }; const rKey=mkKey(); const COOLDOWN=10*60*1000; const updateState=()=>{ try { const last=Number(localStorage.getItem(rKey)||'0')||0; const left=Math.max(0,(last+COOLDOWN)-Date.now()); if(left>0){ btn.disabled=true; const mins=Math.ceil(left/60000); btn.textContent=`Доступно через ${mins} мин`; } else { btn.disabled=false; btn.textContent='Обновить составы'; } } catch(_){} }; updateState(); btn.addEventListener('click',async()=>{ try { const last=Number(localStorage.getItem(rKey)||'0')||0; if(Date.now()-last<COOLDOWN){ updateState(); return; } } catch(_){} btn.disabled=true; const orig=btn.textContent; btn.textContent='Обновляю...'; try { const params=new URLSearchParams({ home:match.home||'', away:match.away||'' }); const r=await fetch(`/api/match/lineups?${params.toString()}`,{ headers:{'Cache-Control':'no-store'} }); const fresh=await r.json(); const homeList=Array.isArray(fresh?.rosters?.home)?fresh.rosters.home:[]; const awayList=Array.isArray(fresh?.rosters?.away)?fresh.rosters.away:[]; const ev = details?.events || {home:[],away:[]}; renderRosterTable(homePane,homeList,'home',ev); renderRosterTable(awayPane,awayList,'away',ev); try { localStorage.setItem(rKey,String(Date.now())); } catch(_){} } catch(e){} btn.textContent=orig; updateState(); }); btnWrap.appendChild(btn); pane.appendChild(btnWrap); }
@@ -147,4 +222,40 @@
     }
   }
   window.MatchRostersEvents = { render };
+  
+  // Подписка на обновления реестра событий для автоматической синхронизации UI
+  document.addEventListener('eventsRegistryUpdate', (event) => {
+    try {
+      const { home, away, reason } = event.detail;
+      
+      // Проверяем, относится ли обновление к текущему открытому матчу
+      const currentMatch = window.__currentMatchDetails;
+      if (currentMatch && currentMatch.home === home && currentMatch.away === away) {
+        console.log('[MatchRostersEvents] Получено обновление реестра событий, обновляем UI');
+        
+        // Запускаем принудительное обновление деталей матча
+        if (typeof window.fetchMatchDetails === 'function') {
+          window.fetchMatchDetails({ home, away, forceFresh: true })
+            .then(store => {
+              try {
+                if (store && (store.data || store.raw)) {
+                  const details = store.data || store.raw;
+                  // Перерисовываем ростер с обновленными событиями
+                  if (typeof window.MatchRostersEvents.render === 'function') {
+                    window.MatchRostersEvents.render(details);
+                  }
+                }
+              } catch(err) {
+                console.error('[MatchRostersEvents] Ошибка обновления после registry update:', err);
+              }
+            })
+            .catch(err => {
+              console.error('[MatchRostersEvents] Ошибка fetch после registry update:', err);
+            });
+        }
+      }
+    } catch(error) {
+      console.error('[MatchRostersEvents] Ошибка обработки eventsRegistryUpdate:', error);
+    }
+  });
 })();

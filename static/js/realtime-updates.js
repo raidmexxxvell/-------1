@@ -591,6 +591,55 @@ class RealtimeUpdater {
                     }
                 } catch(_) {}
                 break;
+            case 'match_events':
+                // НОВОЕ: Обработка событий матча в реальном времени
+                try {
+                    console.log('[Реалтайм] Получено обновление событий матча:', data);
+                    if (data && data.home && data.away) {
+                        // Немедленное обновление открытого экрана матча (если открыт)
+                        this.refreshMatchDetails(data);
+                        
+                        // Если открыт конкретный матч - обновляем его детали
+                        const matchDetailsPane = document.getElementById('ufo-match-details');
+                        if (matchDetailsPane && matchDetailsPane.style.display !== 'none') {
+                            // Принудительное обновление деталей матча
+                            if (typeof window.fetchMatchDetails === 'function') {
+                                window.fetchMatchDetails({ home: data.home, away: data.away, forceFresh: true })
+                                    .then(store => { 
+                                        try { 
+                                            if (store && (store.data||store.raw)) { 
+                                                const d = store.data || store.raw; 
+                                                this.refreshMatchDetails(d); 
+                                            } 
+                                        } catch(_){} 
+                                    })
+                                    .catch(()=>{});
+                            }
+                        }
+                        
+                        // Уведомляем компоненты о изменении событий
+                        const event = new CustomEvent('matchEventsUpdate', { 
+                            detail: { 
+                                home: data.home, 
+                                away: data.away, 
+                                type: data.entity,
+                                reason: data.reason,
+                                data: data
+                            } 
+                        });
+                        document.dispatchEvent(event);
+                    }
+                } catch(_) {}
+                break;
+            case 'match_details':
+                // НОВОЕ: Обработка обновления деталей матча
+                try {
+                    console.log('[Реалтайм] Получено обновление деталей матча:', data);
+                    if (data && data.home && data.away) {
+                        this.refreshMatchDetails(data);
+                    }
+                } catch(_) {}
+                break;
             case 'lineups_updated':
                 // Авто-обновление составов конкретного матча
                 this.handleLineupsUpdated(data);

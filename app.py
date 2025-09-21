@@ -11261,6 +11261,37 @@ def api_match_events_add():
                     db.commit()
             # Попытка синхронизации в расширенную схему (не критично при ошибке)
             _maybe_sync_event_to_adv_schema(home, away, player, etype)
+            
+            # КРИТИЧНО: Добавляем глобальные WebSocket уведомления для мгновенного обновления всех клиентов
+            try:
+                ws_manager = globals().get('websocket_manager') or (current_app.config.get('websocket_manager') if 'current_app' in globals() else None)
+                if ws_manager:
+                    # Глобальное уведомление о изменении событий матча
+                    ws_manager.notify_data_change('match_events', {
+                        'home': home,
+                        'away': away,
+                        'entity': 'match_events',
+                        'reason': 'event_added',
+                        'player': player,
+                        'type': etype,
+                        'team': team,
+                        'minute': minute,
+                        'updated_at': datetime.now(timezone.utc).isoformat()
+                    })
+                    
+                    # Дополнительное уведомление для обновления деталей конкретного матча
+                    ws_manager.notify_data_change('match_details', {
+                        'home': home,
+                        'away': away,
+                        'reason': 'events_updated',
+                        'updated_at': datetime.now(timezone.utc).isoformat()
+                    })
+            except Exception as ws_err:
+                try:
+                    app.logger.warning(f"WebSocket notification failed for match event add: {ws_err}")
+                except Exception:
+                    pass
+            
             # Таргетированное уведомление в топик деталей матча (events изменились)
             try:
                 inv = globals().get('invalidator')
@@ -11369,6 +11400,37 @@ def api_match_events_remove():
             rid = int(row.id)
             db.delete(row)
             db.commit()
+            
+            # КРИТИЧНО: Добавляем глобальные WebSocket уведомления для мгновенного обновления всех клиентов
+            try:
+                ws_manager = globals().get('websocket_manager') or (current_app.config.get('websocket_manager') if 'current_app' in globals() else None)
+                if ws_manager:
+                    # Глобальное уведомление о удалении события матча
+                    ws_manager.notify_data_change('match_events', {
+                        'home': home,
+                        'away': away,
+                        'entity': 'match_events_removed',
+                        'reason': 'event_removed',
+                        'player': player,
+                        'type': etype,
+                        'team': team,
+                        'removed_id': rid,
+                        'updated_at': datetime.now(timezone.utc).isoformat()
+                    })
+                    
+                    # Дополнительное уведомление для обновления деталей конкретного матча
+                    ws_manager.notify_data_change('match_details', {
+                        'home': home,
+                        'away': away,
+                        'reason': 'events_updated',
+                        'updated_at': datetime.now(timezone.utc).isoformat()
+                    })
+            except Exception as ws_err:
+                try:
+                    app.logger.warning(f"WebSocket notification failed for match event remove: {ws_err}")
+                except Exception:
+                    pass
+            
             # Уведомление в топик деталей матча об изменении событий
             try:
                 inv = globals().get('invalidator')
