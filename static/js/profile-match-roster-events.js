@@ -274,7 +274,7 @@
               matchDetailsPane.__lastEvents = events;
               
               // Обновляем индексы событий для всех видимых селектов
-              document.querySelectorAll(`[data-match-home="${home}"][data-match-away="${away}"] select`).forEach(select => {
+              document.querySelectorAll(`select[data-match-home="${home}"][data-match-away="${away}"]`).forEach(select => {
                 try {
                   const playerKey = (select.getAttribute('data-player') || '').toLowerCase().trim();
                   const eventType = select.getAttribute('data-event-type');
@@ -313,6 +313,16 @@
         }
         
         // Дополнительно: принудительное обновление через API (для полной синхронизации)
+        // Защита: не делать refetch/перерисовку, если недавно были админские изменения (грейс-период)
+        try {
+          const host = document.getElementById('ufo-match-details');
+          const ts = Number(host?.getAttribute('data-admin-last-change-ts') || '0') || 0;
+          const withinGrace = ts && (Date.now() - ts < 8000);
+          if (withinGrace) {
+            console.log('[MatchRostersEvents] Пропускаем fetch перерисовку (грейс после админ-изменений)');
+            return;
+          }
+        } catch(_){}
         debounceEventUpdate(`match-details-${home}-${away}`, () => {
           if (typeof window.fetchMatchDetails === 'function') {
             window.fetchMatchDetails({ home, away, forceFresh: true })
