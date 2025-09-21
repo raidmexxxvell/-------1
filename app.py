@@ -10011,6 +10011,37 @@ def api_betting_tours():
                                 for m in (t.get('matches') or []):
                                     try:
                                         dt = _parse_match_dt(m)
+                                        home = (m.get('home') or '').strip()
+                                        away = (m.get('away') or '').strip()
+                                        
+                                        # НОВАЯ ПРОВЕРКА: Исключаем завершенные матчи полностью
+                                        is_finished = False
+                                        try:
+                                            # Проверяем статус в основной таблице matches
+                                            from utils.match_status import get_match_status_by_names
+                                            match_status = get_match_status_by_names(db, home, away)
+                                            if match_status == 'finished':
+                                                is_finished = True
+                                        except Exception:
+                                            pass
+                                        
+                                        # Дополнительная проверка: есть ли матч в результатах
+                                        if not is_finished:
+                                            try:
+                                                snap_results = _snapshot_get(db, Snapshot, 'results', app.logger)
+                                                if snap_results and 'payload' in snap_results:
+                                                    results = snap_results['payload'].get('results', [])
+                                                    for r in results:
+                                                        if (r.get('home') == home and r.get('away') == away and 
+                                                            r.get('score_home') is not None and r.get('score_away') is not None):
+                                                            is_finished = True
+                                                            break
+                                            except Exception:
+                                                pass
+                                        
+                                        if is_finished:
+                                            continue  # Пропускаем завершенный матч
+                                        
                                         # скрываем начавшиеся
                                         if dt is not None and dt <= now_local:
                                             continue
@@ -10022,7 +10053,6 @@ def api_betting_tours():
                                             except Exception:
                                                 pass
                                         # пересчёт коэффициентов и версии
-                                        home = (m.get('home') or '').strip()
                                         away = (m.get('away') or '').strip()
                                         draw = m.get('date') or m.get('datetime') or ''
                                         date_key = str(draw)[:10] if draw else ''
@@ -15540,9 +15570,13 @@ def api_scorers():
             limit = int(limit_param) if (limit_param is not None and str(limit_param).strip()!='' ) else 10
         except Exception:
             limit = 10
+        
+        # НОВОЕ: Поддержка принудительного обновления через параметр _refresh
+        force_refresh = request.args.get('_refresh') is not None
+        
         max_age = 600
         age = time.time() - (SCORERS_CACHE.get('ts') or 0)
-        if age > max_age:
+        if age > max_age or force_refresh:
             rebuilt = False
             if adv_db_manager and getattr(adv_db_manager, 'SessionLocal', None):
                 env_tour = os.environ.get('DEFAULT_TOURNAMENT_ID')

@@ -205,6 +205,54 @@ class RealtimeUpdater {
                         }
                     } catch(_){}
                 }
+                // КРИТИЧНО: Обновляем кэш завершенных матчей для корректной работы isLiveNow
+                try {
+                    const finStore = (window.__FINISHED_MATCHES = window.__FINISHED_MATCHES || {});
+                    const mkKey = (mm) => {
+                        try {
+                            const dateStr = (mm?.datetime || mm?.date || '').toString().slice(0, 10);
+                            return `${(mm.home || '').toLowerCase().trim()}__${(mm.away || '').toLowerCase().trim()}__${dateStr}`;
+                        } catch(_) {
+                            return `${(mm.home || '').toLowerCase().trim()}__${(mm.away || '').toLowerCase().trim()}__`;
+                        }
+                    };
+                    const matchKey = mkKey({ home, away, datetime: new Date().toISOString() });
+                    finStore[matchKey] = true;
+                    
+                    // Также попробуем найти точный ключ из расписания если есть дата
+                    try {
+                        const schedule = JSON.parse(localStorage.getItem('schedule:tours') || 'null');
+                        if(schedule?.data?.tours) {
+                            schedule.data.tours.forEach(t => {
+                                (t.matches || []).forEach(m => {
+                                    if(m.home === home && m.away === away) {
+                                        const exactKey = mkKey(m);
+                                        finStore[exactKey] = true;
+                                    }
+                                });
+                            });
+                        }
+                    } catch(_) {}
+                } catch(_) {}
+                // Немедленно обновляем UI прогнозов для удаления live-статуса
+                try {
+                    // Удаляем live бейджи из прогнозов
+                    const predCards = document.querySelectorAll('.match-card[data-home]');
+                    predCards.forEach(card => {
+                        const cardHome = card.dataset.home;
+                        const cardAway = card.dataset.away;
+                        if(cardHome === home && cardAway === away) {
+                            const liveBadges = card.querySelectorAll('.live-badge');
+                            liveBadges.forEach(b => b.remove());
+                            // Блокируем ставки если есть кнопки
+                            const betBtns = card.querySelectorAll('.bet-btn');
+                            betBtns.forEach(btn => {
+                                btn.disabled = true;
+                                btn.style.opacity = '0.5';
+                            });
+                        }
+                    });
+                } catch(_) {}
                 // Фоновая синхронизация (расписание нужно обновить в любом случае)
                 this.refreshSchedule();
                 if(!payload.results_block){
@@ -231,11 +279,20 @@ class RealtimeUpdater {
                 } catch(_){}
                 // Обновление таблицы лиги (live проекция) — быстрый refresh чтобы отразить победы/очки
                 try { this.refreshTable(); } catch(_){}
+                // НОВОЕ: Мгновенное обновление статистики (топ-10 по Г+П)
+                try {
+                    if (typeof window.loadStatsViaStore === 'function') { window.loadStatsViaStore(); }
+                    else if (typeof window.loadStatsTable === 'function') { window.loadStatsTable(); }
+                    else if (typeof window.renderScorersTable === 'function') { 
+                        window.renderScorersTable(true); // force refresh
+                    }
+                } catch(_) {}
                 // Принудительное обновление кэшей расписания и результатов для синхронизации
                 try { 
                     localStorage.removeItem('league:schedule'); 
                     localStorage.removeItem('league:results');
                     localStorage.removeItem('schedule:tours');
+                    localStorage.removeItem('betting:tours'); // ВАЖНО: инвалидируем кэш прогнозов
                 } catch(_){}
                 // Дополнительно обновляем результаты если не было results_block
                 if(!payload.results_block){
@@ -243,6 +300,14 @@ class RealtimeUpdater {
                         try { this.triggerDataRefresh('schedule'); } catch(_){}
                     }, 300);
                 }
+                // Если открыта вкладка прогнозов — принудительно перезагружаем
+                try {
+                    const predTab = document.querySelector('.nav-item[data-tab="predictions"]');
+                    const isPredActive = predTab && predTab.classList.contains('active');
+                    if(isPredActive && window.loadTours && typeof window.loadTours === 'function') {
+                        setTimeout(() => { try { window.loadTours(); } catch(_) {} }, 100);
+                    }
+                } catch(_) {}
             } catch(_){}
         });
 
@@ -521,6 +586,9 @@ class RealtimeUpdater {
                 try {
                     if (typeof window.loadStatsViaStore === 'function') { window.loadStatsViaStore(); }
                     else if (typeof window.loadStatsTable === 'function') { window.loadStatsTable(); }
+                    else if (typeof window.renderScorersTable === 'function') { 
+                        window.renderScorersTable(true); // force refresh
+                    }
                 } catch(_) {}
                 break;
             case 'lineups_updated':

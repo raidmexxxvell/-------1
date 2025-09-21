@@ -360,6 +360,15 @@ def finalize_match_core(
             scorers_cache['ts'] = time.time()
             scorers_cache['items'] = scorers
 
+            # КРИТИЧНО: Также инвалидируем глобальный кэш если он существует в глобальном пространстве
+            try:
+                # Импортируем глобальный кэш из app.py для прямой инвалидации
+                import app
+                if hasattr(app, 'SCORERS_CACHE'):
+                    app.SCORERS_CACHE = {'ts': time.time(), 'items': scorers}
+            except Exception:
+                pass
+
             header = ['Игрок', 'Матчи', 'Голы', 'Пасы', 'ЖК', 'КК', 'Очки']
             rows_sorted = sorted(
                 all_rows,
@@ -392,6 +401,9 @@ def finalize_match_core(
             try:
                 if cache_manager:
                     cache_manager.invalidate('stats_table')
+                    # НОВОЕ: Инвалидируем также кэш scorers/player stats
+                    cache_manager.invalidate('scorers')
+                    cache_manager.invalidate('player_stats')
             except Exception:
                 pass
             try:
@@ -598,6 +610,49 @@ def finalize_match_core(
         try:
             if websocket_manager:
                 websocket_manager.notify_data_change('league_table', league_payload)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # 8. WebSocket уведомление о завершении матча (для мгновенного обновления UI)
+    try:
+        if websocket_manager:
+            # Попытаемся взять финальный счёт + свежий блок результатов
+            extra = {}
+            try:
+                snap_res = snapshot_get(db, SnapshotModel, 'results', logger) or {}
+                if snap_res and 'payload' in snap_res:
+                    extra['results_block'] = snap_res['payload']
+            except Exception:
+                pass
+            try:
+                # Добавляем актуальный счёт если есть
+                ms = db.query(MatchScore).filter(MatchScore.home == home, MatchScore.away == away).first()
+                if ms and ms.score_home is not None and ms.score_away is not None:
+                    extra['score_home'] = int(ms.score_home)
+                    extra['score_away'] = int(ms.score_away)
+            except Exception:
+                pass
+            websocket_manager.notify_match_finished(home, away, extra)
+    except Exception as e:
+        try:
+            logger.warning(f"finalize: notify_match_finished failed {home} vs {away}: {e}")
+        except Exception:
+            pass
+
+    # 9. Инвалидация betting-tours кэша для исключения завершенного матча из прогнозов
+    try:
+        if cache_manager:
+            cache_manager.invalidate('betting_tours')
+    except Exception:
+        pass
+    try:
+        # Перестраиваем снапшот betting-tours чтобы исключить завершенный матч
+        try:
+            from app import _build_betting_tours_payload
+            tours_payload = _build_betting_tours_payload()
+            snapshot_set(db, SnapshotModel, 'betting-tours', tours_payload, logger)
         except Exception:
             pass
     except Exception:

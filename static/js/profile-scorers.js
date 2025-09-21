@@ -1,7 +1,7 @@
 // Scorers table loader
 (function(){
   function isStoreEnabled(){ try { return localStorage.getItem('feature:league_ui_store') === '1'; } catch(_) { return false; } }
-  function renderScorers(){
+  function renderScorers(forceRefresh = false){
     if (isStoreEnabled()) { return; } // do not interfere when store UI is on
     const hostPane = document.getElementById('ufo-stats');
     if(!hostPane) { return; }
@@ -10,7 +10,11 @@
     const tbody = table.querySelector('tbody');
     if(!tbody) { return; }
     tbody.innerHTML = '<tr><td style="padding:8px; font-size:12px; opacity:.7;">Загрузка...</td></tr>';
-    fetch('/api/scorers').then(r=>r.json()).then(data => {
+    
+    // Добавляем параметр принудительного обновления
+    const url = forceRefresh ? '/api/scorers?_refresh=1' : '/api/scorers';
+    
+    fetch(url).then(r=>r.json()).then(data => {
       const items = data?.items || [];
       if(!items.length){
         tbody.innerHTML = '<tr><td style="padding:8px; font-size:12px; opacity:.7;">Нет данных</td></tr>';

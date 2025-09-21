@@ -33,10 +33,25 @@
   function isLiveNow(m, opts={}){
     const { windowMinutes = 120, nowTs = Date.now() } = opts;
     try {
-      // Проверяем finStore (завершенные матчи)
+      // Проверяем finStore (завершенные матчи) - используем несколько вариантов ключей
       const finStore = window.__FINISHED_MATCHES || {};
       const key = matchKey(m);
-  if (finStore[key]) { return false; }
+      if (finStore[key]) { return false; }
+      
+      // Дополнительные проверки ключей (на случай разных форматов дат)
+      const homeTeam = (m?.home || '').toLowerCase().trim();
+      const awayTeam = (m?.away || '').toLowerCase().trim();
+      if (homeTeam && awayTeam) {
+        // Проверяем разные варианты ключей
+        const keys = [
+          `${homeTeam}__${awayTeam}__`,
+          `${homeTeam}__${awayTeam}__${(m?.date || '').slice(0, 10)}`,
+          `${homeTeam}__${awayTeam}__${(m?.datetime || '').slice(0, 10)}`
+        ];
+        for (const k of keys) {
+          if (finStore[k]) { return false; }
+        }
+      }
       
       // Проверяем результаты в кэше
       try {
@@ -51,10 +66,10 @@
       } catch(_) {}
       
       const start = parseDateTime(m);
-  if (!start) { return false; }
+      if (!start) { return false; }
       const endTs = start.getTime() + windowMinutes*60*1000;
       return nowTs >= start.getTime() && nowTs < endTs;
-  } catch(_) { return false; }
+    } catch(_) { return false; }
   }
 
   function isStartingSoon(m, minutes = 5, opts={}){
