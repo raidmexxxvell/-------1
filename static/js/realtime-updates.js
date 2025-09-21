@@ -745,6 +745,20 @@ class RealtimeUpdater {
                 setTimeout(() => { try { scoreElement.classList.remove('score-updated'); } catch(_) {} }, 2000);
             }
         });
+        // Дополнительно обновляем счёт в модальном окне деталей матча, если открыт именно этот матч
+        try {
+            const mdPane = document.getElementById('ufo-match-details');
+            if (mdPane && mdPane.style.display !== 'none') {
+                const curH = mdPane.getAttribute('data-match-home') || '';
+                const curA = mdPane.getAttribute('data-match-away') || '';
+                if (curH === home && curA === away) {
+                    const scoreEl = document.getElementById('md-score');
+                    if (scoreEl && scoreEl.textContent !== txt) {
+                        scoreEl.textContent = txt;
+                    }
+                }
+            }
+        } catch(_){}
     }
     
     showNotification(message) {

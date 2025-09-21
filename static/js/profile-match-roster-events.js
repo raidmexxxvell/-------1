@@ -132,17 +132,11 @@
           sel.value= has? '1':'0'; 
           return;
         }
-        
-        // Обновляем локальный индекс ТОЛЬКО если новая система синхронизации недоступна
-        if (!window.__MatchEventsRegistry || typeof window.__MatchEventsRegistry.performEventOperation !== 'function') {
-            if(!evIdx.has(key)) {evIdx.set(key,{goal:0,assist:0,yellow:0,red:0});}
-            evIdx.get(key)[type]= want?1:0; 
-            icon.style.opacity= want? '1':'0.25'; 
-            highlightRow(trRef,key);
-        } else {
-            // Новая система: НЕ обновляем локальный индекс, ждем WebSocket уведомления
-            console.log('[RosterEvents] Локальный индекс НЕ обновлен, ждем WebSocket уведомления');
-        }
+        // Мгновенно отражаем результат в UI (оптимистичное обновление), WS потом подтвердит
+        if(!evIdx.has(key)) {evIdx.set(key,{goal:0,assist:0,yellow:0,red:0});}
+        evIdx.get(key)[type]= want?1:0; 
+        icon.style.opacity= want? '1':'0.25'; 
+        highlightRow(trRef,key);
         
       } else {
         // Fallback к старому методу

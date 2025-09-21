@@ -19,6 +19,7 @@
   const hName=document.getElementById('md-home-name'); const aName=document.getElementById('md-away-name');
     const score=document.getElementById('md-score'); const dt=document.getElementById('md-datetime');
     const homePane=document.getElementById('md-pane-home'); const awayPane=document.getElementById('md-pane-away');
+  try { mdPane.setAttribute('data-match-home', match.home||''); mdPane.setAttribute('data-match-away', match.away||''); } catch(_){ }
   const setLogo=(imgEl,name)=>{ try { (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(imgEl, name||''); } catch(_) {} };
   hName.setAttribute('data-team-name', match.home || ''); aName.setAttribute('data-team-name', match.away || '');
   try { hLogo?.setAttribute('data-team-name', match.home||''); aLogo?.setAttribute('data-team-name', match.away||''); } catch(_) {}
