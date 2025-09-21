@@ -11605,7 +11605,7 @@ def api_admin_generate_season_schedule():
             delta = (6 - wd) % 7
             return d + timedelta(days=delta)
 
-        # Круговой алгоритм (circle method)
+    # Круговой алгоритм (circle method)
         def _build_double_round_pairs(team_ids: list[int]):
             import random as _rnd
             ids = list(team_ids)
@@ -11643,8 +11643,11 @@ def api_admin_generate_season_schedule():
             return first_half + second_half
 
         # Стартовые значения
+        # d0 — ровно выбранная админом дата старта (первый тур должен быть именно на неё)
         d0 = _parse_start_date(start_date_raw)
-        first_sunday = _to_sunday_on_or_after(d0)
+        # Следующие туры выравниваем по воскресеньям: берём первое воскресенье ПОСЛЕ d0
+        # (если d0 — воскресенье, второй тур будет на соседнем воскресенье через 7 дней)
+        second_tour_sunday = _to_sunday_on_or_after(d0 + timedelta(days=1))
 
         db = get_db()
         try:
@@ -11652,12 +11655,13 @@ def api_admin_generate_season_schedule():
             from database.database_models import Tournament
             active = db.query(Tournament).filter(Tournament.status == 'active').order_by(Tournament.start_date.desc().nullslast(), Tournament.created_at.desc()).first()
             if not active:
-                # Создаём новый сезон по правилу «июль-начало»
-                y = first_sunday.year
-                a = y % 100 if first_sunday.month >= 7 else (y - 1) % 100
-                b = (y + 1) % 100 if first_sunday.month >= 7 else y % 100
+                # Создаём новый сезон по правилу «июль-начало», якорим на выбранной дате d0
+                y = d0.year
+                a = y % 100 if d0.month >= 7 else (y - 1) % 100
+                b = (y + 1) % 100 if d0.month >= 7 else y % 100
                 season = f"{a:02d}-{b:02d}"
-                active = Tournament(name=f"Лига Обнинска {season}", season=season, status='active', start_date=first_sunday)
+                # start_date сохраняем ровно как выбрал админ (d0)
+                active = Tournament(name=f"Лига Обнинска {season}", season=season, status='active', start_date=d0)
                 db.add(active)
                 db.flush()
             # Сохраняем идентификатор до коммита/закрытия, чтобы избежать ошибок Session expired
@@ -11676,7 +11680,7 @@ def api_admin_generate_season_schedule():
                 return jsonify({'error': 'already_has_matches', 'tournament_id': int(active_id), 'count': int(existing_cnt)}), 409
 
             # full_reset: выполнить полный сброс доменных данных (включая ставки и админ-логи),
-            # затем жёстко удалить все матчи активного турнира (включая finished) перед генерацией
+            # затем полностью очистить таблицу matches с перезапуском последовательности ID
             if mode == 'full_reset':
                 try:
                     # Полный сброс (внутри очистит кэши/снапшоты и т.д.)
@@ -11685,7 +11689,9 @@ def api_admin_generate_season_schedule():
                     # продолжаем, даже если часть шагов сброса не удалась
                     pass
                 try:
-                    db.query(Match).filter(Match.tournament_id == active_id).delete(synchronize_session=False)
+                    # Полная очистка таблицы matches и зависимых с перезапуском ID
+                    from sqlalchemy import text as _sql_text
+                    db.execute(_sql_text("TRUNCATE TABLE matches RESTART IDENTITY CASCADE"))
                     db.commit()
                 except Exception:
                     try: db.rollback()
@@ -11702,7 +11708,11 @@ def api_admin_generate_season_schedule():
             # Создаём матчи
             created = 0
             for idx, pairs in enumerate(rounds_pairs, start=1):
-                date_i = first_sunday + timedelta(weeks=idx-1)
+                # Тур 1 — строго на выбранную дату d0; далее — каждое воскресенье
+                if idx == 1:
+                    date_i = d0
+                else:
+                    date_i = second_tour_sunday + timedelta(weeks=idx-2)
                 # Перемешивание уже выполнено; выровняем по слотам
                 for k, (home_id, away_id) in enumerate(pairs[:per_round]):
                     tm = time_slots[k] if k < len(time_slots) else time_slots[-1]
