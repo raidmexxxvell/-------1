@@ -726,14 +726,18 @@
 
   // Player management functions
   function loadPlayers() {
-    console.log('[Admin] Loading players...');
-    const tbody = document.getElementById('players-table');
-    if (!tbody) {return;}
+    console.log('[Admin] Loading players via TransferManager...');
     
-    tbody.innerHTML = '<tr><td colspan="6">Загрузка игроков...</td></tr>';
-    
-    // For now, show placeholder
-    tbody.innerHTML = '<tr><td colspan="6">Функция загрузки игроков в разработке</td></tr>';
+    // Инициализируем новую систему трансферов если она доступна
+    if (window.TransferManager && typeof window.TransferManager.loadAllPlayers === 'function') {
+      window.TransferManager.loadAllPlayers();
+    } else {
+      console.warn('[Admin] TransferManager not available, falling back to placeholder');
+      const tbody = document.getElementById('transfer-players-tbody');
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="6">Система трансферов загружается...</td></tr>';
+      }
+    }
   }
 
   function openPlayerModal(playerId = null) {

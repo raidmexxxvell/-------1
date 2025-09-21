@@ -7703,6 +7703,277 @@ def api_team_roster_public():
 
     return etag_json(cache_key, _build, cache_ttl=120, max_age=120, swr=300, core_filter=_core_filter, cache_visibility='public')
 
+# ---------------- Player Transfer Management -----------------
+@app.route('/api/admin/players/transfer', methods=['POST'])
+@require_admin()
+def api_admin_player_transfer():
+    """Перевод игрока между командами в системе трансферов.
+    POST data: player_name, from_team, to_team
+    Обновляет team_roster и динамические таблицы team_stats_<id>.
+    """
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+
+    try:
+        data = request.get_json() or {}
+        player_name = (data.get('player_name') or '').strip()
+        from_team = (data.get('from_team') or '').strip()
+        to_team = (data.get('to_team') or '').strip()
+
+        if not all([player_name, from_team, to_team]):
+            return jsonify({'error': 'Missing required fields: player_name, from_team, to_team'}), 400
+
+        if from_team == to_team:
+            return jsonify({'error': 'Cannot transfer player to the same team'}), 400
+
+        db = get_db()
+        try:
+            from database.database_models import Team
+            
+            # Проверяем существование команд
+            from_team_obj = db.query(Team).filter(
+                func.lower(Team.name) == func.lower(from_team), 
+                Team.is_active == True
+            ).first()
+            to_team_obj = db.query(Team).filter(
+                func.lower(Team.name) == func.lower(to_team), 
+                Team.is_active == True
+            ).first()
+
+            if not from_team_obj:
+                return jsonify({'error': f'Source team "{from_team}" not found'}), 404
+            if not to_team_obj:
+                return jsonify({'error': f'Destination team "{to_team}" not found'}), 404
+
+            # Проверяем существование игрока в исходной команде
+            from sqlalchemy import text
+            check_query = text("SELECT id FROM team_roster WHERE team = :team AND player = :player")
+            result = db.execute(check_query, {
+                'team': from_team_obj.name,
+                'player': player_name
+            }).fetchone()
+
+            if not result:
+                return jsonify({'error': f'Player "{player_name}" not found in team "{from_team}"'}), 404
+
+            # Проверяем, что игрок еще не в целевой команде
+            existing_query = text("SELECT id FROM team_roster WHERE team = :team AND player = :player")
+            existing_result = db.execute(existing_query, {
+                'team': to_team_obj.name,
+                'player': player_name
+            }).fetchone()
+
+            if existing_result:
+                return jsonify({'error': f'Player "{player_name}" already exists in team "{to_team}"'}), 400
+
+            # 1. Обновляем team_roster
+            # Удаляем из старой команды
+            delete_query = text("DELETE FROM team_roster WHERE team = :team AND player = :player")
+            db.execute(delete_query, {
+                'team': from_team_obj.name,
+                'player': player_name
+            })
+
+            # Добавляем в новую команду
+            insert_query = text("INSERT INTO team_roster (team, player, created_at) VALUES (:team, :player, NOW())")
+            db.execute(insert_query, {
+                'team': to_team_obj.name,
+                'player': player_name
+            })
+
+            # 2. Обрабатываем динамические таблицы team_stats
+            try:
+                # Инициализируем таблицы статистики, если они не существуют
+                _ensure_team_stats_table(from_team_obj.id, db.get_bind())
+                _ensure_team_stats_table(to_team_obj.id, db.get_bind())
+                _init_team_stats_if_empty(from_team_obj.id, from_team_obj.name, db)
+                _init_team_stats_if_empty(to_team_obj.id, to_team_obj.name, db)
+
+                # Получаем статистику игрока из старой команды
+                from_stats_table = f"team_stats_{from_team_obj.id}"
+                get_stats_query = text(f"""
+                    SELECT first_name, last_name, matches_played, goals, assists, 
+                           yellow_cards, red_cards, last_updated
+                    FROM {from_stats_table} 
+                    WHERE first_name || ' ' || last_name = :player_name
+                """)
+                player_stats = db.execute(get_stats_query, {'player_name': player_name}).fetchone()
+
+                if player_stats:
+                    # Переносим статистику в новую команду
+                    to_stats_table = f"team_stats_{to_team_obj.id}"
+                    
+                    # Проверяем, есть ли уже игрок в целевой таблице
+                    check_stats_query = text(f"""
+                        SELECT id FROM {to_stats_table} 
+                        WHERE first_name || ' ' || last_name = :player_name
+                    """)
+                    existing_stats = db.execute(check_stats_query, {'player_name': player_name}).fetchone()
+
+                    if existing_stats:
+                        # Обновляем существующую запись (аккумулируем статистику)
+                        update_stats_query = text(f"""
+                            UPDATE {to_stats_table} SET
+                                matches_played = matches_played + :matches_played,
+                                goals = goals + :goals,
+                                assists = assists + :assists,
+                                yellow_cards = yellow_cards + :yellow_cards,
+                                red_cards = red_cards + :red_cards,
+                                last_updated = NOW()
+                            WHERE first_name || ' ' || last_name = :player_name
+                        """)
+                        db.execute(update_stats_query, {
+                            'player_name': player_name,
+                            'matches_played': player_stats[2] or 0,
+                            'goals': player_stats[3] or 0,
+                            'assists': player_stats[4] or 0,
+                            'yellow_cards': player_stats[5] or 0,
+                            'red_cards': player_stats[6] or 0
+                        })
+                    else:
+                        # Создаем новую запись в целевой команде
+                        insert_stats_query = text(f"""
+                            INSERT INTO {to_stats_table} 
+                            (first_name, last_name, matches_played, goals, assists, yellow_cards, red_cards, last_updated)
+                            VALUES (:first_name, :last_name, :matches_played, :goals, :assists, :yellow_cards, :red_cards, NOW())
+                        """)
+                        
+                        # Разделяем имя игрока на имя и фамилию
+                        name_parts = player_name.strip().split(' ', 1)
+                        first_name = name_parts[0] if name_parts else ''
+                        last_name = name_parts[1] if len(name_parts) > 1 else ''
+                        
+                        db.execute(insert_stats_query, {
+                            'first_name': first_name,
+                            'last_name': last_name,
+                            'matches_played': player_stats[2] or 0,
+                            'goals': player_stats[3] or 0,
+                            'assists': player_stats[4] or 0,
+                            'yellow_cards': player_stats[5] or 0,
+                            'red_cards': player_stats[6] or 0
+                        })
+
+                    # Удаляем из старой команды
+                    delete_stats_query = text(f"""
+                        DELETE FROM {from_stats_table} 
+                        WHERE first_name || ' ' || last_name = :player_name
+                    """)
+                    db.execute(delete_stats_query, {'player_name': player_name})
+
+            except Exception as stats_error:
+                app.logger.warning(f"Stats transfer failed for {player_name}: {stats_error}")
+                # Продолжаем выполнение, так как основной перевод в team_roster уже сделан
+
+            db.commit()
+
+            app.logger.info(f"Player transfer completed: {player_name} from {from_team} to {to_team}")
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Player "{player_name}" transferred from "{from_team}" to "{to_team}"',
+                'transfer': {
+                    'player_name': player_name,
+                    'from_team': from_team_obj.name,
+                    'to_team': to_team_obj.name,
+                    'timestamp': datetime.now().isoformat()
+                }
+            })
+
+        except Exception as e:
+            db.rollback()
+            app.logger.error(f"Player transfer failed: {e}")
+            return jsonify({'error': str(e)}), 500
+        finally:
+            db.close()
+
+    except Exception as e:
+        app.logger.error(f"Transfer API error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/admin/transfers/news', methods=['POST'])
+@require_admin()
+def api_admin_create_transfer_news():
+    """Создание новости о трансферах на основе списка переводов игроков.
+    POST data: transfers[] = [{player_name, from_team, to_team}], news_title (optional)
+    """
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+
+    try:
+        data = request.get_json() or {}
+        transfers = data.get('transfers', [])
+        custom_title = (data.get('news_title') or '').strip()
+
+        if not transfers:
+            return jsonify({'error': 'No transfers provided'}), 400
+
+        # Формируем заголовок новости
+        if custom_title:
+            title = custom_title
+        else:
+            transfer_count = len(transfers)
+            if transfer_count == 1:
+                title = "Трансферное окно: новый игрок"
+            else:
+                title = f"Трансферное окно: {transfer_count} переходов"
+
+        # Формируем текст новости
+        content_lines = ["📈 **Трансферы в лиге:**", ""]
+        
+        for i, transfer in enumerate(transfers, 1):
+            player_name = transfer.get('player_name', 'Неизвестный игрок')
+            from_team = transfer.get('from_team', 'Неизвестная команда')
+            to_team = transfer.get('to_team', 'Неизвестная команда')
+            
+            content_lines.append(f"{i}. **{player_name}**")
+            content_lines.append(f"   ➤ из *{from_team}* в *{to_team}*")
+            content_lines.append("")
+
+        content_lines.append("Удачи новым игрокам в их командах! ⚽")
+        content = "\n".join(content_lines)
+
+        db = get_db()
+        try:
+            from database.database_models import News
+            
+            # Создаем новость
+            news_item = News(
+                title=title,
+                content=content,
+                news_type='transfer',
+                is_published=True,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
+            
+            db.add(news_item)
+            db.commit()
+
+            app.logger.info(f"Transfer news created: {title} with {len(transfers)} transfers")
+
+            return jsonify({
+                'status': 'success',
+                'message': 'Transfer news created successfully',
+                'news': {
+                    'id': news_item.id,
+                    'title': title,
+                    'content': content,
+                    'transfers_count': len(transfers),
+                    'created_at': news_item.created_at.isoformat()
+                }
+            })
+
+        except Exception as e:
+            db.rollback()
+            app.logger.error(f"Create transfer news failed: {e}")
+            return jsonify({'error': str(e)}), 500
+        finally:
+            db.close()
+
+    except Exception as e:
+        app.logger.error(f"Transfer news API error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
 @app.route('/api/match/status/get', methods=['GET'])
 def api_match_status_get():
     """Авто: scheduled/soon/live/finished по времени начала матча.

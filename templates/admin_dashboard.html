@@ -192,81 +192,124 @@
             <!-- Players Management Pane -->
             <div id="admin-pane-players" class="admin-pane" style="display: none;">
                 <div class="admin-section">
-                    <h3>Управление игроками</h3>
-                    <div class="players-controls">
-                        <input type="text" id="player-search" placeholder="Поиск игроков..." class="search-input">
-                        <select id="team-filter" class="team-select">
-                            <option value="">Все команды</option>
-                            <!-- Динамически заполняется -->
-                        </select>
-                        <button id="add-new-player-btn" class="action-btn">+ Новый игрок</button>
+                    <h3>Управление игроками и трансферы</h3>
+                    
+                    <!-- Search and Filters -->
+                    <div class="transfer-controls">
+                        <div class="search-row">
+                            <input type="text" id="transfer-player-search" placeholder="Поиск игрока по всем командам..." class="search-input transfer-search">
+                            <button id="transfer-clear-search" class="clear-btn" title="Очистить поиск">&times;</button>
+                        </div>
+                        
+                        <div class="filter-row">
+                            <select id="transfer-team-filter" class="team-select">
+                                <option value="">Все команды</option>
+                                <!-- Динамически заполняется -->
+                            </select>
+                            <button id="transfer-refresh-btn" class="action-btn">🔄 Обновить</button>
+                        </div>
+                        
+                        <!-- Transfer Panel -->
+                        <div id="transfer-panel" class="transfer-panel" style="display: none;">
+                            <h4>Окно трансферов</h4>
+                            <div class="transfer-queue">
+                                <div class="queue-header">
+                                    <span>Накопленные переводы: <span id="transfer-count">0</span></span>
+                                    <div class="queue-actions">
+                                        <button id="transfer-save-all" class="action-btn" disabled>💾 Сохранить все переводы</button>
+                                        <button id="transfer-clear-all" class="cancel-btn">🗑️ Очистить</button>
+                                    </div>
+                                </div>
+                                <div id="transfer-queue-list" class="queue-list">
+                                    <!-- Динамически заполняется списком переводов -->
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     
+                    <!-- Players Table -->
                     <div class="table-container">
-                        <table class="admin-table">
+                        <div id="transfer-loading" class="loading-indicator" style="display: none;">
+                            Загрузка игроков...
+                        </div>
+                        
+                        <table class="admin-table" id="transfer-players-table">
                             <thead>
                                 <tr>
-                                    <th>Имя</th>
+                                    <th>Имя игрока</th>
                                     <th>Команда</th>
-                                    <th>Позиция</th>
-                                    <th>Номер</th>
-                                    <th>Статус</th>
+                                    <th>Голы</th>
+                                    <th>Передачи</th>
+                                    <th>Карточки</th>
                                     <th>Действия</th>
                                 </tr>
                             </thead>
-                            <tbody id="players-table">
+                            <tbody id="transfer-players-tbody">
                                 <!-- Динамически заполняется -->
                             </tbody>
                         </table>
+                        
+                        <div id="transfer-no-players" class="no-data-message" style="display: none;">
+                            Игроки не найдены
+                        </div>
                     </div>
                 </div>
 
-                <!-- Add/Edit Player Modal -->
-                <div id="player-modal" class="modal" style="display: none;">
+                <!-- Transfer Player Modal -->
+                <div id="transfer-player-modal" class="modal" style="display: none;">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h3 id="player-modal-title">Добавить игрока</h3>
-                            <button class="modal-close" onclick="closePlayerModal()">&times;</button>
+                            <h3 id="transfer-modal-title">Перевод игрока</h3>
+                            <button class="modal-close" onclick="window.TransferManager.closeTransferModal()">&times;</button>
                         </div>
                         <div class="modal-body">
-                            <form id="player-form">
-                                <div class="form-group">
-                                    <label for="player-name">Имя игрока:</label>
-                                    <input type="text" id="player-name" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="player-team">Команда:</label>
-                                    <select id="player-team" required>
-                                        <!-- Динамически заполняется -->
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="player-position">Позиция:</label>
-                                    <select id="player-position">
-                                        <option value="GK">Вратарь</option>
-                                        <option value="DEF">Защитник</option>
-                                        <option value="MID">Полузащитник</option>
-                                        <option value="FWD">Нападающий</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="player-number">Номер:</label>
-                                    <input type="number" id="player-number" min="1" max="99">
-                                </div>
-                                <div class="form-group">
-                                    <label for="player-status">Статус:</label>
-                                    <select id="player-status">
-                                        <option value="active">Активный</option>
-                                        <option value="injured">Травмирован</option>
-                                        <option value="suspended">Дисквалифицирован</option>
-                                        <option value="inactive">Неактивный</option>
-                                    </select>
+                            <form id="transfer-form">
+                                <div class="transfer-info">
+                                    <div class="form-group">
+                                        <label>Игрок:</label>
+                                        <span id="transfer-player-name" class="player-name-display"></span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Текущая команда:</label>
+                                        <span id="transfer-current-team" class="team-name-display"></span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="transfer-target-team">Новая команда:</label>
+                                        <select id="transfer-target-team" required>
+                                            <option value="">Выберите команду...</option>
+                                            <!-- Динамически заполняется -->
+                                        </select>
+                                    </div>
                                 </div>
                                 <div class="modal-actions">
-                                    <button type="submit" class="action-btn">Сохранить</button>
-                                    <button type="button" class="cancel-btn" onclick="closePlayerModal()">Отмена</button>
+                                    <button type="button" id="transfer-add-to-queue" class="action-btn">📋 Добавить в список</button>
+                                    <button type="button" class="cancel-btn" onclick="window.TransferManager.closeTransferModal()">Отмена</button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transfer Confirmation Modal -->
+                <div id="transfer-confirm-modal" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3>Подтверждение трансферов</h3>
+                            <button class="modal-close" onclick="window.TransferManager.closeConfirmModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <p><strong>Вы собираетесь выполнить следующие переводы:</strong></p>
+                            <div id="transfer-confirm-list" class="transfer-confirm-list">
+                                <!-- Динамически заполняется -->
+                            </div>
+                            <div class="form-group">
+                                <label for="transfer-news-title">Заголовок новости (необязательно):</label>
+                                <input type="text" id="transfer-news-title" placeholder="Если не указать, будет создан автоматически">
+                            </div>
+                            <div class="confirm-actions">
+                                <button id="transfer-confirm-execute" class="action-btn">✅ Выполнить переводы</button>
+                                <button type="button" class="cancel-btn" onclick="window.TransferManager.closeConfirmModal()">Отмена</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -444,5 +487,6 @@
     <!-- Scripts -->
     <script src="/static/js/telegram-patch.js"></script>
     <script src="/static/js/admin-enhanced.js"></script>
+    <script src="/static/js/admin-transfers.js"></script>
 </body>
 </html>

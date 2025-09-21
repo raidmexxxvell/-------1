@@ -2210,4 +2210,277 @@ body:not(.dark-theme) #team-roster-modal table.admin-table tbody tr:hover {
 .btn-delete:hover {
     background: #c82333;
 }
+
+/* --- Transfer Management Styles --- */
+.transfer-controls {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: var(--card-bg, #fff);
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #e0e0e0);
+}
+
+.search-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.transfer-search {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.clear-btn {
+    background: var(--secondary-color, #6c757d);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.clear-btn:hover {
+    background: var(--secondary-hover, #5a6268);
+}
+
+.filter-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.team-select {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 6px;
+    font-size: 14px;
+    min-width: 200px;
+}
+
+/* Transfer Panel */
+.transfer-panel {
+    margin-top: 20px;
+    padding: 15px;
+    background: var(--info-bg, #e7f3ff);
+    border: 1px solid var(--info-border, #b3d9ff);
+    border-radius: 8px;
+}
+
+.transfer-panel h4 {
+    margin: 0 0 15px 0;
+    color: var(--info-text, #0056b3);
+    font-size: 16px;
+}
+
+.queue-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--info-border, #b3d9ff);
+}
+
+.queue-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.queue-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.queue-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    margin-bottom: 8px;
+    background: white;
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 6px;
+}
+
+.transfer-info {
+    flex: 1;
+}
+
+.transfer-direction {
+    font-size: 13px;
+    color: var(--secondary-text, #666);
+    margin-left: 10px;
+}
+
+.remove-btn {
+    background: var(--danger-color, #dc3545);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.remove-btn:hover {
+    background: var(--danger-hover, #c82333);
+}
+
+/* Player Table Styles */
+.player-name {
+    font-weight: 500;
+}
+
+.transfer-badge {
+    display: inline-block;
+    background: var(--warning-color, #ffc107);
+    color: var(--warning-text, #856404);
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 8px;
+    font-weight: 600;
+}
+
+.player-in-transfer-queue {
+    background-color: var(--warning-light, #fff8e1);
+}
+
+.team-name {
+    font-weight: 500;
+    color: var(--primary-color, #007aff);
+}
+
+.stat-cell {
+    text-align: center;
+    font-weight: 600;
+}
+
+.cards-cell {
+    text-align: center;
+}
+
+.yellow-cards, .red-cards {
+    margin: 0 3px;
+    font-size: 12px;
+}
+
+.actions-cell {
+    text-align: center;
+}
+
+.transfer-btn {
+    background: var(--success-color, #28a745);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.transfer-btn:hover:not(:disabled) {
+    background: var(--success-hover, #218838);
+}
+
+.transfer-btn:disabled {
+    background: var(--disabled-color, #ccc);
+    cursor: not-allowed;
+}
+
+/* Transfer Modal Styles */
+.transfer-info .form-group {
+    margin-bottom: 15px;
+}
+
+.player-name-display,
+.team-name-display {
+    font-weight: 600;
+    color: var(--primary-color, #007aff);
+    font-size: 16px;
+}
+
+.transfer-confirm-list {
+    max-height: 300px;
+    overflow-y: auto;
+    margin: 15px 0;
+    padding: 10px;
+    background: var(--light-bg, #f8f9fa);
+    border-radius: 6px;
+}
+
+.confirm-item {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+.confirm-item:last-child {
+    border-bottom: none;
+}
+
+.confirm-transfer {
+    font-size: 14px;
+}
+
+.confirm-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+/* Loading and No Data States */
+.loading-indicator {
+    text-align: center;
+    padding: 40px;
+    color: var(--secondary-text, #666);
+    font-style: italic;
+}
+
+.no-data-message {
+    text-align: center;
+    padding: 40px;
+    color: var(--secondary-text, #666);
+    font-style: italic;
+    background: var(--light-bg, #f8f9fa);
+    border-radius: 8px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .queue-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .queue-actions {
+        flex-direction: column;
+        width: 100%;
+    }
+    
+    .filter-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .confirm-actions {
+        flex-direction: column;
+    }
+}
 }
