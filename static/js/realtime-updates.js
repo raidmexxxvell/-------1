@@ -569,6 +569,32 @@ class RealtimeUpdater {
                 this.refreshLeagueTable();
                 break;
                 
+            case 'results':
+                // КРИТИЧНО: Мгновенное обновление результатов
+                try {
+                    console.log('[Реалтайм] Получено обновление результатов:', data);
+                    if (data && data.results) {
+                        // Обновляем localStorage кэш
+                        localStorage.setItem('results', JSON.stringify({ data, ts: Date.now() }));
+                        
+                        // Мгновенное обновление UI результатов если открыта вкладка
+                        const pane = document.getElementById('league-pane-results');
+                        if (pane && window.League && typeof window.League.renderResults === 'function') {
+                            console.log('[Реалтайм] Обновляем UI результатов');
+                            window.League.renderResults(pane, { results: data.results });
+                        }
+                        
+                        // Уведомляем компоненты об обновлении результатов
+                        const event = new CustomEvent('resultsUpdate', { 
+                            detail: { results: data.results, timestamp: Date.now() } 
+                        });
+                        document.dispatchEvent(event);
+                    }
+                } catch(error) {
+                    console.error('[Реалтайм] Ошибка обновления результатов:', error);
+                }
+                break;
+                
             case 'schedule':
                 this.refreshSchedule();
                 break;

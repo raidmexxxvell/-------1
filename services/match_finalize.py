@@ -132,7 +132,14 @@ def finalize_match_core(
                 pass
             try:
                 if websocket_manager:
-                    websocket_manager.notify_data_change('results', payload)
+                    # Добавляем небольшую задержку для результатов тоже
+                    import threading
+                    def delayed_results_notify():
+                        websocket_manager.notify_data_change('results', payload)
+                    
+                    # Отправляем уведомление с минимальной задержкой
+                    timer = threading.Timer(0.05, delayed_results_notify)
+                    timer.start()
             except Exception:
                 pass
             # Очистка team overview etag-ключей
@@ -406,9 +413,27 @@ def finalize_match_core(
                     cache_manager.invalidate('player_stats')
             except Exception:
                 pass
+            
+            # ВАЖНО: WebSocket уведомление отправляем ПОСЛЕ обновления всех кэшей
+            # Добавляем небольшую задержку чтобы убедиться что все кэши обновились
             try:
                 if websocket_manager:
-                    websocket_manager.notify_data_change('stats_table', stats_payload)
+                    # Добавляем краткую задержку для обеспечения консистентности кэшей
+                    import threading
+                    def delayed_notify():
+                        try:
+                            # Дополнительно проверяем что SCORERS_CACHE действительно обновился
+                            import app
+                            if hasattr(app, 'SCORERS_CACHE'):
+                                app.SCORERS_CACHE = {'ts': time.time(), 'items': scorers}
+                        except Exception:
+                            pass
+                        
+                        websocket_manager.notify_data_change('stats_table', stats_payload)
+                    
+                    # Отправляем уведомление с минимальной задержкой
+                    timer = threading.Timer(0.05, delayed_notify)
+                    timer.start()
             except Exception:
                 pass
         except Exception as sc_err:
