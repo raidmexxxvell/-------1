@@ -240,11 +240,12 @@ html, body { overflow-x: hidden; }
 }
 
 /* Стили для модалки ввода ставки */
-/* Сделали модалку ставок чуть компактнее */
-.stake-modal .modal-dialog { width: min(380px, calc(100% - 32px)); top: 28vh; border-radius: 12px; padding: 12px; }
+/* Сделали модалку ставок ещё компактнее и не на всю ширину экрана */
+.stake-modal .modal-dialog { width: min(340px, calc(100% - 40px)); top: 28vh; border-radius: 12px; padding: 12px; }
 .stake-modal .modal-title { font-size: 15px; margin-bottom: 6px; }
 .stake-modal .modal-desc { font-size: 13px; color: var(--gray); margin-bottom: 10px; }
-.stake-modal .modal-input { font-size: 18px; padding: 12px 14px; border-radius: 10px; text-align: center; font-weight:800; letter-spacing:1px; }
+/* Поле ввода уже, чем модалка, и центрировано */
+.stake-modal .modal-input { font-size: 18px; padding: 10px 12px; border-radius: 10px; text-align: center; font-weight:800; letter-spacing:1px; display:block; width: min(220px, 86%); margin: 0 auto; }
 .stake-modal .modal-actions { justify-content: space-between; margin-top: 14px; }
 .stake-modal .modal-actions .btn-secondary { background: transparent; border-color: rgba(255,255,255,0.06); }
 .stake-modal .modal-actions .btn-primary { background: var(--primary); border-color: transparent; color: #061028; }
