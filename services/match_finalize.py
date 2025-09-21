@@ -419,6 +419,23 @@ def finalize_match_core(
             try:
                 if websocket_manager:
                     websocket_manager.notify_data_change('leader-goal-assist', {'reason': 'invalidate', 'ts': datetime.now(timezone.utc).isoformat()})
+                    # Дополнительно публикуем топиковое уведомление, чтобы слушатели ws:topic_update сработали мгновенно
+                    try:
+                        topic = 'leaderboards'
+                        if hasattr(websocket_manager, 'emit_to_topic_batched'):
+                            websocket_manager.emit_to_topic_batched(topic, 'topic_update', {
+                                'entity': 'leader-goal-assist',
+                                'reason': 'refresh',
+                                'updated_at': datetime.now(timezone.utc).isoformat()
+                            }, priority=1)
+                        elif hasattr(websocket_manager, 'emit_to_topic'):
+                            websocket_manager.emit_to_topic(topic, 'topic_update', {
+                                'entity': 'leader-goal-assist',
+                                'reason': 'refresh',
+                                'updated_at': datetime.now(timezone.utc).isoformat()
+                            })
+                    except Exception:
+                        pass
             except Exception:
                 pass
             # 0. Таблица идемпотентности для динамических инкрементов

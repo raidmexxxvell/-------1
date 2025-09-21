@@ -270,7 +270,10 @@
       ovBtn?.classList.add('active');
       document.getElementById('team-pane-overview')?.setAttribute('style','');
       document.getElementById('team-pane-matches')?.setAttribute('style','display:none;');
-      document.getElementById('team-pane-roster')?.setAttribute('style','display:none;');
+      // ВАЖНО: при открытии другой команды сбрасываем ленивый флаг и содержимое ростера,
+      // чтобы не подтягивался состав предыдущей команды
+      const rsPane = document.getElementById('team-pane-roster');
+      if (rsPane) { try { rsPane.removeAttribute('data-loaded'); rsPane.innerHTML=''; } catch(_) {} rsPane.setAttribute('style','display:none;'); }
     } catch(_) {}
     // Загрузка Overview
     ov.innerHTML = '<div style="padding:12px; color: var(--gray);">Загружаю...</div>';

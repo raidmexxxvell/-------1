@@ -489,7 +489,13 @@ class RealtimeUpdater {
         this.updateMatchScore(home, away, data);
         
         // Показываем уведомление
-        this.showNotification(`${home} ${data.score_home || 0} - ${data.score_away || 0} ${away}`);
+        try {
+            const sh = (typeof data?.score_home === 'number') ? data.score_home : null;
+            const sa = (typeof data?.score_away === 'number') ? data.score_away : null;
+            if (sh != null && sa != null) {
+                this.showNotification(`${home} ${sh} : ${sa} ${away}`);
+            }
+        } catch(_) {}
     }
     
     updateUI(dataType, data, timestamp) {
@@ -509,6 +515,14 @@ class RealtimeUpdater {
             case 'betting_odds':
                 this.refreshBettingOdds(data);
                 break;
+            case 'leader-goal-assist':
+            case 'stats_table':
+                // Мгновенное обновление таблицы статистики (Г+П)
+                try {
+                    if (typeof window.loadStatsViaStore === 'function') { window.loadStatsViaStore(); }
+                    else if (typeof window.loadStatsTable === 'function') { window.loadStatsTable(); }
+                } catch(_) {}
+                break;
             case 'lineups_updated':
                 // Авто-обновление составов конкретного матча
                 this.handleLineupsUpdated(data);
@@ -525,7 +539,7 @@ class RealtimeUpdater {
             if(!data) {return;}
             // Проверяем, есть ли на странице что-то связанное с матчем (ростер или карточка матча)
             const selectorMatchCard = `[data-match-home="${data.home}"][data-match-away="${data.away}"]`;
-            const rosterPresent = document.querySelector('.roster-table') || document.querySelector(selectorMatchCard);
+            const rosterPresent = document.querySelector('.roster-table') || document.querySelector('.team-roster-table') || document.querySelector(selectorMatchCard);
             if(!rosterPresent){
                 // Ничего подходящего – пропускаем тихо
                 return;
@@ -554,19 +568,20 @@ class RealtimeUpdater {
     }
     
     updateMatchScore(home, away, data) {
-        // Обновляем отображение счета матча
+        // Обновляем отображение счета матча без мерцания и в едином формате
         const matchElements = document.querySelectorAll(`[data-match-home="${home}"][data-match-away="${away}"]`);
-        
+        const sh = (typeof data?.score_home === 'number') ? data.score_home : null;
+        const sa = (typeof data?.score_away === 'number') ? data.score_away : null;
+        if (sh == null || sa == null) { return; }
+        const txt = `${sh} : ${sa}`;
         matchElements.forEach(element => {
-            const scoreElement = element.querySelector('.match-score');
-            if (scoreElement && data.score_home !== undefined && data.score_away !== undefined) {
-                scoreElement.textContent = `${data.score_home} - ${data.score_away}`;
-                
+            const scoreElement = element.querySelector('.match-score') || element.querySelector('.score');
+            if (!scoreElement) { return; }
+            if (scoreElement.textContent !== txt) {
+                scoreElement.textContent = txt;
                 // Добавляем анимацию обновления
                 scoreElement.classList.add('score-updated');
-                setTimeout(() => {
-                    scoreElement.classList.remove('score-updated');
-                }, 2000);
+                setTimeout(() => { try { scoreElement.classList.remove('score-updated'); } catch(_) {} }, 2000);
             }
         });
     }

@@ -40,6 +40,24 @@ declare global {
         set.add(topic);
         s.topics = Array.from(set);
       });
+      // Лидерборды/статистика лиги: мгновенное обновление таблицы статистики
+      const ent = String(p.entity||'');
+      if (ent === 'leaderboards' || ent === 'leader-goal-assist' || topic === 'leaderboards') {
+        try { (window as any).loadStatsViaStore?.(); } catch(_) {}
+        try { (window as any).loadStatsTable?.(); } catch(_) {}
+      }
+    } catch(_) {}
+  });
+
+  // Дополнительно: если прилетает патч данных о лидербордах — обновим таблицу
+  window.addEventListener('ws:data_patch', (e: Event) => {
+    try {
+      const p = (e as CustomEvent).detail || {} as any;
+      const t = String(p?.type || p?.data_type || p?.entity || '');
+      if (t === 'leader-goal-assist') {
+        try { (window as any).loadStatsViaStore?.(); } catch(_) {}
+        try { (window as any).loadStatsTable?.(); } catch(_) {}
+      }
     } catch(_) {}
   });
 
