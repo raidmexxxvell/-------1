@@ -1106,7 +1106,7 @@
                 const allIds = new Set();
                 blocks.forEach(b => { (dataBlock[b.key]||[]).forEach(it => { if (it?.user_id) {allIds.add(it.user_id);} }); });
                 const idsParam = Array.from(allIds).join(',');
-                const render = (avatars) => {
+                    const render = (avatars) => {
                     blocks.forEach(b => {
                     const section = document.createElement('div'); section.className = 'prize-block';
                     const h = document.createElement('h3'); h.textContent = b.title; section.appendChild(h);
@@ -1120,11 +1120,13 @@
                         if (i === 0) {pl.classList.add('gold');}
                         if (i === 1) {pl.classList.add('silver');}
                         if (i === 2) {pl.classList.add('bronze');}
-                        const avatar = document.createElement('div'); avatar.className = 'podium-avatar';
-                        const img = document.createElement('img'); img.alt = it?.display_name || '';
-                        // Аватар с бэкенда, если есть; иначе заглушка
-                        const key = it?.user_id ? String(it.user_id) : null;
-                        const photo = (key && avatars && avatars[key]) ? avatars[key] : '/static/img/achievements/placeholder.png';
+                                                const avatar = document.createElement('div'); avatar.className = 'podium-avatar';
+                                                const img = document.createElement('img'); img.alt = it?.display_name || '';
+                                                // Аватар с бэкенда, если есть; иначе заглушка
+                                                const key = it?.user_id ? String(it.user_id) : null;
+                                                const photo = (key && avatars && avatars[key] && (avatars[key].avatar_url || avatars[key].photo_url))
+                                                    ? (avatars[key].avatar_url || avatars[key].photo_url)
+                                                    : '/static/img/achievements/placeholder.png';
                         img.src = photo;
                         avatar.appendChild(img);
                         const name = document.createElement('div'); name.className = 'podium-name'; name.textContent = it ? it.display_name : '—';

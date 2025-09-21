@@ -51,7 +51,7 @@
         const newTier = Number(a.best_tier || a.tier || 0);
         if (newTier > 0) {nextBest[g] = newTier;}
         if (hadBaseline && newTier > oldTier){
-          unlocked.push({ group: g, tier: newTier, name: a.name||g, icon: a.icon||null });
+          unlocked.push({ group: g, tier: newTier, name: a.name||g, icon: a.icon||null, icon_url: a.icon_url||null });
         }
       });
       writeBest(nextBest);
@@ -112,6 +112,8 @@
       const state = tierMap[item.tier] || (item.icon||'bronze');
       const key = item.key || item.code || item.group || slugify(item.name||'');
       const candidates = [];
+      // Приоритет: явный URL, если пришёл с бэкенда
+      if (item.icon_url) { candidates.push(item.icon_url); }
       if (key) {candidates.push(`${base}${slugify(key)}-${state}.png`);}
       if (key && item.icon) {candidates.push(`${base}${slugify(key)}-${slugify(item.icon)}.png`);}
       candidates.push(`${base}${state}.png`);
