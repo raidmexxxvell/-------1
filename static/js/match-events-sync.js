@@ -96,7 +96,7 @@
             return registry.pendingOps.get(eventKey);
         }
         
-        // Получаем текущее состояние
+        // Получаем текущее состояние БЕЗ изменения локального кэша
         const currentCount = getCurrentEventState(home, away, team, player, type) || 0;
         const wantedCount = operation === 'add' ? currentCount + 1 : Math.max(0, currentCount - 1);
         
@@ -132,35 +132,8 @@
                 
                 console.log('[EventsRegistry] Операция завершена успешно:', eventKey, result);
                 
-                // Немедленно обновляем локальный кэш для предотвращения flickering
-                const matchKey = getMatchKey(home, away);
-                const cached = registry.eventsCache.get(matchKey) || { home: [], away: [] };
-                
-                // Применяем изменение локально
-                const side = team === 'home' ? 'home' : 'away';
-                if (operation === 'add') {
-                    cached[side] = cached[side] || [];
-                    cached[side].push({
-                        player: player,
-                        type: type,
-                        minute: minute,
-                        team: team,
-                        id: result.id || Date.now() // temporary ID
-                    });
-                } else if (operation === 'remove' && result.removed > 0) {
-                    cached[side] = (cached[side] || []).filter((event, index, arr) => {
-                        if (event.player === player && event.type === type) {
-                            // Удаляем последнее вхождение
-                            const lastIndex = arr.length - 1 - arr.slice().reverse().findIndex(e => 
-                                e.player === player && e.type === type
-                            );
-                            return index !== lastIndex;
-                        }
-                        return true;
-                    });
-                }
-                
-                updateEventsCache(home, away, cached);
+                // ВАЖНО: НЕ обновляем локальный кэш здесь - ждем WebSocket уведомления
+                // Это устраняет race condition когда локальное изменение конфликтует с WebSocket
                 
                 return result;
                 

@@ -10787,50 +10787,26 @@ def api_match_score_set():
 
             score_changed = (old_score_home != row.score_home) or (old_score_away != row.score_away)
             
-            # Отправляем компактный патч через WebSocket (если доступен)
+            # Отправляем прямое live_update уведомление для мгновенного обновления счета
             try:
                 ws = app.config.get('websocket_manager')
                 inv = globals().get('invalidator')
                 if ws and score_changed:
-                    # bump версию коэффициентов (на будущее - если логика будет зависеть от счёта)
+                    # НОВОЕ: Прямое live_update уведомление для мгновенного отображения счета
+                    ws.emit('live_update', {
+                        'home': home,
+                        'away': away,
+                        'data': {
+                            'score_home': row.score_home,
+                            'score_away': row.score_away,
+                            'updated_at': datetime.now(timezone.utc).isoformat()
+                        }
+                    })
+                    
+                    # Дополнительно обновляем версию коэффициентов если нужно
                     new_ver = _bump_odds_version(home, away)
-                    # Патч состояния матча (счёт) — отправляем только реальные изменения; без null полей
-                    match_fields = {'odds_version': new_ver}
-                    if row.score_home is not None:
-                        match_fields['score_home'] = row.score_home
-                    if row.score_away is not None:
-                        match_fields['score_away'] = row.score_away
-                    if hasattr(ws, 'notify_patch_debounced'):
-                        ws.notify_patch_debounced(
-                            entity='match',
-                            entity_id={'home': home, 'away': away},
-                            fields=match_fields
-                        )
-                    else:
-                        # fallback на прямую отправку
-                        ws.notify_patch(
-                            entity='match',
-                            entity_id={'home': home, 'away': away},
-                            fields=match_fields
-                        )
-                    # Патч коэффициентов/рынков (частичный snapshot) — можно пропустить, но оставим при изменении счёта
-                    odds_fields = _build_odds_fields(home, away)
-                    if odds_fields:
-                        odds_fields['odds_version'] = new_ver
-                        if hasattr(ws, 'notify_patch_debounced'):
-                            ws.notify_patch_debounced(
-                                entity='odds',
-                                entity_id={'home': home, 'away': away},
-                                fields=odds_fields
-                            )
-                        else:
-                            # fallback на прямую отправку
-                            ws.notify_patch(
-                                entity='odds',
-                                entity_id={'home': home, 'away': away},
-                                fields=odds_fields
-                            )
-                # Таргетированный topic-update для деталей матча (если включено в клиенте)
+                    
+                # Уведомляем компоненты через обычный data_change канал тоже
                 try:
                     if inv:
                         dt = _get_match_datetime(home, away)
@@ -10840,14 +10816,12 @@ def api_match_score_set():
                             'type': 'data_patch',
                             'entity': 'match',
                             'id': {'home': home, 'away': away},
-                            'fields': {'score_home': row.score_home, 'score_away': row.score_away, 'odds_version': new_ver}
+                            'fields': {'score_home': row.score_home, 'score_away': row.score_away}
                         }, priority=1)
-                        # Дополнительно: инвалидация таблицы и расписания при live‑счёте (без расчёта ставок)
+                        
+                        # Минимальная инвалидация для обновления таблицы/расписания
                         try:
                             inv.invalidate_for_change('league_table_update', {})
-                        except Exception:
-                            pass
-                        try:
                             inv.invalidate_for_change('schedule_update', {})
                         except Exception:
                             pass
@@ -11503,44 +11477,11 @@ def api_match_events_add():
             # Попытка синхронизации в расширенную схему (не критично при ошибке)
             _maybe_sync_event_to_adv_schema(home, away, player, etype)
             
-            # КРИТИЧНО: Добавляем глобальные WebSocket уведомления для мгновенного обновления всех клиентов
+            # КРИТИЧНО: Упрощенные WebSocket уведомления для устранения конфликтов
             try:
                 ws_manager = globals().get('websocket_manager') or (current_app.config.get('websocket_manager') if 'current_app' in globals() else None)
                 if ws_manager:
-                    # Глобальное уведомление о изменении событий матча
-                    ws_manager.notify_data_change('match_events', {
-                        'home': home,
-                        'away': away,
-                        'entity': 'match_events',
-                        'reason': 'event_added',
-                        'player': player,
-                        'type': etype,
-                        'team': team,
-                        'minute': minute,
-                        'updated_at': datetime.now(timezone.utc).isoformat()
-                    })
-                    
-                    # Дополнительное уведомление для обновления деталей конкретного матча
-                    ws_manager.notify_data_change('match_details', {
-                        'home': home,
-                        'away': away,
-                        'reason': 'events_updated',
-                        'updated_at': datetime.now(timezone.utc).isoformat()
-                    })
-            except Exception as ws_err:
-                try:
-                    app.logger.warning(f"WebSocket notification failed for match event add: {ws_err}")
-                except Exception:
-                    pass
-            
-            # Таргетированное уведомление в топик деталей матча (events изменились)
-            try:
-                inv = globals().get('invalidator')
-                if inv:
-                    dt = _get_match_datetime(home, away)
-                    date_str = dt.isoformat()[:10] if dt else ''
-                    topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
-                    # Build authoritative events payload
+                    # Единственное центральное уведомление о событиях с полными данными
                     full_events = {'home': [], 'away': []}
                     try:
                         rows = db.query(MatchPlayerEvent).filter(
@@ -11557,12 +11498,31 @@ def api_match_events_add():
                             })
                     except Exception:
                         pass
-                    inv.publish_topic(topic, 'topic_update', {
-                        'entity': 'match_events',
+                    
+                    # Отправляем одно уведомление с полными событиями матча
+                    ws_manager.notify_data_change('match_events', {
                         'home': home,
                         'away': away,
-                        'events': full_events
-                    }, priority=1)
+                        'events': full_events,
+                        'reason': 'event_added',
+                        'player': player,
+                        'type': etype,
+                        'team': team,
+                        'minute': minute,
+                        'updated_at': datetime.now(timezone.utc).isoformat()
+                    })
+            except Exception as ws_err:
+                try:
+                    app.logger.warning(f"WebSocket notification failed for match event add: {ws_err}")
+                except Exception:
+                    pass
+            
+            # Минимальные topic уведомления только для инвалидации кэшей 
+            try:
+                inv = globals().get('invalidator')
+                if inv:
+                    # Только инвалидация кэшей без дополнительных WebSocket уведомлений
+                    inv.invalidate_for_change('match_details_update', {'home': home, 'away': away})
             except Exception:
                 pass
             return jsonify({'status': 'ok', 'id': int(row.id)})
@@ -11642,44 +11602,11 @@ def api_match_events_remove():
             db.delete(row)
             db.commit()
             
-            # КРИТИЧНО: Добавляем глобальные WebSocket уведомления для мгновенного обновления всех клиентов
+            # КРИТИЧНО: Упрощенные WebSocket уведомления для устранения конфликтов
             try:
                 ws_manager = globals().get('websocket_manager') or (current_app.config.get('websocket_manager') if 'current_app' in globals() else None)
                 if ws_manager:
-                    # Глобальное уведомление о удалении события матча
-                    ws_manager.notify_data_change('match_events', {
-                        'home': home,
-                        'away': away,
-                        'entity': 'match_events_removed',
-                        'reason': 'event_removed',
-                        'player': player,
-                        'type': etype,
-                        'team': team,
-                        'removed_id': rid,
-                        'updated_at': datetime.now(timezone.utc).isoformat()
-                    })
-                    
-                    # Дополнительное уведомление для обновления деталей конкретного матча
-                    ws_manager.notify_data_change('match_details', {
-                        'home': home,
-                        'away': away,
-                        'reason': 'events_updated',
-                        'updated_at': datetime.now(timezone.utc).isoformat()
-                    })
-            except Exception as ws_err:
-                try:
-                    app.logger.warning(f"WebSocket notification failed for match event remove: {ws_err}")
-                except Exception:
-                    pass
-            
-            # Уведомление в топик деталей матча об изменении событий
-            try:
-                inv = globals().get('invalidator')
-                if inv:
-                    dt = _get_match_datetime(home, away)
-                    date_str = dt.isoformat()[:10] if dt else ''
-                    topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
-                    # Build authoritative events payload
+                    # Единственное центральное уведомление о событиях с полными данными
                     full_events = {'home': [], 'away': []}
                     try:
                         rows = db.query(MatchPlayerEvent).filter(
@@ -11696,12 +11623,31 @@ def api_match_events_remove():
                             })
                     except Exception:
                         pass
-                    inv.publish_topic(topic, 'topic_update', {
-                        'entity': 'match_events',
+                    
+                    # Отправляем одно уведомление с полными событиями матча
+                    ws_manager.notify_data_change('match_events', {
                         'home': home,
                         'away': away,
-                        'events': full_events
-                    }, priority=1)
+                        'events': full_events,
+                        'reason': 'event_removed',
+                        'player': player,
+                        'type': etype,
+                        'team': team,
+                        'removed_id': rid,
+                        'updated_at': datetime.now(timezone.utc).isoformat()
+                    })
+            except Exception as ws_err:
+                try:
+                    app.logger.warning(f"WebSocket notification failed for match event remove: {ws_err}")
+                except Exception:
+                    pass
+            
+            # Минимальные topic уведомления только для инвалидации кэшей 
+            try:
+                inv = globals().get('invalidator')
+                if inv:
+                    # Только инвалидация кэшей без дополнительных WebSocket уведомлений
+                    inv.invalidate_for_change('match_details_update', {'home': home, 'away': away})
             except Exception:
                 pass
             return jsonify({'status': 'ok', 'removed': 1, 'id': rid})
