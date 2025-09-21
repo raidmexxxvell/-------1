@@ -172,6 +172,32 @@ class MultiLevelCache:
                 
         return count
 
+    # --- Lightweight helpers for idempotency tokens ---
+    def try_acquire(self, key: str, ttl_seconds: int = 10) -> bool:
+        """
+        Attempts to acquire a short-lived lock/token. Returns True if acquired, False otherwise.
+        Memory-level only if Redis is unavailable; with Redis uses SETNX semantics via set(name, value, ex, nx=True).
+        """
+        try:
+            token_key = f"idem:{key}"
+            # Redis preferred for cross-process safety
+            if self.redis_client:
+                try:
+                    ok = self.redis_client.set(token_key, b"1", ex=max(1, int(ttl_seconds)), nx=True)
+                    return bool(ok)
+                except Exception:
+                    pass
+            # Fallback: in-memory best-effort
+            now = time.time()
+            with self.lock:
+                ent = self.memory_cache.get(token_key)
+                if ent and now - ent.get('timestamp', 0) < ttl_seconds:
+                    return False
+                self.memory_cache[token_key] = {'data': 1, 'timestamp': now}
+                return True
+        except Exception:
+            return False
+
     def get_stats(self) -> dict:
         """Возвращает статистику кэша"""
         with self.lock:

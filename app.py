@@ -478,6 +478,49 @@ if DATABASE_SYSTEM_AVAILABLE:
 def _update_schedule_snapshot_from_matches(db_session, logger):
     """Builds a minimal schedule payload from `matches` table and writes snapshot 'schedule'."""
     try:
+        # Local helper: compute match status consistently with /api/match/status/get
+        def _compute_status(dt: datetime, explicit: str = None):
+            # explicit overrides only for finished; 'live' elevates to live
+            try:
+                # Determine schedule TZ shift (minutes)
+                try:
+                    tz_m = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+                except Exception:
+                    tz_m = 0
+                if tz_m == 0:
+                    try:
+                        tz_hh = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
+                    except Exception:
+                        tz_hh = 0
+                    tz_m = tz_hh * 60
+                if tz_m == 0:
+                    try:
+                        tz_m = int(os.environ.get('DEFAULT_TZ_MINUTES') or os.environ.get('DEFAULT_TZ_MIN') or '180')
+                    except Exception:
+                        tz_m = 180
+                now_local = datetime.now() + timedelta(minutes=tz_m)
+            except Exception:
+                now_local = datetime.now()
+
+            soon = False
+            if explicit == 'finished':
+                return 'finished', soon
+            if dt is None:
+                # unknown — fall back to explicit or scheduled
+                return (explicit if explicit in ('live','finished','scheduled') else 'scheduled'), False
+            try:
+                if (dt - timedelta(minutes=10)) <= now_local < dt:
+                    return 'scheduled', True
+                elif dt <= now_local < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                    return 'live', False
+                elif now_local >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                    return 'finished', False
+            except Exception:
+                pass
+            # Outside windows; respect explicit live if set
+            if explicit == 'live':
+                return 'live', False
+            return 'scheduled', False
         # Load teams mapping
         try:
             team_rows = db_session.query(Team).all()
@@ -551,12 +594,16 @@ def _update_schedule_snapshot_from_matches(db_session, logger):
             except Exception:
                 pass
 
+            explicit_status = (getattr(mm, 'status', None) or '').lower() if getattr(mm, 'status', None) else None
+            # Compute status consistently
+            comp_status, is_soon = _compute_status(dt, explicit_status)
             tours_map[tour_key].append({
                 'home': team_map.get(mm.home_team_id, ''),
                 'away': team_map.get(mm.away_team_id, ''),
                 'date': date_s,
                 'time': time_s,
-                'status': getattr(mm, 'status', None)
+                'status': comp_status,
+                'soon': bool(is_soon)
             })
 
         # Build simple tours list sorted by first match date within each tour
@@ -586,23 +633,40 @@ def _update_schedule_snapshot_from_matches(db_session, logger):
         except Exception:
             pass
 
-        # pick up to 3 upcoming tours: prefer those with start_at >= today
-        now_local = datetime.now()
-        filtered = []
-        for t in tours_list:
+        # Keep current tour (has at least one non-finished match) plus the next tours
+        # Also filter out finished matches inside each tour
+        # Determine first index of tour with unfinished matches
+        def _not_finished(m):
             try:
-                sa = t.get('start_at')
-                if not sa:
-                    filtered.append(t)
-                    continue
-                sa_dt = datetime.fromisoformat(sa)
-                if sa_dt.date() >= (now_local.date()):
-                    filtered.append(t)
+                return (m.get('status') != 'finished')
             except Exception:
-                filtered.append(t)
-            if len(filtered) >= 3:
+                return True
+        current_idx = None
+        for i, t in enumerate(tours_list):
+            matches = t.get('matches', [])
+            if any(_not_finished(m) for m in matches):
+                current_idx = i
                 break
+        filtered = []
+        if current_idx is not None:
+            # include current + next up to 2 tours
+            for j in range(current_idx, min(len(tours_list), current_idx + 3)):
+                tt = tours_list[j]
+                # filter out finished matches
+                fm = [m for m in (tt.get('matches') or []) if _not_finished(m)]
+                if fm:
+                    filtered.append({ 'tour': tt.get('tour'), 'matches': fm, 'start_at': tt.get('start_at') })
+                else:
+                    # if no unfinished matches and it's not the very first included tour, skip
+                    if j == current_idx:
+                        # If we landed here, technically all finished; try to pick next tours only
+                        continue
+        else:
+            # No unfinished tours — take next three by order (as fallback), without filtering
+            for tt in tours_list[:3]:
+                filtered.append(tt)
 
+        # Safety fallback
         if not filtered:
             filtered = tours_list[:3]
 
@@ -1182,6 +1246,45 @@ def _pseudo_user_id() -> int:
         # Небольшой фиксированный ID как fallback
         return 0
 
+# --- Bet lock helpers (UTC unification under feature flag) ---
+def _is_feature_enabled(name: str) -> bool:
+    try:
+        return (os.environ.get(name, '').strip().lower() in ('1', 'true', 'yes'))
+    except Exception:
+        return False
+
+def _convert_local_naive_to_utc(dt):
+    """Converts a naive/local datetime to UTC.
+    Priority: DEFAULT_TZ via zoneinfo; fallback to SCHEDULE_TZ_SHIFT_* if tzdata is unavailable.
+    """
+    if not dt:
+        return None
+    try:
+        from zoneinfo import ZoneInfo  # Python 3.9+
+        tz_name = os.environ.get('DEFAULT_TZ', 'Europe/Moscow')
+        if dt.tzinfo is None:
+            local_dt = dt.replace(tzinfo=ZoneInfo(tz_name))
+        else:
+            local_dt = dt
+        return local_dt.astimezone(timezone.utc)
+    except Exception:
+        # Fallback: use SCHEDULE_TZ_SHIFT_* (minutes/hours)
+        try:
+            tzmin = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+        except Exception:
+            tzmin = 0
+        if tzmin == 0:
+            try:
+                tzh = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
+            except Exception:
+                tzh = 0
+            tzmin = tzh * 60
+        # Local naive -> UTC: subtract local shift minutes
+        try:
+            return (dt - timedelta(minutes=tzmin)).replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
 
 @app.route('/api/betting/place', methods=['POST'])
 @require_telegram_auth()
@@ -1303,25 +1406,21 @@ def api_betting_place():
     if not found:
         return jsonify({'error': 'Матч не найден'}), 404
     if match_dt:
+        # Всегда-ON: единый UTC-замок через utils.betting
         try:
-            tzmin = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+            from utils.betting import BettingCalculator
+            match_dt_utc = _convert_local_naive_to_utc(match_dt)
+            calc = BettingCalculator()
+            ok, msg = calc.check_bet_timing(match_dt_utc, lock_ahead_minutes=BET_LOCK_AHEAD_MINUTES)
+            if not ok:
+                if 'already started' in (msg or ''):
+                    return jsonify({'error': 'Ставки на начавшийся матч недоступны', 'locked': True}), 400
+                if 'Betting closed' in (msg or ''):
+                    return jsonify({'error': 'Ставки закрыты перед началом матча', 'locked': True}), 400
+                return jsonify({'error': 'Ставки недоступны', 'locked': True}), 400
         except Exception:
-            tzmin = 0
-        if tzmin == 0:
-            try:
-                tzh = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
-            except Exception:
-                tzh = 0
-            tzmin = tzh * 60
-        now_local = datetime.now() + timedelta(minutes=tzmin)
-        if match_dt <= now_local:
-            return jsonify({'error': 'Ставки на начавшийся матч недоступны'}), 400
-        # Закрываем прием ставок за BET_LOCK_AHEAD_MINUTES до старта
-        try:
-            if match_dt - timedelta(minutes=BET_LOCK_AHEAD_MINUTES) <= now_local:
-                return jsonify({'error': 'Ставки закрыты перед началом матча'}), 400
-        except Exception:
-            pass
+            # Если не удалось вычислить lock — блокируем на всякий случай
+            return jsonify({'error': 'Ставки временно недоступны', 'locked': True}), 400
 
     db: Session = get_db()
     try:
@@ -6463,7 +6562,8 @@ def _build_betting_tours_payload():
             extra = tours[1:2]
     tours = primary + extra
 
-    now_local = datetime.now()
+    # Временная опора
+    now_utc = datetime.now(timezone.utc)
     # Для запросов флагов статуса матчей переиспользуем одну DB-сессию (снижает нагрузку и предотвращает лишние коннекты)
     db_flags = get_db() if SessionLocal is not None else None
     for t in tours:
@@ -6495,24 +6595,27 @@ def _build_betting_tours_payload():
         for m in t.get('matches', []):
             started = False
             try:
+                # Всегда по UTC (конвертация из локального представления даты/времени)
+                dt_local = None
                 if m.get('datetime'):
-                    dt = datetime.fromisoformat(m['datetime'])
-                    if dt <= now_local:
-                        started = True
+                    dt_local = datetime.fromisoformat(m['datetime'])
                 elif m.get('date'):
-                    d = datetime.fromisoformat(m['date']).date()
-                    if d < now_local.date():
-                        started = True
-                    elif d == now_local.date():
-                        # если есть точное время — сравниваем с текущим временем
+                    try:
+                        dd = datetime.fromisoformat(m['date']).date()
+                    except Exception:
+                        dd = None
+                    tm = None
+                    try:
                         if m.get('time'):
-                            tm = datetime.strptime(m['time'], '%H:%M').time()
-                            match_dt = datetime.combine(d, tm)
-                            if match_dt <= now_local:
-                                started = True
-                        else:
-                            # без точного времени — считаем что старт в полночь (уже начался)
-                            started = True
+                            tm = datetime.strptime((m.get('time') or '00:00'), '%H:%M').time()
+                    except Exception:
+                        tm = None
+                    if dd:
+                        dt_local = datetime.combine(dd, tm or datetime.min.time())
+                if dt_local is not None:
+                    dt_utc = _convert_local_naive_to_utc(dt_local)
+                    if dt_utc and dt_utc <= now_utc:
+                        started = True
             except Exception:
                 pass
             if started:
@@ -6522,11 +6625,39 @@ def _build_betting_tours_payload():
         for m in t.get('matches', []):
             try:
                 lock = False
+                # Единый UTC-замок — через betting utils
+                from utils.betting import BettingCalculator
+                # Гарантируем наличие локального datetime для вычисления
+                dt_local = None
                 if m.get('datetime'):
-                    lock = datetime.fromisoformat(m['datetime']) - timedelta(minutes=BET_LOCK_AHEAD_MINUTES) <= now_local
-                elif m.get('date'):
-                    d = datetime.fromisoformat(m['date']).date()
-                    lock = datetime.combine(d, datetime.max.time()) <= now_local
+                    try:
+                        dt_local = datetime.fromisoformat(m['datetime'])
+                    except Exception:
+                        dt_local = None
+                if dt_local is None:
+                    # Сконструируем из date/time при их наличии
+                    try:
+                        dd = datetime.fromisoformat((m.get('date') or '')[:10]).date() if m.get('date') else None
+                    except Exception:
+                        dd = None
+                    tt = None
+                    try:
+                        tt = datetime.strptime((m.get('time') or '00:00'), '%H:%M').time() if m.get('time') else None
+                    except Exception:
+                        tt = None
+                    if dd:
+                        dt_local = datetime.combine(dd, tt or datetime.min.time())
+                        # Проставим обратно строковое поле для клиентской консистентности
+                        try:
+                            m['datetime'] = dt_local.isoformat()
+                        except Exception:
+                            pass
+                # Перевод в UTC и проверка lock
+                dt_utc = _convert_local_naive_to_utc(dt_local) if dt_local else None
+                if dt_utc is not None:
+                    calc = BettingCalculator()
+                    ok, _msg = calc.check_bet_timing(dt_utc, lock_ahead_minutes=BET_LOCK_AHEAD_MINUTES)
+                    lock = (not ok)
                 # Если матч помечен как live/finished админом — обязательно закрываем
                 if SessionLocal is not None:
                     db = get_db()
@@ -6546,12 +6677,15 @@ def _build_betting_tours_payload():
                             except Exception:
                                 match_dt = None
                             if match_dt is not None:
-                                if row.status == 'live':
-                                    if match_dt - timedelta(minutes=10) <= now_local < match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                        lock = True
-                                elif row.status == 'finished':
-                                    if now_local >= match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
-                                        lock = True
+                                # Сравнения в UTC
+                                mt_utc = _convert_local_naive_to_utc(match_dt)
+                                if mt_utc is not None:
+                                    if row.status == 'live':
+                                        if mt_utc - timedelta(minutes=10) <= now_utc < mt_utc + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                            lock = True
+                                    elif row.status == 'finished':
+                                        if now_utc >= mt_utc + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                            lock = True
                     except Exception:
                         pass
                     finally:
@@ -7513,6 +7647,18 @@ def api_match_status_set_live():
                 row.score_away = 0
                 row.updated_at = datetime.now(timezone.utc)
                 db.commit()
+                # Отправим начальный счёт по WS (без null), чтобы UI не «мигал»
+                try:
+                    ws = app.config.get('websocket_manager')
+                    if ws:
+                        new_ver = _bump_odds_version(home, away)
+                        payload = {'odds_version': new_ver, 'score_home': 0, 'score_away': 0}
+                        if hasattr(ws, 'notify_patch_debounced'):
+                            ws.notify_patch_debounced(entity='match', entity_id={'home': home, 'away': away}, fields=payload)
+                        else:
+                            ws.notify_patch(entity='match', entity_id={'home': home, 'away': away}, fields=payload)
+                except Exception:
+                    pass
                 # Ранее счёт синхронизировался в лист расписания Google Sheets (удалено)
             # Обновим статус матча как live в основной таблице matches (+зеркало в MatchFlags на переходный период)
             try:
@@ -8134,18 +8280,34 @@ def get_user():
             db.commit(); db.refresh(db_user)
         finally:
             db.close()
-        # mirror photo
+        # mirror photo (берём photo_url из g.auth_data, а при отсутствии — из parsed)
         try:
-            if parsed.get('user') and parsed['user'].get('photo_url') and SessionLocal is not None:
-                dbp = get_db();
+            photo_url = None
+            try:
+                # При использовании @require_telegram_auth() валидированные данные лежат в g.auth_data
+                if hasattr(flask.g, 'auth_data') and isinstance(getattr(flask.g, 'auth_data', None), dict):
+                    photo_url = (flask.g.auth_data.get('user') or {}).get('photo_url') or None
+            except Exception:
+                photo_url = None
+            if not photo_url:
+                try:
+                    photo_url = (parsed.get('user') or {}).get('photo_url') if isinstance(parsed, dict) else None
+                except Exception:
+                    photo_url = None
+
+            if photo_url and SessionLocal is not None:
+                dbp = get_db()
                 try:
                     r = dbp.get(UserPhoto, int(user_data['id']))
-                    url = parsed['user'].get('photo_url'); nnow=datetime.now(timezone.utc)
+                    nnow = datetime.now(timezone.utc)
                     if r:
-                        if url and r.photo_url!=url:
-                            r.photo_url=url; r.updated_at=nnow; dbp.commit()
+                        if r.photo_url != photo_url:
+                            r.photo_url = photo_url
+                            r.updated_at = nnow
+                            dbp.commit()
                     else:
-                        dbp.add(UserPhoto(user_id=int(user_data['id']), photo_url=url, updated_at=nnow)); dbp.commit()
+                        dbp.add(UserPhoto(user_id=int(user_data['id']), photo_url=photo_url, updated_at=nnow))
+                        dbp.commit()
                 finally:
                     dbp.close()
         except Exception as pe:
@@ -10166,29 +10328,36 @@ def api_match_score_set():
             row.score_away = sa
             row.updated_at = datetime.now(timezone.utc)
             db.commit()
+
+            score_changed = (old_score_home != row.score_home) or (old_score_away != row.score_away)
             
             # Отправляем компактный патч через WebSocket (если доступен)
             try:
                 ws = app.config.get('websocket_manager')
                 inv = globals().get('invalidator')
-                if ws:
+                if ws and score_changed:
                     # bump версию коэффициентов (на будущее - если логика будет зависеть от счёта)
                     new_ver = _bump_odds_version(home, away)
-                    # Патч состояния матча (счёт) — дебаунс
+                    # Патч состояния матча (счёт) — отправляем только реальные изменения; без null полей
+                    match_fields = {'odds_version': new_ver}
+                    if row.score_home is not None:
+                        match_fields['score_home'] = row.score_home
+                    if row.score_away is not None:
+                        match_fields['score_away'] = row.score_away
                     if hasattr(ws, 'notify_patch_debounced'):
                         ws.notify_patch_debounced(
                             entity='match',
                             entity_id={'home': home, 'away': away},
-                            fields={'score_home': row.score_home, 'score_away': row.score_away, 'odds_version': new_ver}
+                            fields=match_fields
                         )
                     else:
                         # fallback на прямую отправку
                         ws.notify_patch(
                             entity='match',
                             entity_id={'home': home, 'away': away},
-                            fields={'score_home': row.score_home, 'score_away': row.score_away, 'odds_version': new_ver}
+                            fields=match_fields
                         )
-                    # Патч коэффициентов/рынков (частичный snapshot) — дебаунс
+                    # Патч коэффициентов/рынков (частичный snapshot) — можно пропустить, но оставим при изменении счёта
                     odds_fields = _build_odds_fields(home, away)
                     if odds_fields:
                         odds_fields['odds_version'] = new_ver
@@ -10248,7 +10417,7 @@ def api_match_score_set():
             except Exception:
                 pass
             
-            return jsonify({'status': 'ok', 'score_home': row.score_home, 'score_away': row.score_away})
+            return jsonify({'status': 'ok', 'score_home': row.score_home, 'score_away': row.score_away, 'changed': bool(score_changed)})
         finally:
             db.close()
     except Exception as e:
@@ -10813,9 +10982,68 @@ def api_match_events_add():
             return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
         try:
-            row = MatchPlayerEvent(home=home, away=away, team=team, minute=minute, player=player, type=etype, note=(note or None))
-            db.add(row)
-            db.commit()
+            # 1) Idempotency guard: if identical event already exists -> reuse it
+            existing = db.query(MatchPlayerEvent).filter(
+                MatchPlayerEvent.home==home,
+                MatchPlayerEvent.away==away,
+                MatchPlayerEvent.team==team,
+                MatchPlayerEvent.player==player,
+                MatchPlayerEvent.type==etype,
+                (MatchPlayerEvent.minute==minute if minute is not None else MatchPlayerEvent.minute.is_(None)),
+                (MatchPlayerEvent.note== (note or None))
+            ).order_by(MatchPlayerEvent.id.asc()).first()
+            if existing:
+                row = existing
+            else:
+                # 2) Acquire short idempotency token to avoid concurrent duplicates
+                try:
+                    from optimizations.multilevel_cache import get_cache
+                    idem_key = f"evt:{home.lower()}__{away.lower()}__{team}:{(player or '').lower()}:{etype}:{minute if minute is not None else 'n'}:{(note or '').strip().lower()}"
+                    cache = get_cache()
+                    if cache.try_acquire(idem_key, ttl_seconds=10):
+                        # Double-check under token
+                        existing2 = db.query(MatchPlayerEvent).filter(
+                            MatchPlayerEvent.home==home,
+                            MatchPlayerEvent.away==away,
+                            MatchPlayerEvent.team==team,
+                            MatchPlayerEvent.player==player,
+                            MatchPlayerEvent.type==etype,
+                            (MatchPlayerEvent.minute==minute if minute is not None else MatchPlayerEvent.minute.is_(None)),
+                            (MatchPlayerEvent.note== (note or None))
+                        ).order_by(MatchPlayerEvent.id.asc()).first()
+                        if existing2:
+                            row = existing2
+                        else:
+                            row = MatchPlayerEvent(
+                                home=home, away=away, team=team,
+                                minute=minute, player=player, type=etype, note=(note or None)
+                            )
+                            db.add(row)
+                            db.commit()
+                    else:
+                        # Someone else likely processing; short wait-loop best-effort
+                        db.commit()  # ensure no txn holds locks
+                        time.sleep(0.05)
+                        row = db.query(MatchPlayerEvent).filter(
+                            MatchPlayerEvent.home==home,
+                            MatchPlayerEvent.away==away,
+                            MatchPlayerEvent.team==team,
+                            MatchPlayerEvent.player==player,
+                            MatchPlayerEvent.type==etype,
+                            (MatchPlayerEvent.minute==minute if minute is not None else MatchPlayerEvent.minute.is_(None)),
+                            (MatchPlayerEvent.note== (note or None))
+                        ).order_by(MatchPlayerEvent.id.asc()).first() or MatchPlayerEvent(
+                            home=home, away=away, team=team,
+                            minute=minute, player=player, type=etype, note=(note or None)
+                        )
+                        if row.id is None:
+                            db.add(row)
+                            db.commit()
+                except Exception:
+                    # Fallback without cache: rely on unique-by-check
+                    row = MatchPlayerEvent(home=home, away=away, team=team, minute=minute, player=player, type=etype, note=(note or None))
+                    db.add(row)
+                    db.commit()
             # Попытка синхронизации в расширенную схему (не критично при ошибке)
             _maybe_sync_event_to_adv_schema(home, away, player, etype)
             # Таргетированное уведомление в топик деталей матча (events изменились)
@@ -10825,13 +11053,28 @@ def api_match_events_add():
                     dt = _get_match_datetime(home, away)
                     date_str = dt.isoformat()[:10] if dt else ''
                     topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
+                    # Build authoritative events payload
+                    full_events = {'home': [], 'away': []}
+                    try:
+                        rows = db.query(MatchPlayerEvent).filter(
+                            MatchPlayerEvent.home==home, MatchPlayerEvent.away==away
+                        ).order_by(MatchPlayerEvent.minute.asc().nulls_last(), MatchPlayerEvent.id.asc()).all()
+                        for e in rows:
+                            side = 'home' if (e.team or 'home') == 'home' else 'away'
+                            full_events[side].append({
+                                'id': int(e.id),
+                                'minute': (int(e.minute) if e.minute is not None else None),
+                                'player': e.player,
+                                'type': e.type,
+                                'note': e.note or ''
+                            })
+                    except Exception:
+                        pass
                     inv.publish_topic(topic, 'topic_update', {
                         'entity': 'match_events',
                         'home': home,
                         'away': away,
-                        'team': team,
-                        'type': etype,
-                        'player': player
+                        'events': full_events
                     }, priority=1)
             except Exception:
                 pass
@@ -10876,6 +11119,37 @@ def api_match_events_remove():
                 MatchPlayerEvent.type==etype
             ).order_by(MatchPlayerEvent.id.desc()).first()
             if not row:
+                # Publish current events anyway for consistency
+                try:
+                    inv = globals().get('invalidator')
+                    if inv:
+                        dt = _get_match_datetime(home, away)
+                        date_str = dt.isoformat()[:10] if dt else ''
+                        topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
+                        full_events = {'home': [], 'away': []}
+                        try:
+                            rows = db.query(MatchPlayerEvent).filter(
+                                MatchPlayerEvent.home==home, MatchPlayerEvent.away==away
+                            ).order_by(MatchPlayerEvent.minute.asc().nulls_last(), MatchPlayerEvent.id.asc()).all()
+                            for e in rows:
+                                side = 'home' if (e.team or 'home') == 'home' else 'away'
+                                full_events[side].append({
+                                    'id': int(e.id),
+                                    'minute': (int(e.minute) if e.minute is not None else None),
+                                    'player': e.player,
+                                    'type': e.type,
+                                    'note': e.note or ''
+                                })
+                        except Exception:
+                            pass
+                        inv.publish_topic(topic, 'topic_update', {
+                            'entity': 'match_events',
+                            'home': home,
+                            'away': away,
+                            'events': full_events
+                        }, priority=1)
+                except Exception:
+                    pass
                 return jsonify({'status': 'ok', 'removed': 0})
             rid = int(row.id)
             db.delete(row)
@@ -10887,13 +11161,28 @@ def api_match_events_remove():
                     dt = _get_match_datetime(home, away)
                     date_str = dt.isoformat()[:10] if dt else ''
                     topic = f"match:{home.lower()}__{away.lower()}__{date_str}:details"
+                    # Build authoritative events payload
+                    full_events = {'home': [], 'away': []}
+                    try:
+                        rows = db.query(MatchPlayerEvent).filter(
+                            MatchPlayerEvent.home==home, MatchPlayerEvent.away==away
+                        ).order_by(MatchPlayerEvent.minute.asc().nulls_last(), MatchPlayerEvent.id.asc()).all()
+                        for e in rows:
+                            side = 'home' if (e.team or 'home') == 'home' else 'away'
+                            full_events[side].append({
+                                'id': int(e.id),
+                                'minute': (int(e.minute) if e.minute is not None else None),
+                                'player': e.player,
+                                'type': e.type,
+                                'note': e.note or ''
+                            })
+                    except Exception:
+                        pass
                     inv.publish_topic(topic, 'topic_update', {
-                        'entity': 'match_events_removed',
+                        'entity': 'match_events',
                         'home': home,
                         'away': away,
-                        'team': team,
-                        'type': etype,
-                        'player': player
+                        'events': full_events
                     }, priority=1)
             except Exception:
                 pass

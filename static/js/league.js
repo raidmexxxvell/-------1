@@ -308,9 +308,14 @@
     const MAX_RENDERED_TOURS = 4; // держим в DOM не больше 4 туров одновременно
     const INITIAL_RENDER = Math.min(2, tours.length);
 
-  function createMatchCard(m) {
+    function createMatchCard(m) {
       const card = document.createElement('div');
       card.className = 'match-card';
+      // WS addressing: помечаем карточку атрибутами для таргетирования updateMatchScore
+      try {
+        if (m && typeof m.home === 'string') { card.setAttribute('data-match-home', m.home); }
+        if (m && typeof m.away === 'string') { card.setAttribute('data-match-away', m.away); }
+      } catch(_) {}
       const header = document.createElement('div'); header.className = 'match-header';
   const dateStr = (() => { try { const ds = normalizeDateStr(m.date || m.datetime); return ds ? formatDateRu(ds) : ''; } catch(_) { return ''; } })();
       const timeStr = m.time || '';
@@ -324,12 +329,13 @@
   if (isLive && !finStore[mkKey(m)]) { const live = document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); header.appendChild(live); }
       card.appendChild(header);
 
-      const center = document.createElement('div'); center.className='match-center';
+  const center = document.createElement('div'); center.className='match-center';
       const home = document.createElement('div'); home.className='team home';
   const hImg = document.createElement('img'); hImg.className='logo'; hImg.alt = m.home || ''; hImg.setAttribute('data-team-name', m.home || ''); try { hImg.loading='lazy'; hImg.decoding='async'; } catch(_) {} loadTeamLogo(hImg, m.home || '');
       const hName = document.createElement('div'); hName.className='team-name'; hName.setAttribute('data-team-name', m.home || ''); hName.textContent = withTeamCount(m.home || '');
       home.append(hImg, hName);
-  const score = document.createElement('div'); score.className = 'score'; score.textContent = 'VS';
+  // Добавляем класс match-score, чтобы realtime-updates смог находить и обновлять счёт по WS
+  const score = document.createElement('div'); score.className = 'score match-score'; score.textContent = 'VS';
       const away = document.createElement('div'); away.className='team away';
   const aImg = document.createElement('img'); aImg.className='logo'; aImg.alt = m.away || ''; aImg.setAttribute('data-team-name', m.away || ''); try { aImg.loading='lazy'; aImg.decoding='async'; } catch(_) {} loadTeamLogo(aImg, m.away || '');
       const aName = document.createElement('div'); aName.className='team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');

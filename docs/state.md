@@ -101,6 +101,7 @@ interface MatchStats {
 - league (no persist)
   - state: `{ table: any[]; stats: any[]; schedule: { tours: any[]; lastUpdated: number|null; etag?: string|null } }`
   - обновляется из: etag-fetch (schedule/table/stats), WS патчи
+  - Примечание (live score в расписании): карточки матчей размечены атрибутами `data-match-home`/`data-match-away`, а элемент счёта имеет класс `match-score`. Это позволяет `realtime-updates.js` (метод `updateMatchScore`) обновлять текст счёта напрямую по WS без полной перерисовки карточки и исключает мерцание «VS → 0:0 → исчез → 0:1 → исчез».
 
 ### Статистика (вкладка «Статистика» Лиги)
 
