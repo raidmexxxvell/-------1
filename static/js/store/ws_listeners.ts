@@ -4,12 +4,14 @@
 
 import type { StoreApi } from './core';
 
-declare global {
-  interface Window {
-    RealtimeStore?: StoreApi<RealtimeState>;
-    OddsStore?: StoreApi<OddsState>;
-    MatchesStore?: StoreApi<MatchesState>;
-  }
+interface RealtimeState {
+  connected: boolean;
+  reconnects: number;
+  topics?: string[];
+}
+
+interface OddsState {
+  map: Record<string, { value: number; version: number; lastUpdated: number }>;
 }
 
 (function(){
@@ -19,13 +21,13 @@ declare global {
   window.addEventListener('ws:connected', (e: Event) => {
     try {
       const d = (e as CustomEvent).detail || {};
-      window.RealtimeStore?.update(s => { s.connected = true; s.reconnects = Number(d.reconnects||0); });
+      (window as any).RealtimeStore?.update((s: any) => { s.connected = true; s.reconnects = Number(d.reconnects||0); });
     } catch(_) {}
   });
   window.addEventListener('ws:disconnected', (e: Event) => {
     try {
       const d = (e as CustomEvent).detail || {};
-      window.RealtimeStore?.update(s => { s.connected = false; s.reconnects = (s.reconnects||0)+1; });
+      (window as any).RealtimeStore?.update((s: any) => { s.connected = false; s.reconnects = (s.reconnects||0)+1; });
     } catch(_) {}
   });
 
@@ -35,7 +37,7 @@ declare global {
       const p = (e as CustomEvent).detail || {};
       const topic = String(p.topic||p.channel||'').trim();
       if (!topic) return;
-      window.RealtimeStore?.update(s => {
+      (window as any).RealtimeStore?.update((s: any) => {
         const set = new Set(s.topics||[]);
         set.add(topic);
         s.topics = Array.from(set);
@@ -70,7 +72,7 @@ declare global {
         : (d.key || null);
       if (!key) return;
       const incomingV = typeof d.odds_version === 'number' ? d.odds_version : 0;
-      window.OddsStore?.update(s => {
+      (window as any).OddsStore?.update((s: any) => {
         const cur = s.map[key]?.version || 0;
         if (incomingV < cur) return; // ignore stale
         const value = typeof d.odds?.value === 'number' ? d.odds.value : (typeof d.odds === 'number' ? d.odds : 0);
@@ -84,7 +86,7 @@ declare global {
     try {
       const p = (e as CustomEvent).detail || {};
       if (!p || !p.entity) return;
-      if (!window.MatchesStore) return;
+      if (!(window as any).MatchesStore) return;
 
       if (p.entity === 'match') {
         const id = p.id || {}; const fields = p.fields || {};
@@ -94,7 +96,7 @@ declare global {
         if (!home || !away) return;
         const key = `${home}_${away}_${date||''}`;
         const score_home = fields.score_home; const score_away = fields.score_away;
-        window.MatchesStore.update(s => {
+        (window as any).MatchesStore.update((s: any) => {
           const cur = s.map[key] || { info: { id: key, home, away, date }, score: null, events: [], lastUpdated: null };
           if (score_home !== undefined || score_away !== undefined) {
             const prev = cur.score || { home: 0, away: 0 } as any;
@@ -115,14 +117,16 @@ declare global {
         // events array expected in fields.events or p.events
         const incoming = Array.isArray(fields.events) ? fields.events : (Array.isArray(p.events) ? p.events : []);
         if (!incoming.length) return;
-        window.MatchesStore.update(s => {
+        (window as any).MatchesStore.update((s: any) => {
           const cur = s.map[key] || { info: { id: key, home, away, date }, score: null, events: [], lastUpdated: null };
           // простая слияние: добавляем новые события в конец, избегая дублей по (t,kind,team)
-          const seen = new Set(cur.events.map(ev => `${ev.t}|${ev.kind}|${ev.team||ev.teamName||ev.side||''}`));
+          const eventsArray = cur.events || []; // защита от undefined
+          const seen = new Set(eventsArray.map((ev: any) => `${ev.t}|${ev.kind}|${ev.team||ev.teamName||ev.side||''}`));
           for (const ev of incoming) {
             const sig = `${ev.t}|${ev.kind}|${ev.team||ev.teamName||ev.side||''}`;
-            if (!seen.has(sig)) { cur.events.push(ev); seen.add(sig); }
+            if (!seen.has(sig)) { eventsArray.push(ev); seen.add(sig); }
           }
+          cur.events = eventsArray; // обновляем массив
           cur.lastUpdated = Date.now();
           s.map[key] = cur;
         });
@@ -136,9 +140,32 @@ declare global {
         const date = id.date || p.date || '';
         if (!home || !away) return;
         const key = `${home}_${away}_${date||''}`;
-        window.MatchesStore.update(s => {
+        (window as any).MatchesStore.update((s: any) => {
           const cur = s.map[key] || { info: { id: key, home, away, date }, score: null, events: [], lastUpdated: null } as any;
           cur.stats = Object.assign({}, cur.stats || {}, fields?.stats || fields || {});
+          cur.lastUpdated = Date.now();
+          s.map[key] = cur;
+        });
+      }
+
+      // optional: match_rosters patch (новое добавление)
+      if (p.entity === 'match_rosters' || p.entity === 'rosters') {
+        const id = p.id || {}; const fields = p.fields || {};
+        const home = id.home || p.home || fields.home || '';
+        const away = id.away || p.away || fields.away || '';
+        const date = id.date || p.date || '';
+        if (!home || !away) return;
+        const key = `${home}_${away}_${date||''}`;
+        (window as any).MatchesStore.update((s: any) => {
+          const cur = s.map[key] || { info: { id: key, home, away, date }, score: null, events: [], lastUpdated: null } as any;
+          // Обновляем составы
+          if (fields.rosters) {
+            (cur as any).rosters = fields.rosters;
+          } else if (fields.home_roster || fields.away_roster) {
+            (cur as any).rosters = (cur as any).rosters || { home: [], away: [] };
+            if (fields.home_roster) (cur as any).rosters.home = fields.home_roster;
+            if (fields.away_roster) (cur as any).rosters.away = fields.away_roster;
+          }
           cur.lastUpdated = Date.now();
           s.map[key] = cur;
         });

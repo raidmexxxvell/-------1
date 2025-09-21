@@ -18,6 +18,9 @@ declare global {
   interface Window {
     // MatchesStore likely already declared globally in other store modules; avoid redeclaration conflict
     MatchStats?: any;
+    MatchRostersEvents?: any;
+    MatchesStore?: StoreApi<MatchesState>;
+    MatchesStoreAPI?: any;
     __WEBSOCKETS_ENABLED__?: boolean;
   }
 }
@@ -241,8 +244,156 @@ declare global {
     return true;
   }
 
+  // --- Rosters/Events override ---
+  // Legacy MatchRostersEvents.render(fetch...) → заменяем на версию из стора
+  function installRostersOverride(){
+    try {
+      const orig = window.MatchRostersEvents && window.MatchRostersEvents.render;
+      if(!orig || (window.MatchRostersEvents && window.MatchRostersEvents.__storeDriven)) return;
+      
+      // Сохраняем оригинальную функцию
+      window.MatchRostersEvents.__originalRender = orig;
+      
+      window.MatchRostersEvents.render = function(match: any, details: any, mdPane: any, els: any){
+        console.log('[Bridge] MatchRostersEvents.render called from store', { match, details, mdPane, els });
+        
+        // Читаем из стора и рендерим мгновенно
+        try {
+          renderRostersFromStore(match, mdPane, els);
+        } catch(e) {
+          console.warn('[Bridge] Error rendering rosters from store:', e);
+          // Fallback на оригинальную функцию если что-то пошло не так
+          try {
+            orig.call(this, match, details, mdPane, els);
+          } catch(_) {}
+        }
+      };
+      
+      window.MatchRostersEvents.__storeDriven = true;
+      console.log('[Bridge] Rosters override installed successfully');
+    } catch(e) {
+      console.error('[Bridge] Failed to install rosters override:', e);
+    }
+  }
+
+  function renderRostersFromStore(match: any, mdPane: any, els: any) {
+    if(!els.homePane || !els.awayPane) return;
+    
+    // Получаем данные из стора
+    let storeData: any = null;
+    let hasStoreData = false;
+    
+    if ((window as any).MatchesStoreAPI && match?.home && match?.away) {
+      try {
+        const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(match.home, match.away);
+        if (matchKey) {
+          storeData = (window as any).MatchesStoreAPI.getMatch(matchKey);
+          hasStoreData = !!(storeData && (storeData.rosters || storeData.events));
+        }
+      } catch(e) {
+        console.warn('[Bridge] MatchesStoreAPI error:', e);
+      }
+    }
+    
+    // Fallback на старый MatchesStore
+    if (!hasStoreData) {
+      const st = (window as any).MatchesStore?.get();
+      if (st) {
+        const key = findMatchKey(st);
+        if (key) {
+          const entry = st.map[key];
+          storeData = entry || null;
+          hasStoreData = !!(storeData && (storeData.rosters || storeData.events || storeData.score));
+        }
+      }
+    }
+    
+    // Если нет данных в сторе, используем последний кэш или пустые данные
+    const rosters = storeData?.rosters || mdPane.__lastRosters || { home: [], away: [] };
+    const events = storeData?.events || mdPane.__lastEvents || { home: [], away: [] };
+    const score = storeData?.score;
+    
+    // Обновляем кэш для совместимости с legacy кодом
+    mdPane.__lastRosters = rosters;
+    mdPane.__lastEvents = events;
+    if (score) {
+      mdPane.__lastScore = score;
+      // Обновляем счет в UI если элементы доступны
+      try {
+        const scoreEl = document.getElementById('md-score');
+        if (scoreEl && typeof score.home === 'number' && typeof score.away === 'number') {
+          scoreEl.textContent = `${score.home} : ${score.away}`;
+        }
+      } catch(_) {}
+    }
+    
+    // Нормализуем события в формат, который ожидает legacy код
+    let eventsFormatted: { home: any[]; away: any[] } = { home: [], away: [] };
+    if (Array.isArray(events)) {
+      // Новый формат: массив событий с side
+      for (const ev of events) {
+        const bucket = (ev.side === 'away') ? eventsFormatted.away : eventsFormatted.home;
+        bucket.push({
+          player: ev.player || ev.team || ev.teamName || '',
+          type: ev.type || ev.kind || 'event'
+        });
+      }
+    } else if (events && typeof events === 'object') {
+      // Старый формат: {home: [], away: []}
+      eventsFormatted.home = (events.home ?? []).map((e: any) => ({
+        player: e.player || '',
+        type: e.type || 'event'
+      }));
+      eventsFormatted.away = (events.away ?? []).map((e: any) => ({
+        player: e.player || '',
+        type: e.type || 'event'
+      }));
+    }
+    
+    // Вызываем оригинальную render функцию с данными из стора
+    try {
+      // Получаем оригинальную функцию (до override)
+      const renderFunc = window.MatchRostersEvents.__originalRender;
+      if (!renderFunc) {
+        console.warn('[Bridge] No original render function found, using fallback');
+        if (els.homePane) els.homePane.innerHTML = `<div>Команда 1: ${rosters.home?.length || 0} игроков</div>`;
+        if (els.awayPane) els.awayPane.innerHTML = `<div>Команда 2: ${rosters.away?.length || 0} игроков</div>`;
+        return;
+      }
+      
+      const detailsObj = {
+        rosters: {
+          home: rosters.home ?? [],
+          away: rosters.away ?? []
+        },
+        events: eventsFormatted,
+        score: score
+      };
+      
+      renderFunc(match, detailsObj, mdPane, els);
+    } catch(err) {
+      console.warn('[Bridge] Error calling rosters render function:', err);
+      // Минимальный fallback
+      if (els.homePane) {
+        els.homePane.innerHTML = `<div>Команда 1: ${rosters.home?.length || 0} игроков</div>`;
+      }
+      if (els.awayPane) {
+        els.awayPane.innerHTML = `<div>Команда 2: ${rosters.away?.length || 0} игроков</div>`;
+      }
+    }
+  }
+
   // Периодически пытаемся установить override, пока legacy модуль не прогружен
-  try { let tries=0; const timer=setInterval(()=>{ tries++; installStatsOverride(); if(window.MatchStats?.__storeDriven || tries>40) clearInterval(timer); }, 250); } catch(_){ }
+  try { 
+    let tries=0; 
+    const timer=setInterval(()=>{ 
+      tries++; 
+      installStatsOverride(); 
+      installRostersOverride();
+      if((window.MatchStats?.__storeDriven && window.MatchRostersEvents?.__storeDriven) || tries>40) 
+        clearInterval(timer); 
+    }, 250); 
+  } catch(_){ }
 
   // --- Events / rosters bridge ---
   // Мы НЕ рендерим roster здесь — лишь инициируем тот же механизм, что и realtime-updates (matchDetailsUpdate)

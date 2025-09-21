@@ -15,17 +15,17 @@ declare global {
     score: MatchScore | null; 
     events: MatchEvent[]; 
     stats?: MatchStats | null; 
+    rosters?: { home: any[]; away: any[] } | null; // составы команд
     ui?: MatchUIState | null; // UI состояние (scoreText, votes cache)
     lastUpdated: number | null 
   }
   interface MatchesState { map: Record<string, MatchEntry> }
-  interface Window { MatchesStore?: StoreApi<MatchesState> }
 }
 
 (() => {
   const init: MatchesState = { map: {} };
   const matches = window.Store.createStore<MatchesState>('matches', init);
-  window.MatchesStore = matches;
+  (window as any).MatchesStore = matches;
 
   // Совместимость с legacy MatchState API
   const MatchStateCompat = {
