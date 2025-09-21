@@ -597,12 +597,18 @@
     function showStakeModal(title, message, defaultValue) {
       return new Promise(resolve => {
         const modal = document.createElement('div'); modal.className = 'modal stake-modal show';
+        // Строка лимитов (если сервер передал глобальные лимиты)
+        const L = (window.__BET_LIMITS__||{});
+        const limLine = (L && (L.min!=null || L.max!=null))
+          ? `<div class="modal-hint">Лимиты: мин ${Number(L.min||10)}, макс ${Number(L.max||5000)}${L.daily?`, в день до ${Number(L.daily)}`:''}</div>`
+          : '';
         modal.innerHTML = `
           <div class="modal-backdrop"></div>
           <div class="modal-dialog">
             <div class="modal-title">${escapeHtml(title)}</div>
             <div class="modal-desc">${escapeHtml(message)}</div>
             <input class="modal-input" type="text" inputmode="numeric" value="${String(defaultValue||'')}" />
+            ${limLine}
             <div class="modal-error"></div>
             <div class="modal-actions">
               <button class="btn btn-secondary modal-cancel" type="button">Отмена</button>

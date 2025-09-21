@@ -81,6 +81,14 @@
     <link rel="stylesheet" href="/static/css/realtime-indicator.css?v={{ static_version }}">
     <link rel="stylesheet" href="/static/css/accessibility.css?v={{ static_version }}">{# A11y стили #}
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚽</text></svg>">
+            <script>
+                // Экспортируем лимиты ставок в глобальный объект для фронтенда
+                window.__BET_LIMITS__ = {
+                    min: '{{ bet_min|default(10) }}',
+                    max: '{{ bet_max|default(5000) }}',
+                    daily: '{{ bet_daily|default(50000) }}'
+                };
+            </script>
 </head>
 <body data-admin="{{ admin_user_id }}" class="theme-ufo">
     <!-- ЗАСТАВКА -->

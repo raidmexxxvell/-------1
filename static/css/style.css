@@ -240,7 +240,8 @@ html, body { overflow-x: hidden; }
 }
 
 /* Стили для модалки ввода ставки */
-.stake-modal .modal-dialog { width: min(420px, calc(100% - 32px)); top: 28vh; border-radius: 12px; padding: 14px; }
+/* Сделали модалку ставок чуть компактнее */
+.stake-modal .modal-dialog { width: min(380px, calc(100% - 32px)); top: 28vh; border-radius: 12px; padding: 12px; }
 .stake-modal .modal-title { font-size: 15px; margin-bottom: 6px; }
 .stake-modal .modal-desc { font-size: 13px; color: var(--gray); margin-bottom: 10px; }
 .stake-modal .modal-input { font-size: 18px; padding: 12px 14px; border-radius: 10px; text-align: center; font-weight:800; letter-spacing:1px; }
@@ -248,6 +249,8 @@ html, body { overflow-x: hidden; }
 .stake-modal .modal-actions .btn-secondary { background: transparent; border-color: rgba(255,255,255,0.06); }
 .stake-modal .modal-actions .btn-primary { background: var(--primary); border-color: transparent; color: #061028; }
 .stake-modal .modal-error { color: var(--danger); font-size: 13px; min-height: 18px; text-align:center; margin-top:8px; }
+/* Подсказка-штрих мелким шрифтом для лимитов ставок */
+.stake-modal .modal-hint { font-size: 11px; color: var(--gray); opacity: .9; margin-top: 6px; text-align: center; }
 
 /* --- Трансляция VK --- */
 .stream-wrap { width: 100%; border-radius: 12px; overflow: hidden; background: rgba(2,6,23,0.6); border: 1px solid rgba(255,255,255,0.08); }

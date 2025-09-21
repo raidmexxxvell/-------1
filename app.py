@@ -8396,6 +8396,9 @@ def index():
         websockets_enabled=ws_enabled,
         ws_topic_subs=ws_topic_subs,
         ws_topic_scheme=str(app.config.get('WS_TOPIC_SCHEME','no_date')),
+        bet_min=app.config.get('BET_MIN_STAKE', 10),
+        bet_max=app.config.get('BET_MAX_STAKE', 5000),
+        bet_daily=app.config.get('BET_DAILY_MAX_STAKE', 50000),
     )
 
 @app.route('/api/user', methods=['POST'])
