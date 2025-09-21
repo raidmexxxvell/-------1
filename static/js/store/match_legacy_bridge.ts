@@ -244,6 +244,45 @@ declare global {
     return true;
   }
 
+  function checkStoreDataAvailable(match: any): boolean {
+    if (!match?.home || !match?.away) return false;
+    
+    // Проверяем через MatchesStoreAPI
+    if ((window as any).MatchesStoreAPI) {
+      try {
+        const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(match.home, match.away);
+        if (matchKey) {
+          const storeData = (window as any).MatchesStoreAPI.getMatch(matchKey);
+          if (storeData && (storeData.rosters || storeData.events)) {
+            return true;
+          }
+        }
+      } catch(e) {
+        console.warn('[Bridge] MatchesStoreAPI check error:', e);
+      }
+    }
+    
+    // Fallback на старый MatchesStore
+    if ((window as any).MatchesStore) {
+      try {
+        const st = (window as any).MatchesStore.get();
+        if (st) {
+          const key = findMatchKey(st);
+          if (key) {
+            const entry = st.map[key];
+            if (entry && (entry.rosters || entry.events || entry.score)) {
+              return true;
+            }
+          }
+        }
+      } catch(e) {
+        console.warn('[Bridge] Legacy store check error:', e);
+      }
+    }
+    
+    return false;
+  }
+
   // --- Rosters/Events override ---
   // Legacy MatchRostersEvents.render(fetch...) → заменяем на версию из стора
   function installRostersOverride(){
@@ -257,7 +296,44 @@ declare global {
       window.MatchRostersEvents.render = function(match: any, details: any, mdPane: any, els: any){
         console.log('[Bridge] MatchRostersEvents.render called from store', { match, details, mdPane, els });
         
-        // Читаем из стора и рендерим мгновенно
+        // Администратор: не перехватываем, оставляем оригинальный рендер с контролами
+        try {
+          const adminId = document.body.getAttribute('data-admin');
+          const isAdmin = !!(adminId && adminId.trim() !== '');
+          if (isAdmin) {
+            console.log('[Bridge] Admin mode detected, using original rosters render');
+            return orig.call(this, match, details, mdPane, els);
+          }
+        } catch(_) {}
+        
+        // Если вебсокеты недоступны, используем оригинальный рендер
+        try {
+          if (!window.__WEBSOCKETS_ENABLED__) {
+            console.log('[Bridge] WebSockets disabled, using original rosters render');
+            return orig.call(this, match, details, mdPane, els);
+          }
+        } catch(_) {}
+        
+        // Сначала проверяем - есть ли данные в сторе
+        let hasStoreData = false;
+        try {
+          hasStoreData = checkStoreDataAvailable(match);
+        } catch(e) {
+          console.warn('[Bridge] Error checking store data:', e);
+        }
+        
+        // Если данных в сторе НЕТ - используем оригинальную функцию
+        if (!hasStoreData) {
+          console.log('[Bridge] No store data, using original render');
+          try {
+            orig.call(this, match, details, mdPane, els);
+          } catch(e) {
+            console.warn('[Bridge] Original render failed:', e);
+          }
+          return;
+        }
+        
+        // Только если есть данные в сторе - читаем из него
         try {
           renderRostersFromStore(match, mdPane, els);
         } catch(e) {
@@ -322,7 +398,11 @@ declare global {
       try {
         const scoreEl = document.getElementById('md-score');
         if (scoreEl && typeof score.home === 'number' && typeof score.away === 'number') {
-          scoreEl.textContent = `${score.home} : ${score.away}`;
+          const newScoreText = `${score.home} : ${score.away}`;
+          // Только обновляем если счет действительно изменился
+          if (scoreEl.textContent !== newScoreText) {
+            scoreEl.textContent = newScoreText;
+          }
         }
       } catch(_) {}
     }
