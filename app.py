@@ -7756,7 +7756,7 @@ def api_admin_player_transfer():
             if not result:
                 return jsonify({'error': f'Player "{player_name}" not found in team "{from_team}"'}), 404
 
-            # Проверяем, что игрок еще не в целевой команде
+            # Проверяем, что игрока еще не в целевой команде
             existing_query = text("SELECT id FROM team_roster WHERE team = :team AND player = :player")
             existing_result = db.execute(existing_query, {
                 'team': to_team_obj.name,
@@ -7800,58 +7800,28 @@ def api_admin_player_transfer():
                 player_stats = db.execute(get_stats_query, {'player_name': player_name}).fetchone()
 
                 if player_stats:
-                    # Переносим статистику в новую команду
+                    # Создаем новую запись в целевой команде (игрока там точно нет, мы проверили выше)
                     to_stats_table = f"team_stats_{to_team_obj.id}"
-                    
-                    # Проверяем, есть ли уже игрок в целевой таблице
-                    check_stats_query = text(f"""
-                        SELECT id FROM {to_stats_table} 
-                        WHERE first_name || ' ' || last_name = :player_name
+                    insert_stats_query = text(f"""
+                        INSERT INTO {to_stats_table} 
+                        (first_name, last_name, matches_played, goals, assists, yellow_cards, red_cards, last_updated)
+                        VALUES (:first_name, :last_name, :matches_played, :goals, :assists, :yellow_cards, :red_cards, NOW())
                     """)
-                    existing_stats = db.execute(check_stats_query, {'player_name': player_name}).fetchone()
-
-                    if existing_stats:
-                        # Обновляем существующую запись (аккумулируем статистику)
-                        update_stats_query = text(f"""
-                            UPDATE {to_stats_table} SET
-                                matches_played = matches_played + :matches_played,
-                                goals = goals + :goals,
-                                assists = assists + :assists,
-                                yellow_cards = yellow_cards + :yellow_cards,
-                                red_cards = red_cards + :red_cards,
-                                last_updated = NOW()
-                            WHERE first_name || ' ' || last_name = :player_name
-                        """)
-                        db.execute(update_stats_query, {
-                            'player_name': player_name,
-                            'matches_played': player_stats[2] or 0,
-                            'goals': player_stats[3] or 0,
-                            'assists': player_stats[4] or 0,
-                            'yellow_cards': player_stats[5] or 0,
-                            'red_cards': player_stats[6] or 0
-                        })
-                    else:
-                        # Создаем новую запись в целевой команде
-                        insert_stats_query = text(f"""
-                            INSERT INTO {to_stats_table} 
-                            (first_name, last_name, matches_played, goals, assists, yellow_cards, red_cards, last_updated)
-                            VALUES (:first_name, :last_name, :matches_played, :goals, :assists, :yellow_cards, :red_cards, NOW())
-                        """)
-                        
-                        # Разделяем имя игрока на имя и фамилию
-                        name_parts = player_name.strip().split(' ', 1)
-                        first_name = name_parts[0] if name_parts else ''
-                        last_name = name_parts[1] if len(name_parts) > 1 else ''
-                        
-                        db.execute(insert_stats_query, {
-                            'first_name': first_name,
-                            'last_name': last_name,
-                            'matches_played': player_stats[2] or 0,
-                            'goals': player_stats[3] or 0,
-                            'assists': player_stats[4] or 0,
-                            'yellow_cards': player_stats[5] or 0,
-                            'red_cards': player_stats[6] or 0
-                        })
+                    
+                    # Разделяем имя игрока на имя и фамилию
+                    name_parts = player_name.strip().split(' ', 1)
+                    first_name = name_parts[0] if name_parts else ''
+                    last_name = name_parts[1] if len(name_parts) > 1 else ''
+                    
+                    db.execute(insert_stats_query, {
+                        'first_name': first_name,
+                        'last_name': last_name,
+                        'matches_played': player_stats[2] or 0,
+                        'goals': player_stats[3] or 0,
+                        'assists': player_stats[4] or 0,
+                        'yellow_cards': player_stats[5] or 0,
+                        'red_cards': player_stats[6] or 0
+                    })
 
                     # Удаляем из старой команды
                     delete_stats_query = text(f"""
