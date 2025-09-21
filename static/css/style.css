@@ -398,6 +398,10 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 .ads-dots { position: absolute; left: 0; right: 0; bottom: 6px; display: flex; gap: 6px; justify-content: center; align-items: center; }
 .ads-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.45); }
 .ads-dot.active { background: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,0.35); }
+/* News slide specific tweaks (centered) */
+.news-slide-title { font-weight: 800; font-size: 16px; line-height: 1.3; margin: 0 0 4px; text-align: center; }
+.news-slide-text { font-size: 13.5px; line-height: 1.5; color: var(--light); text-align: center; }
+@media (max-width:480px){ .news-slide-title { font-size: 14px; } .news-slide-text { font-size: 13px; } }
 
 .winner-glow:hover {
     box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.9), 0 0 12px rgba(234, 179, 8, 0.9);

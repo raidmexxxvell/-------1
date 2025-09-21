@@ -92,13 +92,10 @@
         const slide = document.createElement('div');
         slide.className='ads-slide';
         slide.innerHTML = `
-          <div class="ads-img" style="display:flex; align-items:flex-start; min-height:120px; padding:12px; background: transparent;">
-            <div style="display:flex; flex-direction:column; gap:6px; width:100%;">
-              <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; width:100%;">
-                <div class="news-title" style="text-align:left;">${escapeHtml(s.title)}</div>
-                <div class="news-date" style="white-space:nowrap;">${escapeHtml(s.dateText)}</div>
-              </div>
-              <div class="news-content">${escapeHtml(s.preview)}</div>
+          <div class="ads-img" style="padding:14px 16px 22px; background: transparent;">
+            <div style="display:flex; flex-direction:column; gap:6px; width:100%; align-items:center; text-align:center;">
+              <div class="news-slide-title">${escapeHtml(s.title)}</div>
+              <div class="news-slide-text">${escapeHtml(s.preview)}</div>
             </div>
           </div>`;
         slide.style.cursor='pointer';
@@ -112,7 +109,7 @@
         const w = box.clientWidth; track.scrollTo({left: index*w, behavior:'smooth'});
         Array.from(dots.children).forEach((d,i)=>d.classList.toggle('active', i===index));
       };
-      const arm=()=>{ if (slides.length<=1) return; if (timer) clearInterval(timer); timer=setInterval(()=>{ if(!hovering){ index=(index+1)%slides.length; apply(); } }, 3000); };
+  const arm=()=>{ if (slides.length<=1) return; if (timer) clearInterval(timer); timer=setInterval(()=>{ if(!hovering){ index=(index+1)%slides.length; apply(); } }, 7000); };
       arm();
 
       // Pause on hover (desktop)
