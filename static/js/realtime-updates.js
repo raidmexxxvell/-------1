@@ -343,23 +343,47 @@ class RealtimeUpdater {
                 }
             } catch(_){}
             
-            // Обновление составов/событий: при изменении событий матча перезагружаем детали и оповещаем слушателей
+            // Обновление составов/событий: избегаем лишних рефетчей, чтобы не затирать локальные правки администратора
             try {
                 if ((payload.entity === 'match_events' || payload.entity === 'match_events_removed') && payload.home && payload.away) {
-                    console.log('[Реалтайм] Обновляем детали матча для событий:', payload.home, 'против', payload.away);
-                    if (typeof window.fetchMatchDetails === 'function') {
-                        // Быстрый рефетч только деталей открытого матча
-                        window.fetchMatchDetails({ home: payload.home, away: payload.away, forceFresh: true })
-                            .then(store => { try { if (store && (store.data||store.raw)) { const d = store.data || store.raw; this.refreshMatchDetails(d); } } catch(_){} })
-                            .catch(()=>{});
-                    } else {
-                        // Fallback: лёгкий запрос без ETag-утилиты
-                        const params = new URLSearchParams({ home: payload.home, away: payload.away });
-                        fetch(`/api/match-details?${params.toString()}`, { headers: { 'Cache-Control': 'no-store' } })
-                            .then(r => r.ok ? r.json() : Promise.reject(new Error('http '+r.status)))
-                            .then(d => { try { this.refreshMatchDetails(d); } catch(_){} })
-                            .catch(()=>{});
+                    const { home, away } = payload;
+                    console.log('[Реалтайм] match_events topic_update:', home, 'vs', away);
+
+                    // Если в topic_update уже переданы полные события — применяем их напрямую без refetch
+                    const __ffDirectTopicEvents = (function(){
+                        try { return (localStorage.getItem('feature:ws_topic_update_direct_events') ?? '1') !== '0'; } catch(_) { return true; }
+                    })();
+                    if (__ffDirectTopicEvents && payload.events && window.__MatchEventsRegistry) {
+                        try {
+                            window.__MatchEventsRegistry.updateEventsCache(home, away, payload.events);
+                            const ev = new CustomEvent('eventsRegistryUpdate', {
+                                detail: {
+                                    home, away,
+                                    type: 'match_events',
+                                    reason: payload.reason || 'topic_update',
+                                    timestamp: Date.now(),
+                                    events: payload.events
+                                }
+                            });
+                            document.dispatchEvent(ev);
+
+                            // При открытых деталях матча попробуем мягко обновить видимые ростеры
+                            const matchDetailsPane = document.getElementById('ufo-match-details');
+                            if (matchDetailsPane && matchDetailsPane.style.display !== 'none') {
+                                const curHome = matchDetailsPane.getAttribute('data-match-home') || matchDetailsPane.getAttribute('data-match-key') || '';
+                                const curAway = matchDetailsPane.getAttribute('data-match-away') || '';
+                                // Если это тот же матч — точечный ререндер, если есть API
+                                if ((curHome && curAway && curHome===home && curAway===away) || (!curHome && !curAway)) {
+                                    try { if (typeof window.renderMatchRosters === 'function') { window.renderMatchRosters(home, away, payload.events); } } catch(_){}
+                                }
+                            }
+                        } catch(_){ /* no-op */ }
+                        // Ничего больше не делаем — источник истины уже применён
+                        return;
                     }
+
+                    // Иначе НЕ делаем немедленный refetch — ждём нормализованное событие data_changed: 'match_events'
+                    // Это устраняет гонку: topic_update -> refetch vs data_changed -> registry update
                 }
             } catch(_){}
             // Полный сброс: чистим локальные отметки голосований и восстанавливаем UI

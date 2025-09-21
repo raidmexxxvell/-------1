@@ -171,6 +171,7 @@ this.socket.on('data_patch', (patch) => {
 });
 ```
 - Интеграции: серверные события `data_patch`, `topic_update`, localStorage (инвалидация кэшей), DOM события.
+- Обновление логики: `topic_update` для `match_events` больше не запускает немедленный refetch. Если сервер присылает полные события в payload (`payload.events`), они применяются напрямую через глобальный `__MatchEventsRegistry` и рассылается `eventsRegistryUpdate`. Это устраняет гонку между `topic_update` и `data_changed:match_events` и проблему «скачков/сбросов» в админ-UI. Поведение защищено фича-флагом `feature:ws_topic_update_direct_events` (по умолчанию включен, можно отключить, установив `localStorage['feature:ws_topic_update_direct_events']='0'`).
 
 3) league.js — рендер лиги, виртуализация и батчинг DOM
 - Роль: отрисовка таблиц/статы, расписания и карточек матчей; batched append; виртуализация туров.
