@@ -11,7 +11,9 @@
       busy: false, 
       cancelled: false,
       noFetchUntil: 0, // временная блокировка fetch после админ-действий
-      lastAdminAction: 0 // timestamp последнего админ-действия
+      lastAdminAction: 0, // timestamp последнего админ-действия
+      // КРИТИЧНО: Сохраняем актуальный счет в state для инкрементов (принцип статистики)
+      currentScore: { home: 0, away: 0 }
     };
     
     let scorePoll=null; let pollWatch=null; let adminScoreCtrlsAdded=false;
@@ -25,6 +27,24 @@
         return '0:0';
       }
     };
+    
+    // КРИТИЧНО: Инициализируем currentScore из DOM при загрузке
+    const initCurrentScore = () => {
+      try {
+        const currentText = scoreEl.textContent || '';
+        const match = currentText.match(/(\d+)\s*:\s*(\d+)/);
+        if (match) {
+          state.currentScore.home = parseInt(match[1], 10) || 0;
+          state.currentScore.away = parseInt(match[2], 10) || 0;
+          console.log('[LiveScore] Инициализирован счет из DOM:', state.currentScore.home, ':', state.currentScore.away);
+        }
+      } catch(e) {
+        console.warn('[LiveScore] Ошибка инициализации счета:', e);
+      }
+    };
+    
+    // Инициализируем счет при загрузке
+    initCurrentScore();
     
     const applyScore=(sh,sa)=>{ 
       try { 
@@ -42,6 +62,10 @@
         
         scoreEl.textContent = newScoreText;
         state.sig = newSig;
+        
+        // КРИТИЧНО: Сохраняем актуальный счет в state для инкрементов
+        state.currentScore.home = Number(sh) || 0;
+        state.currentScore.away = Number(sa) || 0;
         
         return true;
       } catch(_){
@@ -101,7 +125,12 @@
         row.append(left, spacer, right);
         try { center.appendChild(row); } catch(_){}
         const tg=window.Telegram?.WebApp||null;
-        const parseScore=()=>{ try { const t=scoreEl.textContent||''; const m=t.match(/(\d+)\s*:\s*(\d+)/); if(m) {return [parseInt(m[1],10)||0, parseInt(m[2],10)||0];} } catch(_){} return [0,0]; };
+        
+        // КРИТИЧНО: Заменяем parseScore() на state-based подход (принцип статистики)
+        const getCurrentScore = () => {
+          return [state.currentScore.home, state.currentScore.away];
+        };
+        
         const postScore=async(sh,sa)=>{ 
           try { 
             console.log('[LiveScore] Отправляем новый счет:', sh, ':', sa);
@@ -161,14 +190,14 @@
             window.showAlert?.(e?.message||'Не удалось сохранить счёт','error'); 
           } 
         };
-        hMinus.addEventListener('click',()=>{ const [h,a]=parseScore(); postScore(Math.max(0,h-1),a); });
-        hPlus.addEventListener('click',()=>{ const [h,a]=parseScore(); postScore(h+1,a); });
-        aMinus.addEventListener('click',()=>{ const [h,a]=parseScore(); postScore(h,Math.max(0,a-1)); });
-        aPlus.addEventListener('click',()=>{ const [h,a]=parseScore(); postScore(h,a+1); });
+        hMinus.addEventListener('click',()=>{ const [h,a]=getCurrentScore(); postScore(Math.max(0,h-1),a); });
+        hPlus.addEventListener('click',()=>{ const [h,a]=getCurrentScore(); postScore(h+1,a); });
+        aMinus.addEventListener('click',()=>{ const [h,a]=getCurrentScore(); postScore(h,Math.max(0,a-1)); });
+        aPlus.addEventListener('click',()=>{ const [h,a]=getCurrentScore(); postScore(h,a+1); });
         adminScoreCtrlsAdded=true;
-      } catch(_){} };
-    // Live status fetch (server) + admin fallback на локальный live
-  { const raw=(match?.datetime||match?.date||''); const dateStr = raw ? String(raw).slice(0,10) : ''; }
+      } catch(_){} 
+    };
+
     // WebSocket listener для мгновенного обновления счета (как в статистике)
     let wsScoreRefreshHandler = null;
     
@@ -226,23 +255,35 @@
     };
 
     // Вычисляем WS-топик деталей матча, как в profile-match-advanced.js
-  const __wsTopic = (()=>{ try { const h=(match?.home||'').toLowerCase().trim(); const a=(match?.away||'').toLowerCase().trim(); const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):'')); const d=raw?raw.slice(0,10):''; return `match:${h}__${a}__${d}:details`; } catch(_) { return null; } })();
-  const isWsActive = ()=>{
-    try {
-      if(!window.__WEBSOCKETS_ENABLED__) {return false;}
-      if(!__wsTopic) {return false;}
-      const ru = window.realtimeUpdater;
-      return !!(ru && typeof ru.getTopicEnabled==='function' && ru.getTopicEnabled() && typeof ru.hasTopic==='function' && ru.hasTopic(__wsTopic));
-    } catch(_) { return false; }
-  };
-  fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent((match?.datetime||match?.date||'').toString().slice(0,10))}`)
+    const __wsTopic = (()=>{ 
+      try { 
+        const h=(match?.home||'').toLowerCase().trim(); 
+        const a=(match?.away||'').toLowerCase().trim(); 
+        const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):'')); 
+        const d=raw?raw.slice(0,10):''; 
+        return `match:${h}__${a}__${d}:details`; 
+      } catch(_) { 
+        return null; 
+      } 
+    })();
+    
+    const isWsActive = ()=>{
+      try {
+        if(!window.__WEBSOCKETS_ENABLED__) {return false;}
+        if(!__wsTopic) {return false;}
+        const ru = window.realtimeUpdater;
+        return !!(ru && typeof ru.getTopicEnabled==='function' && ru.getTopicEnabled() && typeof ru.hasTopic==='function' && ru.hasTopic(__wsTopic));
+      } catch(_) { return false; }
+    };
+
+    fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent((match?.datetime||match?.date||'').toString().slice(0,10))}`)
       .then(r=>r.json())
       .then(async s=>{
         const localLive = (()=>{ try { return window.MatchUtils?.isLiveNow ? window.MatchUtils.isLiveNow(match) : false; } catch(_) { return false; } })();
-  const serverLive = (s?.status==='live');
-  const finished = (s?.status==='finished');
-  // Админу позволяем работать, если локально матч идёт, даже если сервер ошибочно вернул finished
-  if (serverLive || (isAdmin && localLive)) {
+        const serverLive = (s?.status==='live');
+        const finished = (s?.status==='finished');
+        // Админу позволяем работать, если локально матч идёт, даже если сервер ошибочно вернул finished
+        if (serverLive || (isAdmin && localLive)) {
           // Вставим бейдж live в UI
           try { const exists = dtEl.querySelector('.live-badge'); if(!exists){ const live=document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); dtEl.appendChild(live); } } catch(_){}
           // Если счёта нет — показываем 0:0
