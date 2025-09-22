@@ -5085,14 +5085,44 @@ def api_team_overview():
                         # 1) Попробуем динамическую таблицу team_stats_<id>
                         try:
                             table = f"team_stats_{int(team_id)}"
-                            row = db.execute(text(f"SELECT COALESCE(SUM(yellow_cards),0), COALESCE(SUM(red_cards),0) FROM {table}"))
-                            agg = row.first() if row else None
-                            if agg:
-                                cards['yellow'] = int(agg[0] or 0)
-                                cards['red'] = int(agg[1] or 0)
-                                app.logger.info(f"Team {name_final} (id={team_id}): cards from team_stats_{team_id}: yellow={cards['yellow']}, red={cards['red']}")
+                            # Проверим существование таблицы и получим сумму карточек
+                            result = db.execute(text(f"""
+                                SELECT 
+                                    COALESCE(SUM(yellow_cards), 0) as total_yellow,
+                                    COALESCE(SUM(red_cards), 0) as total_red,
+                                    COUNT(*) as player_count
+                                FROM {table}
+                            """)).first()
+                            
+                            if result and result[2] > 0:  # если есть игроки в таблице
+                                cards['yellow'] = int(result[0] or 0)
+                                cards['red'] = int(result[1] or 0)
+                                app.logger.info(f"Team {name_final} (id={team_id}): cards from {table}: yellow={cards['yellow']}, red={cards['red']}, players={result[2]}")
+                            else:
+                                app.logger.info(f"Team {name_final} (id={team_id}): {table} exists but no players found")
                         except Exception as e:
-                            app.logger.info(f"Team {name_final} (id={team_id}): team_stats table error: {e}")
+                            app.logger.info(f"Team {name_final} (id={team_id}): {table} error: {e}")
+                            # Попробуем другой подход - может быть проблема с именем таблицы
+                            try:
+                                # Проверим, какие team_stats таблицы существуют
+                                tables_result = db.execute(text("""
+                                    SELECT table_name FROM information_schema.tables 
+                                    WHERE table_name LIKE 'team_stats_%' 
+                                    AND table_schema = 'public'
+                                """)).fetchall()
+                                available_tables = [row[0] for row in tables_result]
+                                app.logger.info(f"Available team_stats tables: {available_tables}")
+                                
+                                expected_table = f"team_stats_{team_id}"
+                                if expected_table in available_tables:
+                                    # Таблица существует, попробуем ещё раз с более простым запросом
+                                    result = db.execute(text(f"SELECT SUM(yellow_cards), SUM(red_cards) FROM {expected_table}")).first()
+                                    if result:
+                                        cards['yellow'] = int(result[0] or 0)
+                                        cards['red'] = int(result[1] or 0)
+                                        app.logger.info(f"Team {name_final} (id={team_id}): cards from {expected_table} (retry): yellow={cards['yellow']}, red={cards['red']}")
+                            except Exception as e2:
+                                app.logger.info(f"Team {name_final} (id={team_id}): retry failed: {e2}")
                         # 2) Если нули — посчитаем по событиям
                         if cards['yellow'] == 0 and cards['red'] == 0:
                             try:

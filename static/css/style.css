@@ -487,13 +487,13 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 /* Полукруговая диаграмма результатов (W/D/L) */
 #ufo-team .gauge { 
     position: relative;
-    width: 140px; height: 100px; /* увеличена высота под опущенную дугу */
+    width: 160px; height: 110px; /* увеличена ширина и высота под большую дугу */
     display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
     padding-top:4px;
 }
 #ufo-team .stat-summary { position:relative; }
 #ufo-team .summary-right { padding-left:10px; }
-#ufo-team .gauge svg { height:80px; }
+#ufo-team .gauge svg { height:90px; }
 #ufo-team .gauge .gauge-text { position:static; transform:none; margin-top:-32px; display:flex; flex-direction:column; align-items:center; }
 #ufo-team .gauge svg { overflow: visible; }
 #ufo-team .gauge path.track { stroke: rgba(255,255,255,0.08); stroke-width: 10; fill:none; stroke-linecap:round; }

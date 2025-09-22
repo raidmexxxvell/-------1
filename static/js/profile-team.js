@@ -127,10 +127,10 @@
     const sum = w+d+l;
   if (total && sum && sum !== total){ const k= total/sum; wn=w*k; dn=d*k; ln=l*k; }
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-  svg.setAttribute('width','140'); svg.setAttribute('height','80'); svg.setAttribute('viewBox','0 0 140 80');
+  svg.setAttribute('width','160'); svg.setAttribute('height','90'); svg.setAttribute('viewBox','0 0 160 90');
   // Переворачиваем вертикально, чтобы дуга была сверху
   svg.style.transform = 'scaleY(-1)';
-  const centerX=70, centerY=40, radius=38; // центр дуги намного выше, радиус меньше для компактности
+  const centerX=80, centerY=20, radius=50; // центр дуги намного выше, радиус больше для лучшей видимости
     // Фон-трек
     const track = document.createElementNS('http://www.w3.org/2000/svg','path');
     track.setAttribute('d', describeArc(centerX, centerY, radius, 180, 0));

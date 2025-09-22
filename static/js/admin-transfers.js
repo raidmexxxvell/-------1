@@ -160,20 +160,19 @@
             }
 
             row.innerHTML = `
-                <td class="player-name">
-                    <strong>${player.full_name || 'Без имени'}</strong>
-                    ${inQueue ? '<span class="transfer-badge">В очереди</span>' : ''}
+                <td class="player-name-compact">
+                    <div><strong>${player.full_name || 'Без имени'}</strong></div>
+                    ${inQueue ? '<div class="transfer-badge-compact">В очереди</div>' : ''}
                 </td>
-                <td class="team-name">${player.team_name}</td>
-                <td class="stat-cell">${player.goals || 0}</td>
-                <td class="stat-cell">${player.assists || 0}</td>
-                <td class="cards-cell">
-                    <span class="yellow-cards">🟡${player.yellow_cards || 0}</span>
-                    <span class="red-cards">🔴${player.red_cards || 0}</span>
+                <td class="team-name-compact">${player.team_name}</td>
+                <td class="stats-compact">${player.goals || 0}/${player.assists || 0}</td>
+                <td class="cards-compact">
+                    <span>🟡${player.yellow_cards || 0}</span>
+                    <span>🔴${player.red_cards || 0}</span>
                 </td>
-                <td class="actions-cell">
-                    <button class="action-btn transfer-btn" onclick="window.TransferManager.openTransferModal('${player.full_name}', '${player.team_name}')" ${inQueue ? 'disabled' : ''}>
-                        ↔️ Перевести
+                <td>
+                    <button class="transfer-btn-compact" onclick="window.TransferManager.openTransferModal('${player.full_name}', '${player.team_name}')" ${inQueue ? 'disabled' : ''}>
+                        ↔️
                     </button>
                 </td>
             `;
@@ -279,6 +278,9 @@
             return;
         }
 
+        // Сохраняем данные игрока перед закрытием модального окна
+        const playerName = currentPlayerData.playerName;
+
         // Добавляем в очередь
         transferQueue.push({
             player_name: currentPlayerData.playerName,
@@ -290,20 +292,25 @@
         closeTransferModal();
         renderPlayersTable(); // Перерисовываем таблицу чтобы показать статус
         
-        showNotification(`Игрок ${currentPlayerData.playerName} добавлен в очередь переводов`, 'success');
+        showNotification(`Игрок ${playerName} добавлен в очередь переводов`, 'success');
     }
 
     // Обновление отображения очереди трансферов
     function updateTransferQueueDisplay() {
         const countEl = document.getElementById('transfer-count');
-        const panelEl = document.getElementById('transfer-panel');
+        const emptyStateEl = document.getElementById('transfer-queue-empty');
+        const contentEl = document.getElementById('transfer-queue-content');
         const listEl = document.getElementById('transfer-queue-list');
         const saveBtn = document.getElementById('transfer-save-all');
         
         if (countEl) countEl.textContent = transferQueue.length;
         
-        if (panelEl) {
-            panelEl.style.display = transferQueue.length > 0 ? 'block' : 'none';
+        if (transferQueue.length === 0) {
+            if (emptyStateEl) emptyStateEl.style.display = 'flex';
+            if (contentEl) contentEl.style.display = 'none';
+        } else {
+            if (emptyStateEl) emptyStateEl.style.display = 'none';
+            if (contentEl) contentEl.style.display = 'flex';
         }
         
         if (saveBtn) {
@@ -314,15 +321,15 @@
             listEl.innerHTML = '';
             transferQueue.forEach((transfer, index) => {
                 const item = document.createElement('div');
-                item.className = 'queue-item';
+                item.className = 'queue-item-compact';
                 item.innerHTML = `
-                    <div class="transfer-info">
-                        <strong>${transfer.player_name}</strong>
-                        <span class="transfer-direction">
+                    <div class="transfer-info-compact">
+                        <div class="player-in-queue">${transfer.player_name}</div>
+                        <div class="transfer-direction-compact">
                             ${transfer.from_team} → ${transfer.to_team}
-                        </span>
+                        </div>
                     </div>
-                    <button class="remove-btn" onclick="window.TransferManager.removeFromQueue(${index})" title="Удалить из очереди">
+                    <button class="remove-btn-compact" onclick="window.TransferManager.removeFromQueue(${index})" title="Удалить">
                         ✕
                     </button>
                 `;
