@@ -7231,12 +7231,17 @@ def api_admin_player_transfer():
                 'player': player_name
             })
 
-            # Добавляем в новую команду
-            insert_query = text("INSERT INTO team_roster (team, player, created_at) VALUES (:team, :player, NOW())")
-            db.execute(insert_query, {
+            # Добавляем в новую команду и получаем новый id записи состава (используется как player_id в team_stats)
+            insert_query = text("""
+                INSERT INTO team_roster (team, player, created_at) 
+                VALUES (:team, :player, NOW()) 
+                RETURNING id
+            """)
+            new_roster_row = db.execute(insert_query, {
                 'team': to_team_obj.name,
                 'player': player_name
-            })
+            }).fetchone()
+            new_player_id = int(new_roster_row[0]) if new_roster_row and new_roster_row[0] is not None else None
 
             # 2. Обрабатываем динамические таблицы team_stats
             try:
@@ -7256,21 +7261,24 @@ def api_admin_player_transfer():
                 """)
                 player_stats = db.execute(get_stats_query, {'player_name': player_name}).fetchone()
 
+                # Разделяем имя игрока на имя и фамилию (для вставки/инициализации)
+                name_parts = player_name.strip().split(' ', 1)
+                first_name = name_parts[0] if name_parts else ''
+                last_name = name_parts[1] if len(name_parts) > 1 else ''
+
+                to_stats_table = f"team_stats_{to_team_obj.id}"
+
+                # Готовим запрос вставки в статистику ЦЕЛЕВОЙ команды с обязательным player_id
+                insert_stats_query = text(f"""
+                    INSERT INTO {to_stats_table} 
+                    (player_id, first_name, last_name, matches_played, goals, assists, yellow_cards, red_cards, last_updated)
+                    VALUES (:player_id, :first_name, :last_name, :matches_played, :goals, :assists, :yellow_cards, :red_cards, NOW())
+                """)
+
                 if player_stats:
-                    # Создаем новую запись в целевой команде (игрока там точно нет, мы проверили выше)
-                    to_stats_table = f"team_stats_{to_team_obj.id}"
-                    insert_stats_query = text(f"""
-                        INSERT INTO {to_stats_table} 
-                        (first_name, last_name, matches_played, goals, assists, yellow_cards, red_cards, last_updated)
-                        VALUES (:first_name, :last_name, :matches_played, :goals, :assists, :yellow_cards, :red_cards, NOW())
-                    """)
-                    
-                    # Разделяем имя игрока на имя и фамилию
-                    name_parts = player_name.strip().split(' ', 1)
-                    first_name = name_parts[0] if name_parts else ''
-                    last_name = name_parts[1] if len(name_parts) > 1 else ''
-                    
+                    # Используем существующие значения статистики из исходной команды
                     db.execute(insert_stats_query, {
+                        'player_id': new_player_id,
                         'first_name': first_name,
                         'last_name': last_name,
                         'matches_played': player_stats[2] or 0,
@@ -7280,12 +7288,24 @@ def api_admin_player_transfer():
                         'red_cards': player_stats[6] or 0
                     })
 
-                    # Удаляем из старой команды
+                    # Удаляем запись статистики из исходной команды
                     delete_stats_query = text(f"""
                         DELETE FROM {from_stats_table} 
                         WHERE first_name || ' ' || last_name = :player_name
                     """)
                     db.execute(delete_stats_query, {'player_name': player_name})
+                else:
+                    # Если в исходной команде статистика не найдена — создаём нулевую запись в целевой
+                    db.execute(insert_stats_query, {
+                        'player_id': new_player_id,
+                        'first_name': first_name,
+                        'last_name': last_name,
+                        'matches_played': 0,
+                        'goals': 0,
+                        'assists': 0,
+                        'yellow_cards': 0,
+                        'red_cards': 0
+                    })
 
             except Exception as stats_error:
                 app.logger.warning(f"Stats transfer failed for {player_name}: {stats_error}")
