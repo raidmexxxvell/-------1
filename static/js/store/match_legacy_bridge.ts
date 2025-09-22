@@ -454,15 +454,31 @@ declare global {
     }
     
     // Извлекаем данные с fallback на кэш
-    const rosters = storeData?.rosters || mdPane.__lastRosters || { home: [], away: [] };
-    const events = storeData?.events || mdPane.__lastEvents || { home: [], away: [] };
-    const score = storeData?.score;
+    const rosters = storeData?.rosters || (mdPane as any).__lastRosters || { home: [], away: [] };
+    const events = storeData?.events || (mdPane as any).__lastEvents || { home: [], away: [] };
+    // Вычисляем эффективный счёт, чтобы избежать мерцания «— : —» при частичных патчах
+    const parseDomScore = (): { home: number; away: number } | null => {
+      try {
+        const el = document.getElementById('md-score');
+        const t = el?.textContent?.trim() || '';
+        const m = t.match(/(\d+)\s*:\s*(\d+)/);
+        if (m) {
+          return { home: parseInt(m[1], 10) || 0, away: parseInt(m[2], 10) || 0 };
+        }
+      } catch(_) {}
+      return null;
+    };
+    const lastScore = (mdPane as any).__lastScore as { home:number; away:number } | undefined;
+    let score = storeData?.score as { home:number; away:number } | undefined;
+    if (!score) {
+      score = lastScore || parseDomScore() || undefined;
+    }
     
     // Обновляем кэш для совместимости с legacy кодом
-    mdPane.__lastRosters = rosters;
-    mdPane.__lastEvents = events;
+    (mdPane as any).__lastRosters = rosters;
+    (mdPane as any).__lastEvents = events;
     if (score) {
-      mdPane.__lastScore = score;
+      (mdPane as any).__lastScore = score;
       // КРИТИЧНО: Обновляем счет БЕЗ МЕРЦАНИЯ (принцип из стабильного коммита)
       try {
         const scoreEl = document.getElementById('md-score');
@@ -521,10 +537,17 @@ declare global {
           away: rosters.away ?? []
         },
         events: eventsFormatted,
-        score: score
+        score: score // всегда передаём эффективный счёт, чтобы оригинальный рендер не ставил «— : —»
       };
       
       renderFunc(match, detailsObj, mdPane, els);
+      // Страховка: если оригинальный рендер всё равно вернул placeholder, восстановим счёт
+      try {
+        const scoreEl = document.getElementById('md-score');
+        if (scoreEl && score && (scoreEl.textContent?.trim() === '— : —' || scoreEl.textContent?.trim() === '- : -')) {
+          scoreEl.textContent = `${score.home} : ${score.away}`;
+        }
+      } catch(_) {}
     } catch(err) {
       console.warn('[Bridge] Error calling rosters render function:', err);
       // Минимальный fallback
@@ -569,6 +592,57 @@ declare global {
 
   let lastSig: string|null = null;
   let debounceTimer: any = null;
+
+  // КРИТИЧНО: Подписка на обновления событий реестра для пользователей (store-driven)
+  (function installEventsRegistryListener(){
+    try {
+      if ((window as any).__storeEventsListenerInstalled) return;
+      (window as any).__storeEventsListenerInstalled = true;
+      document.addEventListener('eventsRegistryUpdate', (e: any) => {
+        try {
+          const d = e?.detail || {};
+          if (!d || !d.home || !d.away) return;
+          // Не вмешиваемся в админский рендер
+          let isAdmin = false;
+          try { const adminId = document.body.getAttribute('data-admin'); isAdmin = !!(adminId && adminId.trim() !== ''); } catch(_) {}
+          if (isAdmin) return;
+          // Проверяем, открыт ли модал деталей именно этого матча
+          const mdPane = document.getElementById('ufo-match-details') as HTMLElement | null;
+          if (!mdPane || mdPane.style.display === 'none') return;
+          const cur = (window as any).__currentMatchDetails || null;
+          if (!cur || cur.home !== d.home || cur.away !== d.away) return;
+          // Берём данные из реестра — это самый свежий источник
+          const reg = (window as any).__MatchEventsRegistry;
+          const events = reg && typeof reg.getEvents === 'function' ? reg.getEvents(d.home, d.away) : (d.events || { home: [], away: [] });
+          // Обновим кэш панели и перерендерим через store-driven путь
+          (mdPane as any).__lastEvents = events;
+          // Найдём базовые элементы
+          const els = {
+            homePane: mdPane.querySelector('.home-roster') as HTMLElement | null || mdPane.querySelector('[data-team="home"]') as HTMLElement | null,
+            awayPane: mdPane.querySelector('.away-roster') as HTMLElement | null || mdPane.querySelector('[data-team="away"]') as HTMLElement | null,
+          };
+          if (!els.homePane || !els.awayPane) return;
+          // Для предотвращения частого мерцания - debounce
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            try {
+              // Сформируем минимальный объект storeData для рендера
+              const storeLike: any = { events };
+              // Используем текущий матч из глобального контекста
+              const match = cur;
+              renderRostersFromStore(match, mdPane, els as any);
+              console.log('[Bridge] Store-driven: UI синхронизирован по eventsRegistryUpdate');
+            } catch(err) {
+              console.warn('[Bridge] Store-driven events sync error:', err);
+            }
+          }, 120);
+        } catch(err) {
+          console.warn('[Bridge] eventsRegistryUpdate listener error:', err);
+        }
+      });
+      console.log('[Bridge] Store-driven eventsRegistryUpdate listener installed');
+    } catch(e){ console.warn('[Bridge] Failed to install store events listener:', e); }
+  })();
 
   function computeSig(entry: MatchEntry|undefined){
     if(!entry) return 'empty';
