@@ -25,7 +25,12 @@
   try { hLogo?.setAttribute('data-team-name', match.home||''); aLogo?.setAttribute('data-team-name', match.away||''); } catch(_) {}
     hName.textContent = (window.withTeamCount?window.withTeamCount(match.home||''):(match.home||''));
     aName.textContent = (window.withTeamCount?window.withTeamCount(match.away||''):(match.away||''));
-  setLogo(hLogo, match.home||''); setLogo(aLogo, match.away||''); score.textContent='— : —';
+  setLogo(hLogo, match.home||''); setLogo(aLogo, match.away||'');
+  try {
+    const cur = (score && typeof score.textContent==='string') ? score.textContent.trim() : '';
+    const hasDigits = /\d+\s*:\s*\d+/.test(cur);
+    if (!hasDigits) { score.textContent = '— : —'; }
+  } catch(_) { score.textContent='— : —'; }
     try { if (match.date || match.time){ const d=match.date? new Date(match.date):null; const ds=d?d.toLocaleDateString():''; dt.textContent = `${ds}${match.time? ' '+match.time:''}`; } else {dt.textContent='';} } catch(_) { dt.textContent = match.time||''; }
     const subtabs = mdPane.querySelector('.modal-subtabs');
     // PR-2a: topic-based автоподписка на детали матча (если включено)
@@ -42,8 +47,19 @@
         // небольшая задержка чтобы дождаться connect
         setTimeout(()=>{ 
           try { 
+            const ru = window.realtimeUpdater;
+            // Анти-дребезг: не отправляем повторную подписку, если уже есть или была попытка <1.5с назад
+            try { window.__WS_LAST_SUBSCRIBE_TS = window.__WS_LAST_SUBSCRIBE_TS || new Map(); } catch(_){}
+            const lastTs = (function(){ try { return window.__WS_LAST_SUBSCRIBE_TS?.get?.(__topic) || 0; } catch(_) { return 0; } })();
+            const recently = (Date.now() - lastTs) < 1500;
+            const already = (function(){ try { return !!window.__WS_TOPIC_SUBSCRIBED?.has?.(__topic); } catch(_) { return false; } })();
+            if (already || recently) {
+              console.log('[WS Матч] Пропускаем повторную подписку:', __topic, 'already=', already, 'recently=', recently);
+              return;
+            }
             console.log('[WS Матч] Попытка подписки на топик:', __topic);
-            window.realtimeUpdater.subscribeTopic(__topic); 
+            ru.subscribeTopic(__topic);
+            try { window.__WS_LAST_SUBSCRIBE_TS?.set?.(__topic, Date.now()); } catch(_){}
             console.log('[WS Матч] Подписка выполнена для:', __topic);
           } catch(e){
             console.error('[WS Матч] Ошибка подписки:', e);

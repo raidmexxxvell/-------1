@@ -885,11 +885,19 @@ class RealtimeUpdater {
                 // дублируем в глобальную Map с таймстампом
                 window.__WS_PENDING_SUBSCRIPTIONS = window.__WS_PENDING_SUBSCRIPTIONS || new Map();
                 window.__WS_PENDING_SUBSCRIPTIONS.set(topic, Date.now());
+                // Анти-дребезг: запомним время последней локальной подписки
+                window.__WS_LAST_SUBSCRIBE_TS = window.__WS_LAST_SUBSCRIBE_TS || new Map();
             } catch(_) {}
             if(!this.topicEnabled) {
                 console.warn('[Реалтайм] Подписки на топики отключены');
                 return;
             }
+            // Анти-дребезг отправки: если уже подписаны глобально или недавно отправляли — не дублируем
+            try {
+                if (window.__WS_TOPIC_SUBSCRIBED?.has?.(topic)) { return; }
+                const lastTs = window.__WS_LAST_SUBSCRIBE_TS?.get?.(topic) || 0;
+                if (Date.now() - lastTs < 1500) { return; }
+            } catch(_) {}
             if(this.socket && this.isConnected && !this.subscribedTopics.has(topic)){
                 console.log('[Реалтайм] Отправляем подписку на топик:', topic);
                 this.socket.emit('subscribe', { topic });
@@ -897,6 +905,7 @@ class RealtimeUpdater {
                 console.log('[Реалтайм] Подписались на топик:', topic, 'Всего подписок:', this.subscribedTopics.size);
                 try { window.__WS_TOPIC_SUBSCRIBED?.add?.(topic); } catch(_){}
                 try { window.__WS_PENDING_SUBSCRIPTIONS?.delete?.(topic); } catch(_){}
+                try { window.__WS_LAST_SUBSCRIBE_TS?.set?.(topic, Date.now()); } catch(_) {}
                 try { window.RealtimeStore && window.RealtimeStore.update(s => { if (!Array.isArray(s.topics)) {s.topics = [];} if (!s.topics.includes(topic)) {s.topics.push(topic);} }); } catch(_){}
             } else {
                 console.log('[Реалтайм] Не можем подписаться сейчас - сокет:', !!this.socket, 'подключен:', this.isConnected, 'уже подписан:', this.subscribedTopics.has(topic));

@@ -347,13 +347,52 @@ declare global {
       window.MatchRostersEvents.render = function(match: any, details: any, mdPane: any, els: any){
         console.log('[Bridge] MatchRostersEvents.render called from store', { match, details, mdPane, els });
         
-        // Администратор: не перехватываем, оставляем оригинальный рендер с контролами
+        // Администратор: используем оригинальный рендер, НО сохраняем/прокидываем эффективный счёт,
+        // чтобы original не ставил «— : —» и не перетирал подтверждённый счёт
         try {
           const adminId = document.body.getAttribute('data-admin');
           const isAdmin = !!(adminId && adminId.trim() !== '');
           if (isAdmin) {
-            console.log('[Bridge] Admin mode detected, using original rosters render');
-            return orig.call(this, match, details, mdPane, els);
+            console.log('[Bridge] Admin mode detected, preserving score during original render');
+            // Определяем эффективный счёт из источников: state → DOM → details
+            let effScore: {home:number; away:number} | null = null;
+            try {
+              const st: any = ((window as any).MatchLiveScore && (window as any).MatchLiveScore.state) || (mdPane && (mdPane as any).__liveScoreState) || null;
+              if (st && st.currentScore && typeof st.currentScore.home === 'number' && typeof st.currentScore.away === 'number') {
+                effScore = { home: st.currentScore.home, away: st.currentScore.away };
+              }
+            } catch(_) {}
+            if (!effScore) {
+              try {
+                const el = document.getElementById('md-score');
+                const txt = String(el?.textContent || '').trim();
+                const m = txt.match(/(\d+)\s*:\s*(\d+)/);
+                if (m) { effScore = { home: Number(m[1])||0, away: Number(m[2])||0 }; }
+              } catch(_) {}
+            }
+            if (!effScore && details && typeof details === 'object' && details.score && typeof details.score.home === 'number' && typeof details.score.away === 'number') {
+              effScore = { home: details.score.home, away: details.score.away };
+            }
+            // Вызываем оригинальный рендер, прокидывая score, если он известен
+            try {
+              const detailsWithScore = (effScore ? Object.assign({}, details || {}, { score: effScore }) : details);
+              orig.call(this, match, detailsWithScore, mdPane, els);
+            } catch(e) {
+              console.warn('[Bridge] Original render (admin) failed:', e);
+              return;
+            }
+            // После рендера восстанавливаем счёт, если он был затёрт плейсхолдером
+            try {
+              if (effScore) {
+                const scoreEl = document.getElementById('md-score');
+                const isPlaceholder = (scoreEl && typeof scoreEl.textContent === 'string') ? /[—-]\s*:\s*[—-]/.test(scoreEl.textContent!.trim()) : false;
+                const desired = `${effScore.home} : ${effScore.away}`;
+                if (scoreEl && (isPlaceholder || scoreEl.textContent!.trim() !== desired)) {
+                  scoreEl.textContent = desired;
+                }
+              }
+            } catch(_) {}
+            return; // для админа на этом заканчиваем
           }
         } catch(_) {}
         
