@@ -280,26 +280,35 @@
     };
 
     // Вычисляем WS-топик деталей матча, как в profile-match-advanced.js
-    const __wsTopic = (()=>{ 
+    const __wsTopics = (()=>{ 
       try { 
         const h=(match?.home||'').toLowerCase().trim(); 
         const a=(match?.away||'').toLowerCase().trim(); 
         const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):'')); 
         const d=raw?raw.slice(0,10):''; 
-        return `match:${h}__${a}__${d}:details`; 
+        return [
+          `match:${h}__${a}__${d}:details`, // with_date
+          `match:${h}__${a}__:details`      // no_date (fallback)
+        ]; 
       } catch(_) { 
-        return null; 
+        return []; 
       } 
     })();
     
     const isWsActive = ()=>{
       try {
         if(!window.__WEBSOCKETS_ENABLED__) {return false;}
-        if(!__wsTopic) {return false;}
-        // Глобальные флаги приоритетнее
-        if (window.__WEBSOCKETS_CONNECTED && window.__WS_TOPIC_SUBSCRIBED && window.__WS_TOPIC_SUBSCRIBED.has(__wsTopic)) { return true; }
+        if(!__wsTopics.length) {return false;}
+        // Глобальные флаги приоритетнее: если подписан хотя бы один из вариантов — считаем активным
+        const sub = window.__WS_TOPIC_SUBSCRIBED;
+        if (window.__WEBSOCKETS_CONNECTED && sub && typeof sub.has==='function') {
+          for (const t of __wsTopics) { if (sub.has(t)) { return true; } }
+        }
         const ru = window.realtimeUpdater;
-        return !!(ru && typeof ru.getTopicEnabled==='function' && ru.getTopicEnabled() && typeof ru.hasTopic==='function' && ru.hasTopic(__wsTopic));
+        if (ru && typeof ru.getTopicEnabled==='function' && ru.getTopicEnabled() && typeof ru.hasTopic==='function'){
+          for (const t of __wsTopics) { if (ru.hasTopic(t)) { return true; } }
+        }
+        return false;
       } catch(_) { return false; }
     };
 
