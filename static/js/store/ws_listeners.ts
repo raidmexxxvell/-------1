@@ -62,6 +62,20 @@ interface OddsState {
             const sa = fields.score_away;
             if (typeof sh === 'number' && typeof sa === 'number') {
               console.log('[WS Listeners] Обновляем счет через WebSocket:', sh, ':', sa);
+              // Уважаем admin protection window, если активен на открытом экране
+              try {
+                const ls = (window as any).MatchLiveScore;
+                const mdPane = document.getElementById('ufo-match-details');
+                const isVisible = !!mdPane && mdPane.style.display !== 'none';
+                if (ls && isVisible) {
+                  const st = (ls as any).state || (mdPane as any).__liveScoreState;
+                  const protectedNow = st && typeof st.noFetchUntil==='number' && Date.now() < st.noFetchUntil;
+                  if (protectedNow) {
+                    console.log('[WS Listeners] Пропускаем ws-score обновление — admin protection активен');
+                    return;
+                  }
+                }
+              } catch(_) {}
               
               // Отправляем централизованное событие для всех score компонентов
               const scoreEvent = new CustomEvent('matchScoreUpdate', {

@@ -15,6 +15,8 @@
       // КРИТИЧНО: Сохраняем актуальный счет в state для инкрементов (принцип статистики)
       currentScore: { home: 0, away: 0 }
     };
+    try { refs.mdPane.__liveScoreState = state; } catch(_) {}
+    try { window.MatchLiveScore.state = state; } catch(_) {}
     
     let scorePoll=null; let pollWatch=null; let adminScoreCtrlsAdded=false;
     const isAdmin = (()=>{ try { const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):''; return !!(adminId && currentId && String(adminId)===currentId); } catch(_) { return false; } })();
@@ -49,6 +51,10 @@
     const applyScore=(sh,sa)=>{ 
       try { 
         if(sh==null || sa==null) {return false;}
+        // Валидация входных значений
+        if (typeof sh !== 'number' || typeof sa !== 'number') { return false; }
+        if (!Number.isFinite(sh) || !Number.isFinite(sa)) { return false; }
+        if (sh < 0 || sa < 0) { return false; }
         const newSig = generateScoreSig(sh, sa);
         
         // КРИТИЧНО: Проверяем сигнатуру - если счет не изменился, пропускаем
@@ -75,6 +81,8 @@
     
     const fetchScore=async()=>{ 
       try { 
+        // Если WS активен по нашему топику - не фетчим
+        if (isWsActive()) { console.log('[LiveScore] WS активен — fetchScore пропущен'); return; }
         // Защита: не перетирать админское обновление (как в статистике - больший период)
         if (Date.now() < state.noFetchUntil) { 
           console.log('[LiveScore] Пропускаем fetch - защита от админ-конфликта');
@@ -98,16 +106,26 @@
           console.log('[LiveScore] 304 Not Modified - счет не изменился');
           return;
         }
-        
-        const d = await r.json(); 
+        // Пытаемся распознать JSON только для успешных кодов
+        if (!r.ok) { console.warn('[LiveScore] fetchScore non-ok status', r.status); return; }
+        const d = await r.json().catch(()=>null); 
+        if (!d || typeof d !== 'object') { console.warn('[LiveScore] fetchScore invalid JSON'); return; }
         const newEtag = r.headers.get('ETag');
         
-        if (typeof d?.score_home==='number' && typeof d?.score_away==='number') {
-          const applied = applyScore(d.score_home, d.score_away);
+        if (typeof d?.score_home==='number' && typeof d?.score_away==='number' && Number.isFinite(d.score_home) && Number.isFinite(d.score_away)) {
+          // Уважение окна защиты: не применять результат fetch если защита активна
+          if (Date.now() < state.noFetchUntil) { console.log('[LiveScore] Защита активна — не применяем fetch-результат'); return; }
+          const applied = applyScore(Math.max(0,d.score_home), Math.max(0,d.score_away));
           if (applied) {
             state.etag = newEtag;
             console.log('[LiveScore] Счет обновлен из API:', d.score_home, ':', d.score_away);
+            try {
+              const ev = new CustomEvent('matchScoreUpdate', { detail: { home: match.home, away: match.away, score_home: d.score_home, score_away: d.score_away, source: 'fetch' } });
+              document.dispatchEvent(ev);
+            } catch(_) {}
           }
+        } else {
+          console.warn('[LiveScore] fetchScore вернул некорректные данные, DOM не обновлен');
         }
       } catch(e) {
         console.warn('[LiveScore] Ошибка fetchScore:', e);
@@ -157,7 +175,8 @@
                 
                 // Обновляем timestamps для защиты
                 state.lastAdminAction = Date.now();
-                state.noFetchUntil = Date.now() + 15000; // 15 секунд защита вместо 6
+                const protectMs = (window.__ADMIN_PROTECTION_MS || 15000);
+                state.noFetchUntil = Date.now() + Number(protectMs);
                 
                 // Маркируем админское изменение
                 try { 
@@ -169,17 +188,23 @@
                 
                 // Уведомляем другие компоненты через WebSocket-совместимое событие
                 try {
+                  const payload = {
+                    home: match.home,
+                    away: match.away,
+                    score_home: d.score_home,
+                    score_away: d.score_away,
+                    timestamp: Date.now(),
+                    source: 'admin'
+                  };
                   const event = new CustomEvent('scoreUpdatedByAdmin', {
                     detail: {
-                      home: match.home,
-                      away: match.away,
-                      score_home: d.score_home,
-                      score_away: d.score_away,
-                      timestamp: Date.now(),
-                      source: 'admin'
+                      ...payload
                     }
                   });
                   document.dispatchEvent(event);
+                  // Unified событие
+                  const ev2 = new CustomEvent('matchScoreUpdate', { detail: payload });
+                  document.dispatchEvent(ev2);
                 } catch(_) {}
               }
             } else {
@@ -271,6 +296,8 @@
       try {
         if(!window.__WEBSOCKETS_ENABLED__) {return false;}
         if(!__wsTopic) {return false;}
+        // Глобальные флаги приоритетнее
+        if (window.__WEBSOCKETS_CONNECTED && window.__WS_TOPIC_SUBSCRIBED && window.__WS_TOPIC_SUBSCRIBED.has(__wsTopic)) { return true; }
         const ru = window.realtimeUpdater;
         return !!(ru && typeof ru.getTopicEnabled==='function' && ru.getTopicEnabled() && typeof ru.hasTopic==='function' && ru.hasTopic(__wsTopic));
       } catch(_) { return false; }
@@ -301,10 +328,10 @@
             } catch(_){}
           }
           // Polling логика как в статистике - отключается при активных WebSocket
-          const schedule = () => { 
+            const schedule = () => { 
             if (state.cancelled) { return; }
             if (isWsActive()) { 
-              console.log('[LiveScore] WebSocket активен - polling отключен');
+              console.log('[LiveScore] Поллинг отключен - полагаемся на WS топики');
               return; 
             }
             const base = 15000; // 15 секунд базовый интервал
@@ -318,7 +345,7 @@
             if (document.hidden) { schedule(); return; }
             if (state.busy) { schedule(); return; }
             if (isWsActive()) { 
-              console.log('[LiveScore] WebSocket активен во время polling - пропускаем');
+              console.log('[LiveScore] Поллинг отключен - полагаемся на WS топики');
               schedule(); 
               return; 
             }
@@ -368,4 +395,24 @@
     return { cleanup(){ try { if(state.timer) {clearTimeout(state.timer);} } catch(_){} try { if(pollWatch) {clearInterval(pollWatch);} } catch(_){} try { mdPane.querySelectorAll('.admin-score-ctrls').forEach(n=>n.remove()); } catch(_){} } };
   }
   window.MatchLiveScore = { setup };
+})();
+
+// DEV-ONLY: перехватчик fetch для трассировки источников запросов к score/get
+// Включается флагом localStorage.setItem('debug:trace_score_fetch','1')
+(function(){
+  try {
+    if (localStorage.getItem('debug:trace_score_fetch') !== '1') { return; }
+    const orig = window.fetch;
+    window.fetch = function(input, init){
+      try {
+        const url = (typeof input === 'string') ? input : (input?.url || '');
+        if (/\/api\/match\/score\/get/.test(url)) {
+          console.warn('[TRACE score/get]', url);
+          console.trace();
+        }
+      } catch(_) {}
+      return orig.apply(this, arguments);
+    };
+    console.log('[DEV] fetch interceptor for score/get enabled');
+  } catch(_) {}
 })();

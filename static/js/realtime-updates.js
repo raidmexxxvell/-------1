@@ -32,6 +32,29 @@ class RealtimeUpdater {
     // Feature flag for topic-based subscriptions (from template meta)
     this.topicEnabled = !!window.__WS_TOPIC_SUBS__;
         
+        // Глобальные отладочные структуры
+        try {
+            window.__WEBSOCKETS_SOCKET = null;
+            window.__WEBSOCKETS_CONNECTED = false;
+            window.__WS_TOPIC_SUBSCRIBED = window.__WS_TOPIC_SUBSCRIBED || new Set();
+            window.__WS_PENDING_SUBSCRIPTIONS = window.__WS_PENDING_SUBSCRIPTIONS || new Map(); // topic -> ts
+            window.__wsDebug = function(){
+                try {
+                    const sock = window.__WEBSOCKETS_SOCKET;
+                    const topics = Array.from(window.__WS_TOPIC_SUBSCRIBED || []);
+                    const pending = Array.from((window.__WS_PENDING_SUBSCRIPTIONS || new Map()).keys());
+                    const info = {
+                        connected: !!window.__WEBSOCKETS_CONNECTED,
+                        socketId: sock && (sock.id || sock.engine?.id || null),
+                        topics,
+                        pending
+                    };
+                    console.log('[WS DEBUG]', info);
+                    return info;
+                } catch(e){ console.warn('[WS DEBUG] error', e); return { connected:false, topics:[], pending:[] }; }
+            };
+        } catch(_) {}
+
         this.initSocket();
 
         // Автоподписка на глобальные обновления (full_reset и т.п.), даже до установления соединения
@@ -76,6 +99,7 @@ class RealtimeUpdater {
                         forceNew: false
                     });
                     console.log('[WS Инициализация] Socket.IO создан, настраиваем обработчики');
+                    try { window.__WEBSOCKETS_SOCKET = this.socket; } catch(_) {}
                     this.setupEventHandlers();
                     return true;
                 })
@@ -100,6 +124,7 @@ class RealtimeUpdater {
             
             this.isConnected = true;
             this.reconnectAttempts = 0;
+            try { window.__WEBSOCKETS_CONNECTED = true; } catch(_){}
         // No manual heartbeat: Socket.IO handles ping/pong internally
     try { window.RealtimeStore && window.RealtimeStore.set({ connected: true }); } catch(_){}
     __wsEmit('ws:connected', { reconnects: this.reconnectAttempts });
@@ -122,16 +147,23 @@ class RealtimeUpdater {
                         if (!this.subscribedTopics.has(topic)) {
                             this.socket.emit('subscribe', { topic });
                             this.subscribedTopics.add(topic);
+                            try { window.__WS_TOPIC_SUBSCRIBED?.add?.(topic); } catch(_){}
+                            try { window.__WS_PENDING_SUBSCRIPTIONS?.delete?.(topic); } catch(_){}
                         }
                     });
                 }
             } catch(_) {}
+            try {
+                const info = window.__wsDebug?.();
+                console.log('[WS DEBUG] connected=', !!info?.connected, 'topics=', info?.topics);
+            } catch(_){}
         });
         
     this.socket.on('disconnect', (reason) => {
             
             this.isConnected = false;
             this.clearHeartbeat();
+            try { window.__WEBSOCKETS_CONNECTED = false; } catch(_){}
             try { window.RealtimeStore && window.RealtimeStore.set({ connected: false }); } catch(_){}
             __wsEmit('ws:disconnected', { reason: reason || '' });
             
@@ -850,6 +882,9 @@ class RealtimeUpdater {
             try {
                 window.__PENDING_WS_TOPICS__ = window.__PENDING_WS_TOPICS__ || new Set();
                 window.__PENDING_WS_TOPICS__.add(topic);
+                // дублируем в глобальную Map с таймстампом
+                window.__WS_PENDING_SUBSCRIPTIONS = window.__WS_PENDING_SUBSCRIPTIONS || new Map();
+                window.__WS_PENDING_SUBSCRIPTIONS.set(topic, Date.now());
             } catch(_) {}
             if(!this.topicEnabled) {
                 console.warn('[Реалтайм] Подписки на топики отключены');
@@ -860,6 +895,8 @@ class RealtimeUpdater {
                 this.socket.emit('subscribe', { topic });
                 this.subscribedTopics.add(topic);
                 console.log('[Реалтайм] Подписались на топик:', topic, 'Всего подписок:', this.subscribedTopics.size);
+                try { window.__WS_TOPIC_SUBSCRIBED?.add?.(topic); } catch(_){}
+                try { window.__WS_PENDING_SUBSCRIPTIONS?.delete?.(topic); } catch(_){}
                 try { window.RealtimeStore && window.RealtimeStore.update(s => { if (!Array.isArray(s.topics)) {s.topics = [];} if (!s.topics.includes(topic)) {s.topics.push(topic);} }); } catch(_){}
             } else {
                 console.log('[Реалтайм] Не можем подписаться сейчас - сокет:', !!this.socket, 'подключен:', this.isConnected, 'уже подписан:', this.subscribedTopics.has(topic));
@@ -874,6 +911,8 @@ class RealtimeUpdater {
             try { this.pendingTopics.delete(topic); } catch(_) {}
             try { this.subscribedTopics.delete(topic); } catch(_) {}
             try { window.__PENDING_WS_TOPICS__?.delete?.(topic); } catch(_) {}
+            try { window.__WS_TOPIC_SUBSCRIBED?.delete?.(topic); } catch(_){}
+            try { window.__WS_PENDING_SUBSCRIPTIONS?.delete?.(topic); } catch(_){}
             if(!this.topicEnabled) {return;}
             if(this.socket && this.isConnected){ this.socket.emit('unsubscribe', { topic }); }
             try { window.RealtimeStore && window.RealtimeStore.update(s => { s.topics = (s.topics||[]).filter(t => t!==topic); }); } catch(_){}

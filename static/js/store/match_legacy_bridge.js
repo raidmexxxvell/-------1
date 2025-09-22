@@ -446,11 +446,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
         // Извлекаем данные с fallback на кэш
         const rosters = storeData?.rosters || mdPane.__lastRosters || { home: [], away: [] };
         const events = storeData?.events || mdPane.__lastEvents || { home: [], away: [] };
-        const score = storeData?.score;
+    const score = storeData?.score;
         // Обновляем кэш для совместимости с legacy кодом
         mdPane.__lastRosters = rosters;
         mdPane.__lastEvents = events;
-        if (score) {
+        if (score && typeof score.home === 'number' && typeof score.away === 'number' && Number.isFinite(score.home) && Number.isFinite(score.away)) {
             mdPane.__lastScore = score;
             // КРИТИЧНО: Обновляем счет БЕЗ МЕРЦАНИЯ (принцип из стабильного коммита)
             try {
@@ -472,8 +472,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
                 }
             }
             catch (_) { }
+        } else {
+            // Нет валидного счета — не затираем текущий DOM и не ставим плейсхолдеры
         }
-        // Нормализуем события в формат, который ожидает legacy код
+    // Нормализуем события в формат, который ожидает legacy код
         let eventsFormatted = { home: [], away: [] };
         if (Array.isArray(events)) {
             // Новый формат: массив событий с side
