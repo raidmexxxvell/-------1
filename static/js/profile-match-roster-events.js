@@ -78,10 +78,30 @@
           sel.disabled = true;
           try {
             await applyDelta(desired - current);
+            
+            // КРИТИЧНО: Обновляем локальный индекс ТОЛЬКО после успешного сохранения на сервере
             if(!evIdx.has(key)) {evIdx.set(key,{goal:0,assist:0,yellow:0,red:0});}
             evIdx.get(key)[type]= desired;
             icon.style.opacity= desired>0? '1':'0.25';
             highlightRow(trRef,key);
+            
+            // Уведомляем другие компоненты об изменении (как в статистике)
+            try {
+              const eventUpdate = new CustomEvent('playerEventUpdated', {
+                detail: {
+                  home: match.home,
+                  away: match.away,
+                  team: side,
+                  player: player,
+                  eventType: type,
+                  count: desired,
+                  timestamp: Date.now(),
+                  source: 'admin'
+                }
+              });
+              document.dispatchEvent(eventUpdate);
+            } catch(_) {}
+            
             try { const host=document.getElementById('ufo-match-details'); if(host) {host.setAttribute('data-admin-last-change-ts', String(Date.now()));} } catch(_){}
           } catch(e) {
             console.error('events change', e);
@@ -265,15 +285,18 @@
       if (currentMatch && currentMatch.home === home && currentMatch.away === away) {
         console.log('[MatchRostersEvents] Получено обновление реестра событий, обновляем UI синхронно');
         
-        // НОВОЕ: Мгновенно обновляем видимые элементы используя полученные события
-        if (events) {
-          try {
-            const matchDetailsPane = document.getElementById('ufo-match-details');
-            if (matchDetailsPane && matchDetailsPane.style.display !== 'none') {
-              // Сохраняем новые события в пане для последующего использования
-              matchDetailsPane.__lastEvents = events;
-              
-              // Обновляем индексы событий для всех видимых селектов
+        // НОВОЕ: Проверяем защитный период после админ-действий (как в статистике)
+        try {
+          const host = document.getElementById('ufo-match-details');
+          const lastAdminChange = Number(host?.getAttribute('data-admin-last-change-ts') || '0') || 0;
+          const timeSinceAdmin = Date.now() - lastAdminChange;
+          
+          // Если недавно было админ-действие, применяем только мгновенную синхронизацию
+          if (timeSinceAdmin < 8000) {
+            console.log('[MatchRostersEvents] Недавнее админ-действие - только синхронизация UI');
+            
+            // Быстрая синхронизация видимых элементов
+            if (events) {
               document.querySelectorAll(`select[data-match-home="${home}"][data-match-away="${away}"]`).forEach(select => {
                 try {
                   const playerKey = (select.getAttribute('data-player') || '').toLowerCase().trim();
@@ -290,18 +313,74 @@
                       }
                     });
                     
-                    // Обновляем селект и иконку
-                    select.value = String(count);
-                    const icon = select.parentNode?.querySelector('img');
-                    if (icon) {
-                      icon.style.opacity = count > 0 ? '1' : '0.25';
+                    // Проверяем изменился ли счетчик (сигнатура)
+                    const currentValue = parseInt(select.value, 10) || 0;
+                    if (currentValue !== count) {
+                      console.log('[MatchRostersEvents] Синхронизируем селект:', playerKey, eventType, currentValue, '→', count);
+                      
+                      select.value = String(count);
+                      const icon = select.parentNode?.querySelector('img');
+                      if (icon) {
+                        icon.style.opacity = count > 0 ? '1' : '0.25';
+                      }
+                      
+                      // Обновляем подсветку строки
+                      const row = select.closest('tr');
+                      if (row) {
+                        const hasAny = count > 0;
+                        row.style.backgroundColor = hasAny ? 'rgba(255,255,255,0.06)' : '';
+                      }
                     }
+                  }
+                } catch(err) {
+                  console.warn('[MatchRostersEvents] Ошибка синхронизации селекта:', err);
+                }
+              });
+            }
+            return; // Не делаем refetch при недавних админ-действиях
+          }
+        } catch(_) {}
+        
+        // НОВОЕ: Мгновенно обновляем видимые элементы используя полученные события
+        if (events) {
+          try {
+            const matchDetailsPane = document.getElementById('ufo-match-details');
+            if (matchDetailsPane && matchDetailsPane.style.display !== 'none') {
+              // Сохраняем новые события в пане для последующего использования
+              matchDetailsPane.__lastEvents = events;
+              
+              // Обновляем индексы событий для всех видимых селектов (как в статистике)
+              document.querySelectorAll(`select[data-match-home="${home}"][data-match-away="${away}"]`).forEach(select => {
+                try {
+                  const playerKey = (select.getAttribute('data-player') || '').toLowerCase().trim();
+                  const eventType = select.getAttribute('data-event-type');
+                  const team = select.getAttribute('data-team');
+                  
+                  if (playerKey && eventType && team) {
+                    const sideEvents = events[team] || [];
+                    let count = 0;
                     
-                    // Обновляем подсветку строки
-                    const row = select.closest('tr');
-                    if (row) {
-                      const hasAny = count > 0;
-                      row.style.backgroundColor = hasAny ? 'rgba(255,255,255,0.06)' : '';
+                    sideEvents.forEach(event => {
+                      if ((event.player || '').toLowerCase().trim() === playerKey && event.type === eventType) {
+                        count++;
+                      }
+                    });
+                    
+                    // Обновляем селект и иконку ТОЛЬКО если значение изменилось
+                    const currentValue = parseInt(select.value, 10) || 0;
+                    if (currentValue !== count) {
+                      select.value = String(count);
+                      const icon = select.parentNode?.querySelector('img');
+                      if (icon) {
+                        icon.style.opacity = count > 0 ? '1' : '0.25';
+                      }
+                      
+                      // Обновляем подсветку строки
+                      const row = select.closest('tr');
+                      if (row) {
+                        const hasAny = count > 0;
+                        row.style.backgroundColor = hasAny ? 'rgba(255,255,255,0.06)' : '';
+                      }
                     }
                   }
                 } catch(_) {}
@@ -313,16 +392,6 @@
         }
         
         // Дополнительно: принудительное обновление через API (для полной синхронизации)
-        // Защита: не делать refetch/перерисовку, если недавно были админские изменения (грейс-период)
-        try {
-          const host = document.getElementById('ufo-match-details');
-          const ts = Number(host?.getAttribute('data-admin-last-change-ts') || '0') || 0;
-          const withinGrace = ts && (Date.now() - ts < 8000);
-          if (withinGrace) {
-            console.log('[MatchRostersEvents] Пропускаем fetch перерисовку (грейс после админ-изменений)');
-            return;
-          }
-        } catch(_){}
         debounceEventUpdate(`match-details-${home}-${away}`, () => {
           if (typeof window.fetchMatchDetails === 'function') {
             window.fetchMatchDetails({ home, away, forceFresh: true })
@@ -343,10 +412,64 @@
                 console.error('[MatchRostersEvents] Ошибка fetch после registry update:', err);
               });
           }
-        }, 150);
+        }, 300); // Увеличили debounce до 300ms как в статистике
       }
     } catch(error) {
       console.error('[MatchRostersEvents] Ошибка обработки eventsRegistryUpdate:', error);
+    }
+  });
+  
+  // Listener для обновлений событий игроков от админа (как в статистике)
+  document.addEventListener('playerEventUpdated', (event) => {
+    try {
+      const { home, away, team, player, eventType, count, source } = event.detail;
+      
+      // Проверяем текущий матч
+      const currentMatch = window.__currentMatchDetails;
+      if (!currentMatch || currentMatch.home !== home || currentMatch.away !== away) {
+        return;
+      }
+      
+      console.log('[MatchRostersEvents] Получено обновление события игрока:', player, eventType, count);
+      
+      // Находим и обновляем соответствующие элементы у других пользователей
+      document.querySelectorAll(`select[data-match-home="${home}"][data-match-away="${away}"][data-team="${team}"][data-player="${player}"][data-event-type="${eventType}"]`).forEach(select => {
+        try {
+          const currentValue = parseInt(select.value, 10) || 0;
+          if (currentValue !== count) {
+            select.value = String(count);
+            
+            // Обновляем иконку
+            const icon = select.parentNode?.querySelector('img');
+            if (icon) {
+              icon.style.opacity = count > 0 ? '1' : '0.25';
+            }
+            
+            // Обновляем подсветку строки
+            const row = select.closest('tr');
+            if (row) {
+              // Пересчитываем все события для этого игрока
+              const playerKey = player.toLowerCase().trim();
+              const playerSelects = row.querySelectorAll('select');
+              let hasAnyEvents = false;
+              
+              playerSelects.forEach(s => {
+                const val = parseInt(s.value, 10) || 0;
+                if (val > 0) hasAnyEvents = true;
+              });
+              
+              row.style.backgroundColor = hasAnyEvents ? 'rgba(255,255,255,0.06)' : '';
+            }
+            
+            console.log('[MatchRostersEvents] Синхронизирован элемент игрока:', player, eventType, '→', count);
+          }
+        } catch(err) {
+          console.warn('[MatchRostersEvents] Ошибка синхронизации элемента:', err);
+        }
+      });
+      
+    } catch(error) {
+      console.error('[MatchRostersEvents] Ошибка обработки playerEventUpdated:', error);
     }
   });
 })();

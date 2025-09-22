@@ -2,17 +2,92 @@
 (function(){
   function setup(match, refs){
     const scoreEl = refs.scoreEl; const dtEl = refs.dtEl; const mdPane=refs.mdPane; if(!scoreEl||!dtEl||!mdPane) {return {};}
-  let scorePoll=null; let pollWatch=null; let adminScoreCtrlsAdded=false; let noFetchUntil=0;
+    
+    // STATE: центральное состояние с сигнатурой как в статистике
+    const state = { 
+      etag: null, 
+      sig: null, // сигнатура счета для защиты от дубликатов  
+      timer: null, 
+      busy: false, 
+      cancelled: false,
+      noFetchUntil: 0, // временная блокировка fetch после админ-действий
+      lastAdminAction: 0 // timestamp последнего админ-действия
+    };
+    
+    let scorePoll=null; let pollWatch=null; let adminScoreCtrlsAdded=false;
     const isAdmin = (()=>{ try { const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):''; return !!(adminId && currentId && String(adminId)===currentId); } catch(_) { return false; } })();
-    const applyScore=(sh,sa)=>{ try { if(sh==null || sa==null) {return;} scoreEl.textContent=`${Number(sh)} : ${Number(sa)}`; } catch(_){} };
+    
+    // Генерация сигнатуры счета (как в статистике)
+    const generateScoreSig = (sh, sa) => {
+      try {
+        return `${Number(sh)||0}:${Number(sa)||0}`;
+      } catch(_) {
+        return '0:0';
+      }
+    };
+    
+    const applyScore=(sh,sa)=>{ 
+      try { 
+        if(sh==null || sa==null) {return false;}
+        const newSig = generateScoreSig(sh, sa);
+        
+        // КРИТИЧНО: Проверяем сигнатуру - если счет не изменился, пропускаем
+        if (state.sig && newSig === state.sig) {
+          console.log('[LiveScore] Пропускаем обновление - сигнатура не изменилась:', newSig);
+          return false;
+        }
+        
+        const newScoreText = `${Number(sh)} : ${Number(sa)}`;
+        console.log('[LiveScore] Применяем счет:', newScoreText, 'сигнатура:', newSig);
+        
+        scoreEl.textContent = newScoreText;
+        state.sig = newSig;
+        
+        return true;
+      } catch(_){
+        return false;
+      }
+    };
+    
     const fetchScore=async()=>{ 
       try { 
-        // Защита: не перетирать админское обновление в течение короткого окна
-        if (Date.now() < noFetchUntil) { return; }
-        const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`); 
-        const d=await r.json(); 
-        if(typeof d?.score_home==='number' && typeof d?.score_away==='number') {applyScore(d.score_home,d.score_away);} 
-      } catch(_){} 
+        // Защита: не перетирать админское обновление (как в статистике - больший период)
+        if (Date.now() < state.noFetchUntil) { 
+          console.log('[LiveScore] Пропускаем fetch - защита от админ-конфликта');
+          return; 
+        }
+        
+        // Проверяем не слишком ли частые админ-действия
+        const timeSinceAdmin = Date.now() - state.lastAdminAction;
+        if (timeSinceAdmin < 10000) { // 10 секунд защита вместо 6
+          console.log('[LiveScore] Пропускаем fetch - недавнее админ-действие');
+          return;
+        }
+        
+        const url = `/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`;
+        
+        // Используем ETag как в статистике
+        const headers = state.etag ? { 'If-None-Match': state.etag } : {};
+        const r = await fetch(url, { headers }); 
+        
+        if (r.status === 304) {
+          console.log('[LiveScore] 304 Not Modified - счет не изменился');
+          return;
+        }
+        
+        const d = await r.json(); 
+        const newEtag = r.headers.get('ETag');
+        
+        if (typeof d?.score_home==='number' && typeof d?.score_away==='number') {
+          const applied = applyScore(d.score_home, d.score_away);
+          if (applied) {
+            state.etag = newEtag;
+            console.log('[LiveScore] Счет обновлен из API:', d.score_home, ':', d.score_away);
+          }
+        }
+      } catch(e) {
+        console.warn('[LiveScore] Ошибка fetchScore:', e);
+      }
     };
     const ensureAdminCtrls=()=>{ try { if(adminScoreCtrlsAdded) {return;} const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):''; const isAdmin=!!(adminId && currentId && String(adminId)===currentId); if(!isAdmin) {return;} if(mdPane.querySelector('.admin-score-ctrls')){ adminScoreCtrlsAdded=true; return; }
         const mkBtn=(t)=>{ const b=document.createElement('button'); b.className='details-btn'; b.textContent=t; b.style.padding='2px 8px'; b.style.minWidth='unset'; return b; };
@@ -29,21 +104,60 @@
         const parseScore=()=>{ try { const t=scoreEl.textContent||''; const m=t.match(/(\d+)\s*:\s*(\d+)/); if(m) {return [parseInt(m[1],10)||0, parseInt(m[2],10)||0];} } catch(_){} return [0,0]; };
         const postScore=async(sh,sa)=>{ 
           try { 
+            console.log('[LiveScore] Отправляем новый счет:', sh, ':', sa);
+            
             const fd=new FormData(); 
             fd.append('initData', tg?.initData||''); 
             fd.append('home',match.home||''); 
             fd.append('away',match.away||''); 
             fd.append('score_home', String(Math.max(0,sh))); 
             fd.append('score_away', String(Math.max(0,sa))); 
+            
             const r=await fetch('/api/match/score/set',{ method:'POST', body:fd }); 
             const d=await r.json().catch(()=>({})); 
-            if(!r.ok || d?.error) {throw new Error(d?.error||'Ошибка сохранения');} 
-            // Локально применяем счёт мгновенно
-            applyScore(d.score_home,d.score_away);
-            // Анти-гонка: подавляем fetchScore на короткий период, пока прилетит WS
-            noFetchUntil = Date.now() + 6000;
-            try { const host=document.getElementById('ufo-match-details'); if(host){ host.setAttribute('data-admin-last-change-ts', String(Date.now())); } } catch(_){}
+            
+            if(!r.ok || d?.error) {
+              throw new Error(d?.error||'Ошибка сохранения');
+            } 
+            
+            // КРИТИЧНО: Локально применяем счёт ТОЛЬКО если сервер подтвердил
+            if (typeof d.score_home === 'number' && typeof d.score_away === 'number') {
+              const applied = applyScore(d.score_home, d.score_away);
+              if (applied) {
+                console.log('[LiveScore] Счет подтвержден сервером и применен:', d.score_home, ':', d.score_away);
+                
+                // Обновляем timestamps для защиты
+                state.lastAdminAction = Date.now();
+                state.noFetchUntil = Date.now() + 15000; // 15 секунд защита вместо 6
+                
+                // Маркируем админское изменение
+                try { 
+                  const host=document.getElementById('ufo-match-details'); 
+                  if(host){ 
+                    host.setAttribute('data-admin-last-change-ts', String(Date.now())); 
+                  } 
+                } catch(_){}
+                
+                // Уведомляем другие компоненты через WebSocket-совместимое событие
+                try {
+                  const event = new CustomEvent('scoreUpdatedByAdmin', {
+                    detail: {
+                      home: match.home,
+                      away: match.away,
+                      score_home: d.score_home,
+                      score_away: d.score_away,
+                      timestamp: Date.now(),
+                      source: 'admin'
+                    }
+                  });
+                  document.dispatchEvent(event);
+                } catch(_) {}
+              }
+            } else {
+              console.warn('[LiveScore] Сервер не вернул корректный счет:', d);
+            }
           } catch(e){ 
+            console.error('[LiveScore] Ошибка postScore:', e);
             window.showAlert?.(e?.message||'Не удалось сохранить счёт','error'); 
           } 
         };
@@ -55,7 +169,63 @@
       } catch(_){} };
     // Live status fetch (server) + admin fallback на локальный live
   { const raw=(match?.datetime||match?.date||''); const dateStr = raw ? String(raw).slice(0,10) : ''; }
-  // Вычисляем WS-топик деталей матча, как в profile-match-advanced.js
+    // WebSocket listener для мгновенного обновления счета (как в статистике)
+    let wsScoreRefreshHandler = null;
+    
+    // Создаем обработчик WebSocket событий
+    wsScoreRefreshHandler = (e) => {
+      try {
+        const { home, away, score_home, score_away, source } = e.detail || {};
+        if (!home || !away) { return; }
+        
+        // Защита: только для нашего матча
+        if (String(home) !== (match.home || '') || String(away) !== (match.away || '')) { 
+          return; 
+        }
+        
+        console.log('[LiveScore] Получено WebSocket обновление счета:', score_home, ':', score_away, 'источник:', source);
+        
+        // Если это административное изменение - защита от конфликтов
+        if (source === 'admin') {
+          state.lastAdminAction = Date.now();
+          state.noFetchUntil = Date.now() + 12000; // 12 секунд защита
+        }
+        
+        // Применяем счет с проверкой сигнатуры
+        if (typeof score_home === 'number' && typeof score_away === 'number') {
+          const applied = applyScore(score_home, score_away);
+          if (applied) {
+            console.log('[LiveScore] Счет обновлен через WebSocket');
+          }
+        }
+      } catch(err) {
+        console.error('[LiveScore] Ошибка обработки WebSocket события:', err);
+      }
+    };
+    
+    // Слушаем разные типы событий обновления счета
+    document.addEventListener('scoreUpdatedByAdmin', wsScoreRefreshHandler);
+    document.addEventListener('matchScoreUpdate', wsScoreRefreshHandler); // общее событие
+    document.addEventListener('ws:score_update', wsScoreRefreshHandler); // из WebSocket
+    
+    // Cleanup при отмене
+    const originalCancel = mdPane.__scoreSetupCancel || (() => {});
+    mdPane.__scoreSetupCancel = () => {
+      state.cancelled = true;
+      try { if (state.timer) { clearTimeout(state.timer); } } catch(_) {}
+      try { if (scorePoll) { clearInterval(scorePoll); } } catch(_) {}
+      try { if (pollWatch) { clearInterval(pollWatch); } } catch(_) {}
+      try { 
+        if (wsScoreRefreshHandler) {
+          document.removeEventListener('scoreUpdatedByAdmin', wsScoreRefreshHandler);
+          document.removeEventListener('matchScoreUpdate', wsScoreRefreshHandler);
+          document.removeEventListener('ws:score_update', wsScoreRefreshHandler);
+        }
+      } catch(_) {}
+      originalCancel();
+    };
+
+    // Вычисляем WS-топик деталей матча, как в profile-match-advanced.js
   const __wsTopic = (()=>{ try { const h=(match?.home||'').toLowerCase().trim(); const a=(match?.away||'').toLowerCase().trim(); const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):'')); const d=raw?raw.slice(0,10):''; return `match:${h}__${a}__${d}:details`; } catch(_) { return null; } })();
   const isWsActive = ()=>{
     try {
@@ -89,24 +259,72 @@
               }
             } catch(_){}
           }
-          // Опрос счёта только если нет активной WS-подписки на топик матча
-          const syncPolling = ()=>{
+          // Polling логика как в статистике - отключается при активных WebSocket
+          const schedule = () => { 
+            if (state.cancelled) { return; }
+            if (isWsActive()) { 
+              console.log('[LiveScore] WebSocket активен - polling отключен');
+              return; 
+            }
+            const base = 15000; // 15 секунд базовый интервал
+            const jitter = 5000; // 5 секунд джиттер
+            const delay = base + Math.floor(Math.random() * jitter);
+            state.timer = setTimeout(scorePollingLoop, delay);
+          };
+          
+          const scorePollingLoop = async () => {
+            if (state.cancelled) { return; }
+            if (document.hidden) { schedule(); return; }
+            if (state.busy) { schedule(); return; }
+            if (isWsActive()) { 
+              console.log('[LiveScore] WebSocket активен во время polling - пропускаем');
+              schedule(); 
+              return; 
+            }
+            
+            state.busy = true;
+            try {
+              await fetchScore();
+            } finally {
+              state.busy = false;
+              schedule();
+            }
+          };
+          
+          // Мониторинг состояния WebSocket как в статистике
+          const syncPolling = () => {
             try {
               const needPoll = !isWsActive();
+              console.log('[LiveScore] Проверка polling:', needPoll ? 'включен' : 'выключен');
+              
               if (needPoll) {
-                if (!scorePoll) { fetchScore(); scorePoll = setInterval(fetchScore, 15000); }
+                if (!state.timer) { 
+                  console.log('[LiveScore] Запускаем polling');
+                  fetchScore(); // первичная загрузка
+                  schedule(); 
+                }
               } else {
-                if (scorePoll) { clearInterval(scorePoll); scorePoll=null; }
+                if (state.timer) { 
+                  console.log('[LiveScore] Останавливаем polling - WebSocket активен');
+                  clearTimeout(state.timer); 
+                  state.timer = null; 
+                }
               }
-            } catch(_){}
+            } catch(e) {
+              console.error('[LiveScore] Ошибка syncPolling:', e);
+            }
           };
-          // Первая синхронизация и периодическая проверка режима каждые 5с
+          
+          // Первичный запуск
           syncPolling();
-          if (!pollWatch) {pollWatch = setInterval(syncPolling, 5000);}
+          
+          // Периодическая проверка состояния WebSocket (как в статистике)
+          pollWatch = setInterval(syncPolling, 5000);
+          
           ensureAdminCtrls();
         }
       }).catch(()=>{});
-    return { cleanup(){ try { if(scorePoll) {clearInterval(scorePoll);} } catch(_){} try { if(pollWatch) {clearInterval(pollWatch);} } catch(_){} try { mdPane.querySelectorAll('.admin-score-ctrls').forEach(n=>n.remove()); } catch(_){} } };
+    return { cleanup(){ try { if(state.timer) {clearTimeout(state.timer);} } catch(_){} try { if(pollWatch) {clearInterval(pollWatch);} } catch(_){} try { mdPane.querySelectorAll('.admin-score-ctrls').forEach(n=>n.remove()); } catch(_){} } };
   }
   window.MatchLiveScore = { setup };
 })();
