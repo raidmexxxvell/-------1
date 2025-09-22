@@ -130,7 +130,7 @@
   svg.setAttribute('width','140'); svg.setAttribute('height','80'); svg.setAttribute('viewBox','0 0 140 80');
   // Переворачиваем вертикально, чтобы дуга была сверху
   svg.style.transform = 'scaleY(-1)';
-  const centerX=70, centerY=75, radius=58; // центр опущен ниже, чтобы текст попал в центр дуги
+  const centerX=70, centerY=40, radius=38; // центр дуги намного выше, радиус меньше для компактности
     // Фон-трек
     const track = document.createElementNS('http://www.w3.org/2000/svg','path');
     track.setAttribute('d', describeArc(centerX, centerY, radius, 180, 0));

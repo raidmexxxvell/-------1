@@ -5090,8 +5090,9 @@ def api_team_overview():
                             if agg:
                                 cards['yellow'] = int(agg[0] or 0)
                                 cards['red'] = int(agg[1] or 0)
-                        except Exception:
-                            pass
+                                app.logger.info(f"Team {name_final} (id={team_id}): cards from team_stats_{team_id}: yellow={cards['yellow']}, red={cards['red']}")
+                        except Exception as e:
+                            app.logger.info(f"Team {name_final} (id={team_id}): team_stats table error: {e}")
                         # 2) Если нули — посчитаем по событиям
                         if cards['yellow'] == 0 and cards['red'] == 0:
                             try:
@@ -5103,8 +5104,10 @@ def api_team_overview():
                                 for et, cnt in cr:
                                     if str(et) == 'yellow_card': cards['yellow'] = int(cnt or 0)
                                     if str(et) == 'red_card': cards['red'] = int(cnt or 0)
-                            except Exception:
-                                pass
+                                if cards['yellow'] > 0 or cards['red'] > 0:
+                                    app.logger.info(f"Team {name_final} (id={team_id}): cards from match_events: yellow={cards['yellow']}, red={cards['red']}")
+                            except Exception as e:
+                                app.logger.info(f"Team {name_final} (id={team_id}): match_events error: {e}")
                         # 3) Если всё ещё нули — fallback на агрегат TeamPlayerStats по имени
                         if cards['yellow'] == 0 and cards['red'] == 0 and 'TeamPlayerStats' in globals():
                             try:
@@ -5116,15 +5119,22 @@ def api_team_overview():
                                         ysum = int(ys[0] or 0); rsum = int(ys[1] or 0)
                                         if ysum or rsum:
                                             cards['yellow'] = ysum; cards['red'] = rsum
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+                                            app.logger.info(f"Team {name_final} (id={team_id}): cards from TeamPlayerStats: yellow={cards['yellow']}, red={cards['red']}")
+                            except Exception as e:
+                                app.logger.info(f"Team {name_final} (id={team_id}): TeamPlayerStats error: {e}")
+                    else:
+                        app.logger.info(f"Team {name_final}: no team_id found, cards will be 0")
+                except Exception as e:
+                    app.logger.error(f"Team {name_final}: cards calculation error: {e}")
                 tournaments = len(tournaments_set) if tournaments_set else 0
-                # Если по БД нет ни одного сыгранного матча — используем snapshot fallback, чтобы не показывать нули
+                # Если по БД нет ни одного сыгранного матча — используем snapshot fallback, но СОХРАНЯЕМ карточки из БД
                 if matches == 0:
                     try:
-                        return _team_overview_from_results_snapshot(db, name_final)
+                        fallback_data = _team_overview_from_results_snapshot(db, name_final)
+                        # Перезаписываем карточки из нашего расчёта, если они есть
+                        if cards['yellow'] > 0 or cards['red'] > 0:
+                            fallback_data['cards'] = cards
+                        return fallback_data
                     except Exception:
                         pass
                 return {
