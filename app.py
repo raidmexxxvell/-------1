@@ -9740,6 +9740,13 @@ def api_betting_tours():
                             payload = snap['payload']
                             tours = payload.get('tours') or []
                             now_local = datetime.now()
+                            # Новое: жёстко ограничиваем окно дат ближайшими 6 днями даже для снапшота
+                            try:
+                                today = now_local.date()
+                                horizon = today + timedelta(days=6)
+                            except Exception:
+                                today = now_local.date()
+                                horizon = today + timedelta(days=6)
 
                             def _parse_match_dt(m):
                                 dt = None
@@ -9822,7 +9829,7 @@ def api_betting_tours():
                                         pass
                                 m['lock'] = bool(lock)
 
-                            # Пройдём по турам и матчам: фильтрация начавшихся и обновление odds/lock
+                            # Пройдём по турам и матчам: фильтрация по горизонту, начавшихся и обновление odds/lock
                             for t in tours:
                                 filtered = []
                                 for m in (t.get('matches') or []):
@@ -9830,6 +9837,19 @@ def api_betting_tours():
                                         dt = _parse_match_dt(m)
                                         home = (m.get('home') or '').strip()
                                         away = (m.get('away') or '').strip()
+
+                                        # Ограничение окном ближайших 6 дней
+                                        try:
+                                            d_only = None
+                                            if dt is not None:
+                                                d_only = dt.date()
+                                            else:
+                                                rawd = (m.get('date') or m.get('datetime') or '')[:10]
+                                                d_only = datetime.fromisoformat(rawd).date() if rawd else None
+                                        except Exception:
+                                            d_only = None
+                                        if d_only is None or d_only < today or d_only > horizon:
+                                            continue
                                         
                                         # НОВАЯ ПРОВЕРКА: Исключаем завершенные матчи полностью
                                         is_finished = False

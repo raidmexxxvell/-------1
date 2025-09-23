@@ -109,22 +109,30 @@
         }
     });
     
-    // Показываем кнопку "Назад" когда входим в фуллскрин
+    // Показываем/скрываем кнопку "Назад" только по событиям, без периодического опроса
+    let __backWarned = false;
     function updateBackButton() {
-        const streamPane = document.getElementById('md-pane-stream');
-        if (streamPane && streamPane.classList.contains('fs-mode')) {
-            if (tg.BackButton && tg.BackButton.show) {
-                tg.BackButton.show();
+        try {
+            const streamPane = document.getElementById('md-pane-stream');
+            const need = !!(streamPane && streamPane.classList.contains('fs-mode'));
+            const hasAPI = !!(tg.BackButton && (tg.BackButton.show || tg.BackButton.hide));
+            if (!hasAPI) {
+                if (!__backWarned) {
+                    __backWarned = true;
+                    try { console.warn('[Telegram.WebApp] BackButton is not supported in this version'); } catch(_) {}
+                }
+                return;
             }
-        } else {
-            if (tg.BackButton && tg.BackButton.hide) {
-                tg.BackButton.hide();
-            }
-        }
+            if (need && tg.BackButton.show) { tg.BackButton.show(); }
+            if (!need && tg.BackButton.hide) { tg.BackButton.hide(); }
+        } catch(_) {}
     }
-    
-    // Периодически проверяем состояние фуллскрина
-    setInterval(updateBackButton, 500);
+    // Первичная установка
+    updateBackButton();
+    // Реагируем на изменения DOM (fs-mode)
+    document.addEventListener('transitionend', updateBackButton, true);
+    document.addEventListener('animationend', updateBackButton, true);
+    document.addEventListener('fullscreenchange', updateBackButton, true);
     
     
 })();

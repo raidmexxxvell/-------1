@@ -773,14 +773,8 @@
       observer.observe(item, { attributes: true, attributeFilter: ['class'] });
     });
 
-    // Периодическое обновление коэффициентов (каждые 30 сек) если вкладка активна
-    setInterval(() => {
-      const predTab = document.querySelector('.nav-item[data-tab="predictions"]');
-      const isPredActive = predTab && predTab.classList.contains('active');
-      if (isPredActive && wrap && !wrap.hidden) {
-        loadTours();
-      }
-    }, 30000);
+    // Убрали периодический 30-секундный рефреш: обновления приходят через WebSocket
+    // а при его недоступности — через fallback-пуллинг в loadTours (fetchWithETag).
 
     // --- НОВЫЙ КОД: Обработчик обновлений коэффициентов от WebSocket ---
     document.addEventListener('bettingOddsUpdate', (e) => {
