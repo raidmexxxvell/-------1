@@ -773,6 +773,54 @@ declare global {
     }
   }
 
+  // --- Глобальный наблюдатель за счетом ---
+  // На случай, если какой-то legacy-код меняет счет в обход всех override'ов
+  function installScoreObserver() {
+    try {
+      const scoreEl = document.getElementById('md-score');
+      if (!scoreEl) {
+        // Попробовать найти позже, если элемент еще не создан
+        setTimeout(installScoreObserver, 500);
+        return;
+      }
+
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'childList' || mutation.type === 'characterData') {
+            const target = mutation.target as HTMLElement;
+            const newText = (target.textContent || '').trim();
+            
+            if (newText === '— : —' || newText === '- : -') {
+              console.log('[ScoreObserver] Placeholder detected! Restoring score.');
+              
+              // Получаем последний известный счёт из кэша панели
+              const mdPane = detailsPane();
+              const lastScore = (mdPane as any)?.__lastScore as { home: number; away: number } | undefined;
+
+              if (lastScore && typeof lastScore.home === 'number') {
+                target.textContent = `${lastScore.home} : ${lastScore.away}`;
+                console.log(`[ScoreObserver] Score restored to ${lastScore.home} : ${lastScore.away}`);
+              } else {
+                console.warn('[ScoreObserver] No score in cache to restore from.');
+              }
+            }
+          }
+        });
+      });
+
+      observer.observe(scoreEl, {
+        childList: true,
+        subtree: true,
+        characterData: true
+      });
+
+      console.log('[Bridge] Global score observer installed.');
+    } catch (e) {
+      console.error('[Bridge] Failed to install score observer:', e);
+    }
+  }
+
+
   // Периодически пытаемся установить override, пока legacy модуль не прогружен
   try { 
     let tries=0; 
@@ -783,6 +831,10 @@ declare global {
       if((window.MatchStats?.__storeDriven && window.MatchRostersEvents?.__storeDriven) || tries>40) 
         clearInterval(timer); 
     }, 250); 
+    
+    // Устанавливаем наблюдатель за счетом один раз при загрузке
+    installScoreObserver();
+
   } catch(_){ }
 
   // --- Events / rosters bridge ---
