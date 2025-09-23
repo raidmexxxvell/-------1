@@ -9519,8 +9519,9 @@ def api_vote_match():
                     match_id_str = f"{home}_{away}_{date_key or ''}"
                     # Локальная доставка через WS (если доступно)
                     if ws_manager:
-                        ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=500)
-                        ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=500)
+                        # Без задержки, чтобы кэфы обновлялись сразу после голоса
+                        ws_manager.emit_to_topic_batched(f"match_odds_{match_id_str}", 'data_patch', payload, delay_ms=0)
+                        ws_manager.emit_to_topic_batched('predictions_page', 'data_patch', payload, delay_ms=0)
                     # Меж-инстансовая доставка через Redis topic канал (best-effort)
                     if inv:
                         try:
@@ -9530,7 +9531,20 @@ def api_vote_match():
                             pass
                 except Exception as _e:
                     app.logger.error(f"vote ws error: {_e}")
-                return jsonify({'status': 'ok'})
+                # Отдаём клиенту сразу актуальные кэфы, чтобы он не ждал WS
+                try:
+                    resp_payload = {
+                        'status': 'ok',
+                        'home': home,
+                        'away': away,
+                        'date': (date_key or ''),
+                        'odds_version': odds_fields.get('odds_version'),
+                        'odds': (odds_fields.get('odds') or {}),
+                        'markets': (odds_fields.get('markets') or {})
+                    }
+                except Exception:
+                    resp_payload = {'status': 'ok'}
+                return jsonify(resp_payload)
             except IntegrityError:
                 db.rollback()
                 # Дубликат по уникальному индексу — считаем, что уже голосовал

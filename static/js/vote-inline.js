@@ -99,10 +99,20 @@
           fd.append('date', dkey); fd.append('choice', code);
           const r = await fetch('/api/vote/match', { method:'POST', body: fd });
           if (!r.ok) { throw 0; }
+          let payload = null;
+          try { payload = await r.json(); } catch(_) { payload = null; }
           btns.querySelectorAll('button').forEach(x=>x.disabled=true);
           confirm.textContent='Ваш голос учтён'; btns.style.display='none';
           // Небольшая задержка, чтобы БД точно отдала обновлённые агрегаты
-          setTimeout(()=>{ VoteAgg?.fetchAgg(home, away, date || datetime).then(applyAgg); }, 800);
+          setTimeout(()=>{ VoteAgg?.fetchAgg(home, away, date || datetime).then(applyAgg); }, 400);
+          // МГНОВЕННОЕ обновление коэффициентов на карточке, если сервер уже отдал новые odds/markets
+          try {
+            if (payload && (payload.odds || payload.markets)) {
+              const matchId = `${home}_${away}_${dkey}`;
+              const oddsEvent = new CustomEvent('bettingOddsUpdate', { detail: { homeTeam: home, awayTeam: away, date: dkey, odds_version: payload.odds_version, odds: payload.odds||{}, markets: payload.markets||{} } });
+              document.dispatchEvent(oddsEvent);
+            }
+          } catch(_) {}
           try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
         } catch(_) {}
       }, { once:true });
