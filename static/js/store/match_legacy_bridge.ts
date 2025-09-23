@@ -581,9 +581,11 @@ declare global {
       
       renderFunc(match, detailsObj, mdPane, els);
       
-      // РЕШЕНИЕ 1: Immediate restoration после каждого рендера
+      // РЕШЕНИЕ 1: Immediate restoration после каждого рендера - УСИЛЕННАЯ ВЕРСИЯ
       setTimeout(() => {
         try {
+          console.log('[Bridge] Immediate restoration triggered with score:', score);
+          
           // Восстанавливаем счёт если он стал placeholder - более агрессивный поиск
           let scoreEl = document.getElementById('md-score');
           if (!scoreEl) {
@@ -593,16 +595,36 @@ declare global {
           if (!scoreEl) {
             scoreEl = document.querySelector('#ufo-match-details [class*="score"]') as HTMLElement;
           }
+          if (!scoreEl) {
+            // Универсальный поиск по всем возможным местам
+            const allPossible = document.querySelectorAll('[id*="score"], .score, .match-score, [class*="score"]');
+            for (let i = 0; i < allPossible.length; i++) {
+              const el = allPossible[i];
+              if (el.textContent?.includes(':')) {
+                scoreEl = el as HTMLElement;
+                break;
+              }
+            }
+          }
+          
+          console.log('[Bridge] Score element found:', !!scoreEl, 'text:', scoreEl?.textContent);
           
           if (scoreEl && score && typeof score.home === 'number' && typeof score.away === 'number') {
             const currentText = scoreEl.textContent?.trim() || '';
             const isPlaceholder = currentText === '— : —' || currentText === '- : -' || currentText === '';
             const desiredText = `${score.home} : ${score.away}`;
             
-            if (isPlaceholder || currentText !== desiredText) {
+            console.log('[Bridge] Score check:', { currentText, isPlaceholder, desiredText });
+            
+            // ПРИНУДИТЕЛЬНО обновляем в любом случае, если текст не совпадает
+            if (currentText !== desiredText) {
               scoreEl.textContent = desiredText;
-              console.log('[Bridge] Score restored:', currentText, '→', desiredText);
+              console.log('[Bridge] Score FORCEFULLY restored:', currentText, '→', desiredText);
+            } else {
+              console.log('[Bridge] Score already correct:', currentText);
             }
+          } else {
+            console.warn('[Bridge] Cannot restore score:', { scoreEl: !!scoreEl, score, scoreType: typeof score });
           }
           
           // НОВОЕ: Принудительно обновляем события в UI, если они не отобразились
