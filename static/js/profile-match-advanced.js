@@ -29,8 +29,30 @@
   try {
     const cur = (score && typeof score.textContent==='string') ? score.textContent.trim() : '';
     const hasDigits = /\d+\s*:\s*\d+/.test(cur);
-    if (!hasDigits) { score.textContent = '— : —'; }
-  } catch(_) { score.textContent='— : —'; }
+    if (!hasDigits) {
+      // Не перетираем известный счёт плейсхолдером. Пытаемся восстановить из известных источников,
+      // иначе оставляем как есть (мерцания не будет, LiveScore/WS позже проставят верный счёт).
+      let eff = null;
+      try {
+        const st = window.MatchLiveScore && window.MatchLiveScore.state;
+        if (st && st.currentScore && typeof st.currentScore.home === 'number' && typeof st.currentScore.away === 'number') {
+          eff = `${st.currentScore.home} : ${st.currentScore.away}`;
+        }
+      } catch(_) {}
+      if (!eff) {
+        try {
+          const keyCache = (window.MatchUtils? window.MatchUtils.matchKey(match): null) || window.__CURRENT_MATCH_KEY__;
+          const st2 = window.MatchState && window.MatchState.get ? window.MatchState.get(keyCache) : null;
+          if (st2 && st2.score) { eff = st2.score; }
+        } catch(_) {}
+      }
+      if (eff) {
+        score.textContent = eff;
+      } else {
+        // ничего не делаем — избегаем принудительной установки плейсхолдера
+      }
+    }
+  } catch(_) { /* избегаем принудительного плейсхолдера чтобы не вызывать мерцание */ }
     try { if (match.date || match.time){ const d=match.date? new Date(match.date):null; const ds=d?d.toLocaleDateString():''; dt.textContent = `${ds}${match.time? ' '+match.time:''}`; } else {dt.textContent='';} } catch(_) { dt.textContent = match.time||''; }
     const subtabs = mdPane.querySelector('.modal-subtabs');
     // PR-2a: topic-based автоподписка на детали матча (если включено)

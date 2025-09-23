@@ -33,9 +33,9 @@
         if (st && st.score) {
           score.textContent = st.score;
         } else {
-          score.textContent='— : —';
+          // не ставим плейсхолдер — дождемся LiveScore/WS или логики ниже
         }
-      } catch(_) { score.textContent='— : —'; }
+      } catch(_) { /* избегаем принудительного плейсхолдера */ }
     }
     try { if (dt){ if (match.date||match.time){ const d=match.date? new Date(match.date): null; const ds = d? d.toLocaleDateString():''; dt.textContent = `${ds}${match.time? ' '+match.time:''}`;} else {dt.textContent='';} }} catch(_) {}
     const subtabs = mdPane.querySelector('.modal-subtabs');
@@ -82,8 +82,8 @@
             if(!alreadyBadge){
               const live=document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); dt.appendChild(live);
             }
-            // Если в кэше нет счета и на экране placeholders — покажем временный 0:0 только один раз
-            if(/^[—-]/.test(score.textContent.trim())) {score.textContent='0 : 0';}
+            // Если в кэше нет счета и на экране нет цифр — покажем временный 0:0 только один раз
+            if(!/\d+\s*:\s*\d+/.test((score.textContent||'').trim())) {score.textContent='0 : 0';}
             fetchScore();
             // Поллинг включаем только если нет активного WS топика
             if (!isWsActive()) {
