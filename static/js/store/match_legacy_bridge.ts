@@ -584,11 +584,25 @@ declare global {
       // РЕШЕНИЕ 1: Immediate restoration после каждого рендера
       setTimeout(() => {
         try {
-          // Восстанавливаем счёт если он стал placeholder
-          const scoreEl = document.getElementById('md-score');
-          if (scoreEl && score && (scoreEl.textContent?.trim() === '— : —' || scoreEl.textContent?.trim() === '- : -')) {
-            scoreEl.textContent = `${score.home} : ${score.away}`;
-            console.log('[Bridge] Score restored from placeholder:', `${score.home} : ${score.away}`);
+          // Восстанавливаем счёт если он стал placeholder - более агрессивный поиск
+          let scoreEl = document.getElementById('md-score');
+          if (!scoreEl) {
+            // Fallback поиск по тексту или селекторам
+            scoreEl = document.querySelector('.score-display') as HTMLElement;
+          }
+          if (!scoreEl) {
+            scoreEl = document.querySelector('#ufo-match-details [class*="score"]') as HTMLElement;
+          }
+          
+          if (scoreEl && score && typeof score.home === 'number' && typeof score.away === 'number') {
+            const currentText = scoreEl.textContent?.trim() || '';
+            const isPlaceholder = currentText === '— : —' || currentText === '- : -' || currentText === '';
+            const desiredText = `${score.home} : ${score.away}`;
+            
+            if (isPlaceholder || currentText !== desiredText) {
+              scoreEl.textContent = desiredText;
+              console.log('[Bridge] Score restored:', currentText, '→', desiredText);
+            }
           }
           
           // НОВОЕ: Принудительно обновляем события в UI, если они не отобразились
@@ -806,8 +820,8 @@ declare global {
           
           // Найдём базовые элементы
           const els = {
-            homePane: document.getElementById('roster-home') || mdPane.querySelector('.home-roster') as HTMLElement | null,
-            awayPane: document.getElementById('roster-away') || mdPane.querySelector('.away-roster') as HTMLElement | null,
+            homePane: document.querySelector('.roster-table')?.closest('div') || document.querySelector('#ufo-match-details .home-roster') as HTMLElement | null,
+            awayPane: document.querySelectorAll('.roster-table')[1]?.closest('div') || document.querySelector('#ufo-match-details .away-roster') as HTMLElement | null,
           };
           
           if (!els.homePane || !els.awayPane) {
