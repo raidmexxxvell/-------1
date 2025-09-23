@@ -294,6 +294,16 @@
             const center = document.createElement('div'); center.className = 'match-center';
             const home = mkTeam(m.home); const score = document.createElement('div'); score.className='score'; score.textContent = 'VS'; const away = mkTeam(m.away);
             center.append(home, score, away); card.appendChild(center);
+
+            // --- НОВОЕ: Встраиваем голосование под логотипами ---
+            try {
+              if (window.VoteInline && typeof window.VoteInline.create === 'function') {
+                const gv = window.getTeamColor || (window.TeamUtils && window.TeamUtils.getTeamColor);
+                const voteWidget = window.VoteInline.create({ home: m.home, away: m.away, date: (m.date || m.datetime || '').slice(0,10), getTeamColor: gv });
+                if (voteWidget) { card.appendChild(voteWidget); }
+              }
+            } catch(_) {}
+
             const line = document.createElement('div'); line.className = 'betting-line';
             const opts = mkOptions(t.tour, m, !!m.lock);
             line.appendChild(opts);

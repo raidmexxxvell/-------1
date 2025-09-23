@@ -6122,26 +6122,114 @@ def start_background_sync():
 
 # ---------------------- Builders for betting tours and leaderboards ----------------------
 def _build_betting_tours_payload():
-    # Build nearest tour with odds, markets, and locks for each match.
-    # Также открываем следующий тур заранее, если до его первого матча осталось <= 2 дней.
-    # Источник матчей — snapshot 'schedule' (или пусто)
-    # Загружаем текущее расписание из snapshot 'schedule'
-    all_tours = []
-    if SessionLocal is not None:
-        try:
-            dbs = get_db()
-            try:
-                snap = _snapshot_get(dbs, Snapshot, 'schedule', app.logger)
-                payload = snap and snap.get('payload')
-                all_tours = (payload and payload.get('tours')) or []
-            finally:
-                dbs.close()
-        except Exception:
-            all_tours = []
+    # Build tours snapshot for betting UI из БД матчей за ближайшие 6 дней.
+    # Показываем ВСЕ матчи этого окна, сгруппированные по номерам туров и отсортированные по времени.
+    # Если БД недоступна, делаем мягкий фоллбэк на snapshot 'schedule'.
 
     # Ограничиваем окно ближайшими 6 днями (включая сегодня)
     today = datetime.now().date()
     horizon = today + timedelta(days=6)
+
+    all_tours: list[dict] = []
+    used_db = False
+    if SessionLocal is not None:
+        # Прямо читаем таблицу matches: берём scheduled/live в окне дат
+        try:
+            from sqlalchemy.orm import aliased
+            from database.database_models import Match, Team
+            dbs = get_db()
+            try:
+                Home = aliased(Team)
+                Away = aliased(Team)
+                # Окно дат: с начала сегодняшнего дня по конец горизонта
+                start_dt = datetime(today.year, today.month, today.day, 0, 0, 0)
+                end_dt = datetime(horizon.year, horizon.month, horizon.day, 23, 59, 59)
+                rows = (
+                    dbs.query(
+                        Match.id,
+                        Match.tour,
+                        Match.match_date,
+                        Match.status,
+                        Home.name.label('home_name'),
+                        Away.name.label('away_name')
+                    )
+                    .join(Home, Match.home_team_id == Home.id)
+                    .join(Away, Match.away_team_id == Away.id)
+                    .filter(Match.match_date >= start_dt, Match.match_date <= end_dt)
+                    .filter(Match.status.in_(['scheduled', 'live']))
+                    .order_by(Match.tour.asc(), Match.match_date.asc())
+                    .all()
+                )
+                # Группируем по туру
+                groups: dict[int|None, list[dict]] = {}
+                for r in rows:
+                    try:
+                        dt_local = r.match_date
+                        # Нормализуем поля даты
+                        d_iso = (dt_local.date().isoformat() if dt_local else '')
+                        t_iso = (dt_local.strftime('%H:%M') if dt_local else '')
+                        match_dict = {
+                            'home': r.home_name or '',
+                            'away': r.away_name or '',
+                            'date': d_iso,
+                            'time': t_iso,
+                            'datetime': (dt_local.isoformat() if dt_local else None),
+                            'status': (r.status or 'scheduled')
+                        }
+                        key = r.tour
+                        groups.setdefault(key, []).append(match_dict)
+                    except Exception:
+                        continue
+                # Формируем список туров
+                for tour_key, matches in groups.items():
+                    # Старт тура = мин. время матча
+                    try:
+                        start_at = None
+                        try:
+                            start_at = min(
+                                [datetime.fromisoformat(m['datetime']) for m in matches if m.get('datetime')]
+                            ).isoformat()
+                        except Exception:
+                            start_at = None
+                        all_tours.append({
+                            'tour': tour_key,
+                            'title': (f"Тур {tour_key}" if tour_key is not None else 'Матчи'),
+                            'start_at': start_at,
+                            'matches': matches
+                        })
+                    except Exception:
+                        pass
+                # Сортировка: по номеру тура (если есть), затем по start_at
+                def _sort_key(t: dict):
+                    try:
+                        tour_val = (t.get('tour') if t.get('tour') is not None else 10**9)
+                        sa = t.get('start_at') or '2100-01-01T00:00:00'
+                        return (int(tour_val), sa)
+                    except Exception:
+                        return (10**9, '2100-01-01T00:00:00')
+                all_tours.sort(key=_sort_key)
+                used_db = True
+            finally:
+                try:
+                    dbs.close()
+                except Exception:
+                    pass
+        except Exception:
+            used_db = False
+
+    if not used_db:
+        # Фоллбэк: загрузим текущее расписание из snapshot 'schedule', как раньше
+        try:
+            dbs = get_db() if SessionLocal is not None else None
+            try:
+                snap = _snapshot_get(dbs, Snapshot, 'schedule', app.logger) if dbs else None
+                payload = snap and snap.get('payload')
+                all_tours = (payload and payload.get('tours')) or []
+            finally:
+                if dbs:
+                    dbs.close()
+        except Exception:
+            all_tours = []
 
     def _parse_date_only(m):
         # Возвращает дату матча (date part) или None
@@ -6167,39 +6255,16 @@ def _build_betting_tours_payload():
                 return True
         return False
 
+    # Фильтруем только туры, в которых есть матчи в горизонте, и сортируем по дате начала тура и номеру тура
     tours = [t for t in all_tours if is_relevant(t)]
     def sort_key(t):
         try:
-            return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
+            start_at = t.get('start_at') or '2100-01-01T00:00:00'
+            tour_val = (t.get('tour') if t.get('tour') is not None else 10**9)
+            return (datetime.fromisoformat(start_at), int(tour_val))
         except Exception:
             return (datetime(2100,1,1), t.get('tour') or 10**9)
     tours.sort(key=sort_key)
-    # Выбираем ближайший тур (первый по сортировке)
-    primary = tours[:1]
-    extra = []
-    now_local = datetime.now()
-    if len(tours) >= 2 and primary:
-        # Правило: показываем следующий тур, когда ВСЕ матчи текущего уже стартовали (dt <= now)
-        def _all_matches_started(tour_obj):
-            for m in (tour_obj.get('matches') or []):
-                try:
-                    if m.get('datetime'):
-                        dt = datetime.fromisoformat(m['datetime'])
-                        if dt > now_local:
-                            return False
-                    elif m.get('date'):
-                        d = datetime.fromisoformat(m['date']).date()
-                        # днём матча считаем, что старт возможен в любой момент дня — считаем_started если дата < сегодня
-                        if d > now_local.date():
-                            return False
-                    else:
-                        return False  # неизвестное время — считаем не стартовал
-                except Exception:
-                    return False
-            return True if (tour_obj.get('matches') or []) else False
-        if _all_matches_started(primary[0]):
-            extra = tours[1:2]
-    tours = primary + extra
 
     # Временная опора
     now_utc = datetime.now(timezone.utc)
