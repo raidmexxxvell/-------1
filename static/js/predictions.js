@@ -274,7 +274,11 @@
             const matchDate = (m.date || m.datetime || '').slice(0, 10);
             const matchId = `${m.home}_${m.away}_${matchDate}`;
             card.dataset.matchId = matchId;
-            try { enqueueTopic(`match_odds_${matchId}`); } catch(_) {}
+            try {
+              const scheme = (window.__WS_TOPIC_SCHEME__ === 'with_date') ? 'with_date' : 'no_date';
+              const topic = scheme === 'with_date' ? `match_odds_${matchId}` : `match_odds_${m.home}_${m.away}`;
+              enqueueTopic(topic);
+            } catch(_) {}
             // --- КОНЕЦ НОВОГО КОДА ---
 
             try { card.dataset.home = m.home || ''; card.dataset.away = m.away || ''; } catch(_) {}

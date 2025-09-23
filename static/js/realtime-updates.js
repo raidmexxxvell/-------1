@@ -506,10 +506,15 @@ class RealtimeUpdater {
                     if (incomingV < cur) { return; }
                     if (incomingV > cur) { this._setOddsVersion(home, away, incomingV); }
                 }
-                // Пробрасываем событие вниз по UI
-                // Чтобы не конфликтовали ключи 'home' (команда) и 'home' (кэф), помещаем кэфы в под-объект odds,
-                // а названия команд передаём как homeTeam/awayTeam.
-                const payload = { homeTeam: home, awayTeam: away, date, odds_version: incomingV, odds: { ...(fields || {}) } };
+                // Пробрасываем событие вниз по UI. Поле fields может содержать odds и/или markets.
+                const onlyOdds = {}; let markets = undefined;
+                try {
+                    Object.keys(fields||{}).forEach(k => {
+                        if (k === 'markets') { markets = fields.markets; }
+                        else if (k !== 'odds_version') { onlyOdds[k] = fields[k]; }
+                    });
+                } catch(_) {}
+                const payload = { homeTeam: home, awayTeam: away, date, odds_version: incomingV, odds: onlyOdds, markets };
                 this.refreshBettingOdds(payload);
                 __wsEmit('ws:odds', payload);
                 return;

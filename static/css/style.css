@@ -1458,18 +1458,18 @@ body.theme-blb .share-btn {
 @media (max-width:480px){ .news-title { font-size:15px !important; } }
 
 .bet-btn.updated {
-  animation: flash-green 0.5s ease-out;
+    animation: odds-flash 0.6s ease-out;
 }
 
-@keyframes flash-green {
-  0% {
-    background-color: #28a745;
-    color: white;
-    transform: scale(1.05);
-  }
-  100% {
-    background-color: ''; /* Возвращается к исходному состоянию */
-    color: '';
-    transform: scale(1);
-  }
+@keyframes odds-flash {
+    0% { box-shadow: 0 0 0 rgba(40,167,69,0); transform: translateZ(0) scale(1.0); }
+    20% { box-shadow: 0 0 10px rgba(40,167,69,0.7); transform: translateZ(0) scale(1.03); }
+    100% { box-shadow: 0 0 0 rgba(40,167,69,0); transform: translateZ(0) scale(1.0); }
+}
+
+/* Мягкая подсветка обновления счёта */
+.score-updated { animation: score-flash 1.2s ease-out; }
+@keyframes score-flash {
+    0% { color: #ffd166; }
+    100% { color: inherit; }
 }

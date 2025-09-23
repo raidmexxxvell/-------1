@@ -274,8 +274,8 @@
         m: (t?.matches||[]).map(m=>mkKeySafe(m))
       })));
       if (pane.dataset && pane.dataset.hasContent === '1' && pane.dataset.sig === sig) {
-        // Данные не изменились — лишь убедимся, что голосование пропатчено и выходим
-        try { ensureBettingToursFresh().then(() => { try { patchScheduleVotes(pane); } catch(_){} }); } catch(_) {}
+        // Данные не изменились — ранний прогрев туров без патчинга голосований
+        try { ensureBettingToursFresh().catch(()=>{}); } catch(_) {}
         return;
       }
       if (pane.dataset) {pane.dataset.sig = sig;}
@@ -371,18 +371,7 @@
         }
       } catch(_) {}
 
-      // Голосование (П1/X/П2) — показываем только если матч входит в ставочные туры
-      try {
-        const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
-        const tourMatches = new Set();
-        try { const tours=toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(matchKey(x)))); } catch(_) {}
-        if (tourMatches.has(matchKey(m))) {
-          try {
-            const voteEl = window.VoteInline?.create?.({ home: m.home, away: m.away, date: m.date || m.datetime, getTeamColor });
-            if (voteEl) {card.appendChild(voteEl);}
-          } catch(_) {}
-        }
-      } catch(_) {}
+      // Голосование удалено из расписания — доступно только во вкладке «Прогнозы»
 
       // Кнопка «Детали» и админ-«⭐ На главную» из прежней логики
       const footer = document.createElement('div'); footer.className='match-footer';
@@ -497,12 +486,8 @@
     }
     pane.dataset.hasContent = '1';
 
-    // --- NEW: после начального рендера пытаемся догрузить туры для ставок (если ещё нет / устарели) и внедрить голосование ---
-    try {
-      ensureBettingToursFresh().then(() => {
-        try { patchScheduleVotes(pane); } catch(_) {}
-      });
-    } catch(_) {}
+    // --- NEW: ранний прогрев туров ставок (без внедрения голосований в расписание) ---
+    try { ensureBettingToursFresh().catch(()=>{}); } catch(_) {}
 
     // --- LIVE badges periodic rescan (UI only) ---
     try {
@@ -783,59 +768,10 @@
     } catch(_) {}
     return s;
   }
-  function patchScheduleVotes(pane){
-    if (!pane) {return;}
-    const cache = readToursCache();
-    if (!cache) {return;}
-    const tourMatches = computeTourMatchSet(cache);
-    // Не выходим при пустом set — дадим шанс фолбэку на ближайшие матчи
-    const isUpcomingWithinDays = (obj, days=6) => {
-      try {
-        const now = new Date();
-        const d = normalizeDateStr(obj?.date || obj?.datetime || '');
-        if (!d) {return false;}
-        const dt = new Date(d);
-        if (isNaN(dt.getTime())) {return false;}
-        const diff = dt.getTime() - now.getTime();
-        return diff >= 0 && diff <= days*24*60*60*1000;
-      } catch(_) { return false; }
-    };
-    // Пройдём по матч-картам без уже вставленного голосования
-    pane.querySelectorAll('.match-card').forEach(card => {
-      try {
-        // Если уже патчили или уже есть vote-inline — пропускаем (исключает мигалки)
-        if (card.__votePatched === true || card.querySelector('.vote-inline')) {return;}
-        const nameHomeEl = card.querySelector('.team.home .team-name');
-        const nameAwayEl = card.querySelector('.team.away .team-name');
-        const home = (nameHomeEl?.getAttribute('data-team-name') || nameHomeEl?.textContent || '').trim();
-        const away = (nameAwayEl?.getAttribute('data-team-name') || nameAwayEl?.textContent || '').trim();
-        // Сначала пробуем data-атрибуты, затем парсим заголовок
-        let dateKey = card.getAttribute('data-date') || '';
-        if (!dateKey) {
-          const headerSpan = card.querySelector('.match-header span') || card.querySelector('.match-header');
-          try {
-            const txt = (headerSpan?.textContent||'').trim();
-            const m = txt.match(/(\d{2}\.\d{2}\.\d{4})/);
-            if (m) { const parts = m[1].split('.'); dateKey = `${parts[2]}-${parts[1]}-${parts[0]}`; }
-          } catch(_) {}
-        }
-        if (!dateKey) {return;}
-        const key = matchKey({ home, away, date: dateKey });
-        if (!tourMatches.has(key)) {
-          // Фолбэк: если матч ближайшие 6 дней — всё равно показываем голосование
-          if (!isUpcomingWithinDays({ home, away, date: dateKey }, 6)) {return;}
-        }
-        // Создаём голосование
-        if (window.VoteInline && typeof window.VoteInline.create === 'function') {
-          const voteEl = window.VoteInline.create({ home, away, date: dateKey, getTeamColor });
-          if (voteEl) { card.appendChild(voteEl); card.__votePatched = true; }
-        }
-      } catch(_) {}
-    });
-  }
+  function patchScheduleVotes(pane){ /* no-op: голосование показываем только во вкладке «Прогнозы» */ }
 
   // Ранняя фоноваая инициализация при загрузке (не блокирует основной рендер)
-  try { ensureBettingToursFresh().then(()=>{ const pane=document.getElementById('league-pane-schedule'); if(pane && pane.dataset.hasContent==='1') { try { patchScheduleVotes(pane); } catch(_){} } }); } catch(_) {}
+  try { ensureBettingToursFresh().catch(()=>{}); } catch(_) {}
 
   // Фоновый опрос агрегатов голосования для непроголосовавших пользователей (каждые ~4s)
   function startVotePolling(){

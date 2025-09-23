@@ -9,6 +9,19 @@
     
     // Настраиваем Telegram WebApp для лучшей работы с видео
     const tg = window.Telegram.WebApp;
+    // Вспомогательная функция сравнения версий '6.0' < '6.1'
+    function parseVer(v){
+        try { return String(v||'').split('.').map(n=>parseInt(n,10)||0); } catch(_) { return [0,0,0]; }
+    }
+    function gteVer(v, min){
+        const a=parseVer(v), b=parseVer(min);
+        for(let i=0;i<Math.max(a.length,b.length);i++){
+            const ai=a[i]||0, bi=b[i]||0; if(ai>bi) return true; if(ai<bi) return false;
+        }
+        return true;
+    }
+    const BACK_API_MIN_VERSION = '6.1';
+    const backApiSupported = !!(tg && tg.BackButton) && gteVer(tg.version, BACK_API_MIN_VERSION);
     
     // Расширяем область просмотра
     if (tg.expand) {
@@ -111,20 +124,27 @@
     
     // Показываем/скрываем кнопку "Назад" только по событиям, без периодического опроса
     let __backWarned = false;
+    let __backVisible = null; // tri-state: null (unknown), true (shown), false (hidden)
     function updateBackButton() {
         try {
-            const streamPane = document.getElementById('md-pane-stream');
-            const need = !!(streamPane && streamPane.classList.contains('fs-mode'));
-            const hasAPI = !!(tg.BackButton && (tg.BackButton.show || tg.BackButton.hide));
-            if (!hasAPI) {
+            // Если API официально не поддержан текущей версией — не дергаем SDK вовсе
+            if (!backApiSupported) {
                 if (!__backWarned) {
                     __backWarned = true;
                     try { console.warn('[Telegram.WebApp] BackButton is not supported in this version'); } catch(_) {}
                 }
                 return;
             }
-            if (need && tg.BackButton.show) { tg.BackButton.show(); }
-            if (!need && tg.BackButton.hide) { tg.BackButton.hide(); }
+            const streamPane = document.getElementById('md-pane-stream');
+            const need = !!(streamPane && streamPane.classList.contains('fs-mode'));
+            // Избегаем повторных вызовов show/hide, чтобы не плодить внутренние предупреждения SDK
+            if (need === true && __backVisible !== true && tg.BackButton.show) {
+                tg.BackButton.show();
+                __backVisible = true;
+            } else if (need === false && __backVisible !== false && tg.BackButton.hide) {
+                tg.BackButton.hide();
+                __backVisible = false;
+            }
         } catch(_) {}
     }
     // Первичная установка
