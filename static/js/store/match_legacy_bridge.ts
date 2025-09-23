@@ -580,6 +580,144 @@ declare global {
       };
       
       renderFunc(match, detailsObj, mdPane, els);
+      
+      // РЕШЕНИЕ 1: Immediate restoration после каждого рендера
+      setTimeout(() => {
+        try {
+          // Восстанавливаем счёт если он стал placeholder
+          const scoreEl = document.getElementById('md-score');
+          if (scoreEl && score && (scoreEl.textContent?.trim() === '— : —' || scoreEl.textContent?.trim() === '- : -')) {
+            scoreEl.textContent = `${score.home} : ${score.away}`;
+            console.log('[Bridge] Score restored from placeholder:', `${score.home} : ${score.away}`);
+          }
+          
+          // НОВОЕ: Принудительно обновляем события в UI, если они не отобразились
+          if (eventsFormatted && (eventsFormatted.home.length > 0 || eventsFormatted.away.length > 0)) {
+            console.log('[Bridge] Force updating events display:', eventsFormatted);
+            
+            // Обновляем все селекты событий на основе реальных данных из EventsRegistry
+            document.querySelectorAll(`select[data-match-home="${match.home}"][data-match-away="${match.away}"]`).forEach(select => {
+              try {
+                const selectEl = select as HTMLSelectElement;
+                const playerKey = (selectEl.getAttribute('data-player') || '').toLowerCase().trim();
+                const eventType = selectEl.getAttribute('data-event-type');
+                const team = selectEl.getAttribute('data-team');
+                
+                if (playerKey && eventType && team) {
+                  const sideEvents = (eventsFormatted as any)[team] || [];
+                  let count = 0;
+                  
+                  sideEvents.forEach((event: any) => {
+                    if ((event.player || '').toLowerCase().trim() === playerKey && event.type === eventType) {
+                      count++;
+                    }
+                  });
+                  
+                  const currentValue = parseInt(selectEl.value, 10) || 0;
+                  if (currentValue !== count) {
+                    selectEl.value = String(count);
+                    console.log('[Bridge] Updated event select:', playerKey, eventType, currentValue, '→', count);
+                    
+                    // Обновляем визуальную иконку рядом с селектом
+                    const icon = selectEl.parentElement?.querySelector('img');
+                    if (icon) {
+                      (icon as HTMLImageElement).style.opacity = count > 0 ? '1' : '0.25';
+                    }
+                  }
+                }
+              } catch(err) {
+                console.warn('[Bridge] Error updating event select:', err);
+              }
+            });
+            
+            // Для обычных пользователей: обновляем иконки событий
+            document.querySelectorAll('.roster-table tbody tr').forEach(row => {
+              try {
+                const nameCell = row.querySelector('td:first-child');
+                if (!nameCell) return;
+                
+                const playerName = nameCell.textContent?.trim() || '';
+                const playerKey = playerName.toLowerCase().trim();
+                
+                // Находим все иконки событий в этой строке
+                const cells = row.querySelectorAll('td');
+                if (cells.length >= 5) { // Имя + 4 иконки
+                  const yellowCell = cells[1];
+                  const redCell = cells[2]; 
+                  const assistCell = cells[3];
+                  const goalCell = cells[4];
+                  
+                  // Обновляем каждый тип события
+                  const updateEventIcon = (cell: Element, eventType: string, sideEvents: any[]) => {
+                    let count = 0;
+                    sideEvents.forEach((event: any) => {
+                      if ((event.player || '').toLowerCase().trim() === playerKey && event.type === eventType) {
+                        count++;
+                      }
+                    });
+                    
+                    if (count > 0) {
+                      const existingIcon = cell.querySelector('img');
+                      if (!existingIcon) {
+                        // Создаем иконку если её нет
+                        const wrap = document.createElement('div');
+                        wrap.style.display = 'flex';
+                        wrap.style.alignItems = 'center';
+                        wrap.style.justifyContent = 'center';
+                        wrap.style.gap = '4px';
+                        
+                        const img = document.createElement('img');
+                        img.style.width = '18px';
+                        img.style.height = '18px';
+                        img.style.objectFit = 'contain';
+                        
+                        const srcMap: { [key: string]: string } = {
+                          'yellow': '/static/img/icons/yellow.png',
+                          'red': '/static/img/icons/red.png',
+                          'assist': '/static/img/icons/assist.png',
+                          'goal': '/static/img/icons/goal.png'
+                        };
+                        img.src = srcMap[eventType] || '/static/img/icons/placeholder.png';
+                        
+                        wrap.appendChild(img);
+                        
+                        if ((eventType === 'goal' || eventType === 'assist') && count > 1) {
+                          const badge = document.createElement('span');
+                          badge.textContent = 'x' + count;
+                          badge.style.fontSize = '11px';
+                          badge.style.opacity = '0.8';
+                          wrap.appendChild(badge);
+                        }
+                        
+                        cell.innerHTML = '';
+                        cell.appendChild(wrap);
+                      }
+                    } else {
+                      // Убираем иконку если событий нет
+                      cell.innerHTML = '';
+                    }
+                  };
+                  
+                  // Определяем команду текущей строки
+                  const homePane = document.getElementById('roster-home');
+                  const isHomeTeam = homePane?.contains(row as Node);
+                  const teamEvents = isHomeTeam ? eventsFormatted.home : eventsFormatted.away;
+                  
+                  updateEventIcon(yellowCell, 'yellow', teamEvents);
+                  updateEventIcon(redCell, 'red', teamEvents);
+                  updateEventIcon(assistCell, 'assist', teamEvents);
+                  updateEventIcon(goalCell, 'goal', teamEvents);
+                }
+              } catch(err) {
+                console.warn('[Bridge] Error updating event icons for row:', err);
+              }
+            });
+          }
+        } catch(err) {
+          console.warn('[Bridge] Error in immediate restoration:', err);
+        }
+      }, 0);
+      
       // Страховка: если оригинальный рендер всё равно вернул placeholder, восстановим счёт
       try {
         const scoreEl = document.getElementById('md-score');
@@ -641,40 +779,67 @@ declare global {
         try {
           const d = e?.detail || {};
           if (!d || !d.home || !d.away) return;
-          // Не вмешиваемся в админский рендер
-          let isAdmin = false;
-          try { const adminId = document.body.getAttribute('data-admin'); isAdmin = !!(adminId && adminId.trim() !== ''); } catch(_) {}
-          if (isAdmin) return;
+          
+          console.log('[Bridge] eventsRegistryUpdate received:', d);
+          
           // Проверяем, открыт ли модал деталей именно этого матча
           const mdPane = document.getElementById('ufo-match-details') as HTMLElement | null;
-          if (!mdPane || mdPane.style.display === 'none') return;
+          if (!mdPane || mdPane.style.display === 'none') {
+            console.log('[Bridge] Match details not visible, skipping');
+            return;
+          }
+          
           const cur = (window as any).__currentMatchDetails || null;
-          if (!cur || cur.home !== d.home || cur.away !== d.away) return;
+          if (!cur || cur.home !== d.home || cur.away !== d.away) {
+            console.log('[Bridge] Different match or no current match, skipping');
+            return;
+          }
+          
           // Берём данные из реестра — это самый свежий источник
           const reg = (window as any).__MatchEventsRegistry;
           const events = reg && typeof reg.getEvents === 'function' ? reg.getEvents(d.home, d.away) : (d.events || { home: [], away: [] });
-          // Обновим кэш панели и перерендерим через store-driven путь
+          
+          console.log('[Bridge] Events from registry:', events);
+          
+          // Обновим кэш панели 
           (mdPane as any).__lastEvents = events;
+          
           // Найдём базовые элементы
           const els = {
-            homePane: mdPane.querySelector('.home-roster') as HTMLElement | null || mdPane.querySelector('[data-team="home"]') as HTMLElement | null,
-            awayPane: mdPane.querySelector('.away-roster') as HTMLElement | null || mdPane.querySelector('[data-team="away"]') as HTMLElement | null,
+            homePane: document.getElementById('roster-home') || mdPane.querySelector('.home-roster') as HTMLElement | null,
+            awayPane: document.getElementById('roster-away') || mdPane.querySelector('.away-roster') as HTMLElement | null,
           };
-          if (!els.homePane || !els.awayPane) return;
+          
+          if (!els.homePane || !els.awayPane) {
+            console.log('[Bridge] Roster panes not found');
+            return;
+          }
+          
           // Для предотвращения частого мерцания - debounce
           clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             try {
-              // Сформируем минимальный объект storeData для рендера
-              const storeLike: any = { events };
-              // Используем текущий матч из глобального контекста
-              const match = cur;
-              renderRostersFromStore(match, mdPane, els as any);
-              console.log('[Bridge] Store-driven: UI синхронизирован по eventsRegistryUpdate');
+              console.log('[Bridge] Triggering store-driven roster update');
+              
+              // Вызываем MatchRostersEvents.render с обновлёнными событиями
+              if (window.MatchRostersEvents && window.MatchRostersEvents.render) {
+                const match = cur;
+                const details = {
+                  events: events,
+                  rosters: (mdPane as any).__lastRosters || { home: [], away: [] },
+                  score: (mdPane as any).__lastScore || null
+                };
+                
+                // Вызываем рендер с новыми событиями
+                window.MatchRostersEvents.render(match, details, mdPane, els);
+                console.log('[Bridge] Store-driven: UI синхронизирован по eventsRegistryUpdate');
+              } else {
+                console.warn('[Bridge] MatchRostersEvents.render not available');
+              }
             } catch(err) {
               console.warn('[Bridge] Store-driven events sync error:', err);
             }
-          }, 120);
+          }, 50); // Уменьшили debounce для быстрого отклика
         } catch(err) {
           console.warn('[Bridge] eventsRegistryUpdate listener error:', err);
         }
