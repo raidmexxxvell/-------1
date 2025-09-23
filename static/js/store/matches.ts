@@ -93,6 +93,60 @@ declare global {
     return state.map[matchKey]?.stats || null;
   }
 
+  // Получить полную запись матча из стора
+  function getMatch(matchKey: string): MatchEntry | null {
+    const state = matches.get();
+    return state.map[matchKey] || null;
+  }
+
+  // Универсальное обновление записи матча патчем полей
+  function updateMatch(matchKey: string, fields: any) {
+    matches.update(state => {
+      const cur: MatchEntry = state.map[matchKey] || { info: null, score: null, events: [], stats: null, rosters: null, ui: null, lastUpdated: null } as any;
+      // Обновление info (если пришли метаданные)
+      try {
+        const home = fields?.home ?? cur.info?.home;
+        const away = fields?.away ?? cur.info?.away;
+        const date = fields?.date ?? cur.info?.date;
+        if (home || away || date) {
+          cur.info = { id: matchKey, home: String(home||''), away: String(away||''), date: date as any };
+        }
+      } catch(_) {}
+      // Счет
+      if (fields && (fields.score_home !== undefined || fields.score_away !== undefined)) {
+        const prev = cur.score || { home: 0, away: 0 } as any;
+        const h = (fields.score_home !== undefined) ? Number(fields.score_home) : prev.home;
+        const a = (fields.score_away !== undefined) ? Number(fields.score_away) : prev.away;
+        cur.score = { home: h, away: a } as any;
+      }
+      // События
+      try {
+        if (Array.isArray(fields?.events)) {
+          // Полная замена массива событий (считаем приходящим источником истины)
+          cur.events = fields.events.slice();
+        }
+      } catch(_) {}
+      // Составы
+      try {
+        if (fields?.rosters) {
+          (cur as any).rosters = fields.rosters;
+        } else if (fields?.home_roster || fields?.away_roster) {
+          (cur as any).rosters = (cur as any).rosters || { home: [], away: [] };
+          if (fields.home_roster) (cur as any).rosters.home = fields.home_roster;
+          if (fields.away_roster) (cur as any).rosters.away = fields.away_roster;
+        }
+      } catch(_) {}
+      // Статистика
+      try {
+        if (fields?.stats) {
+          cur.stats = Object.assign({}, cur.stats || {}, fields.stats || {});
+        }
+      } catch(_) {}
+      cur.lastUpdated = Date.now();
+      state.map[matchKey] = cur;
+    });
+  }
+
   function findMatchByTeams(home: string, away: string): string | null {
     const state = matches.get();
     const homeNorm = home.toLowerCase().trim();
@@ -117,6 +171,8 @@ declare global {
   (window as any).MatchesStoreAPI = {
     updateMatchStats,
     getMatchStats, 
+    getMatch,
+    updateMatch,
     findMatchByTeams,
     subscribe: matches.subscribe,
     get: matches.get

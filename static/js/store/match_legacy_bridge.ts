@@ -170,27 +170,8 @@ declare global {
     let stats: any = null;
     let hasStoreData = false;
     
-    // ПРИОРИТЕТ 1: __MatchEventsRegistry (стабильный источник из коммита 9764968)
-    if ((window as any).__MatchEventsRegistry && match?.home && match?.away) {
-      try {
-        const registry = (window as any).__MatchEventsRegistry;
-        const matchKey = registry.getMatchKey(match.home, match.away);
-        const cachedEvents = registry.eventsCache?.get(matchKey);
-        
-        if (cachedEvents && (cachedEvents.home || cachedEvents.away)) {
-          console.log('[Bridge] Found data in MatchEventsRegistry:', cachedEvents);
-          // Преобразуем события в статистику
-          stats = convertEventsToStats(cachedEvents);
-          hasStoreData = !!(stats && (stats.home || stats.away));
-          console.log('[Bridge] MatchEventsRegistry stats:', { stats, hasStoreData });
-        }
-      } catch(e) {
-        console.warn('[Bridge] MatchEventsRegistry error:', e);
-      }
-    }
-    
-    // ПРИОРИТЕТ 2: MatchesStoreAPI (если нет данных в Registry)
-    if (!hasStoreData && (window as any).MatchesStoreAPI && match?.home && match?.away) {
+    // ПРИОРИТЕТ 1: MatchesStoreAPI — единый источник истины
+    if ((window as any).MatchesStoreAPI && match?.home && match?.away) {
       try {
         const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(match.home, match.away);
         console.log('[Bridge] Found match key:', matchKey);
@@ -203,6 +184,19 @@ declare global {
       } catch(e) {
         console.warn('[Bridge] MatchesStoreAPI error:', e);
       }
+    }
+    
+    // ПРИОРИТЕТ 2: __MatchEventsRegistry (fallback)
+    if (!hasStoreData && (window as any).__MatchEventsRegistry && match?.home && match?.away) {
+      try {
+        const registry = (window as any).__MatchEventsRegistry;
+        const matchKey = registry.getMatchKey(match.home, match.away);
+        const cachedEvents = registry.eventsCache?.get(matchKey);
+        if (cachedEvents && (cachedEvents.home || cachedEvents.away)) {
+          stats = convertEventsToStats(cachedEvents);
+          hasStoreData = !!(stats && (stats.home || stats.away));
+        }
+      } catch(e) { console.warn('[Bridge] MatchEventsRegistry error:', e); }
     }
     
     // ПРИОРИТЕТ 3: Legacy MatchesStore
@@ -449,25 +443,8 @@ declare global {
     let storeData: any = null;
     let hasStoreData = false;
     
-    // ПРИОРИТЕТ 1: __MatchEventsRegistry (стабильный источник из коммита 9764968)
-    if ((window as any).__MatchEventsRegistry && match?.home && match?.away) {
-      try {
-        const registry = (window as any).__MatchEventsRegistry;
-        const matchKey = registry.getMatchKey(match.home, match.away);
-        const cachedEvents = registry.eventsCache?.get(matchKey);
-        
-        if (cachedEvents && (cachedEvents.home || cachedEvents.away)) {
-          console.log('[Bridge] Found events in MatchEventsRegistry:', cachedEvents);
-          storeData = { events: cachedEvents };
-          hasStoreData = true;
-        }
-      } catch(e) {
-        console.warn('[Bridge] MatchEventsRegistry error:', e);
-      }
-    }
-    
-    // ПРИОРИТЕТ 2: MatchesStoreAPI
-    if (!hasStoreData && (window as any).MatchesStoreAPI && match?.home && match?.away) {
+    // ПРИОРИТЕТ 1: MatchesStoreAPI — единый источник истины (events/rosters/score/stats)
+    if ((window as any).MatchesStoreAPI && match?.home && match?.away) {
       try {
         const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(match.home, match.away);
         if (matchKey) {
@@ -477,6 +454,19 @@ declare global {
       } catch(e) {
         console.warn('[Bridge] MatchesStoreAPI error:', e);
       }
+    }
+    
+    // ПРИОРИТЕТ 2: __MatchEventsRegistry (только события, если стора нет)
+    if (!hasStoreData && (window as any).__MatchEventsRegistry && match?.home && match?.away) {
+      try {
+        const registry = (window as any).__MatchEventsRegistry;
+        const matchKey = registry.getMatchKey(match.home, match.away);
+        const cachedEvents = registry.eventsCache?.get(matchKey);
+        if (cachedEvents && (cachedEvents.home || cachedEvents.away)) {
+          storeData = { events: cachedEvents };
+          hasStoreData = true;
+        }
+      } catch(e) { console.warn('[Bridge] MatchEventsRegistry error:', e); }
     }
     
     // ПРИОРИТЕТ 3: Legacy MatchesStore
@@ -581,56 +571,22 @@ declare global {
       
       renderFunc(match, detailsObj, mdPane, els);
       
-      // РЕШЕНИЕ 1: Immediate restoration после каждого рендера - УСИЛЕННАЯ ВЕРСИЯ
+      // РЕШЕНИЕ: Immediate restoration после рендера — только безопасная проверка
       setTimeout(() => {
         try {
-          console.log('[Bridge] Immediate restoration triggered with score:', score);
-          
-          // Восстанавливаем счёт если он стал placeholder - более агрессивный поиск
-          let scoreEl = document.getElementById('md-score');
-          if (!scoreEl) {
-            // Fallback поиск по тексту или селекторам
-            scoreEl = document.querySelector('.score-display') as HTMLElement;
-          }
-          if (!scoreEl) {
-            scoreEl = document.querySelector('#ufo-match-details [class*="score"]') as HTMLElement;
-          }
-          if (!scoreEl) {
-            // Универсальный поиск по всем возможным местам
-            const allPossible = document.querySelectorAll('[id*="score"], .score, .match-score, [class*="score"]');
-            for (let i = 0; i < allPossible.length; i++) {
-              const el = allPossible[i];
-              if (el.textContent?.includes(':')) {
-                scoreEl = el as HTMLElement;
-                break;
-              }
-            }
-          }
-          
-          console.log('[Bridge] Score element found:', !!scoreEl, 'text:', scoreEl?.textContent);
-          
+          const scoreEl = document.getElementById('md-score');
           if (scoreEl && score && typeof score.home === 'number' && typeof score.away === 'number') {
             const currentText = scoreEl.textContent?.trim() || '';
             const isPlaceholder = currentText === '— : —' || currentText === '- : -' || currentText === '';
             const desiredText = `${score.home} : ${score.away}`;
-            
-            console.log('[Bridge] Score check:', { currentText, isPlaceholder, desiredText });
-            
-            // ПРИНУДИТЕЛЬНО обновляем в любом случае, если текст не совпадает
-            if (currentText !== desiredText) {
+            // Обновляем только если плейсхолдер или текст отличается
+            if (isPlaceholder || currentText !== desiredText) {
               scoreEl.textContent = desiredText;
-              console.log('[Bridge] Score FORCEFULLY restored:', currentText, '→', desiredText);
-            } else {
-              console.log('[Bridge] Score already correct:', currentText);
             }
-          } else {
-            console.warn('[Bridge] Cannot restore score:', { scoreEl: !!scoreEl, score, scoreType: typeof score });
           }
           
-          // НОВОЕ: Принудительно обновляем события в UI, если они не отобразились
+          // Принудительно обновляем события в UI, если они не отобразились
           if (eventsFormatted && (eventsFormatted.home.length > 0 || eventsFormatted.away.length > 0)) {
-            console.log('[Bridge] Force updating events display:', eventsFormatted);
-            
             // Обновляем все селекты событий на основе реальных данных из EventsRegistry
             document.querySelectorAll(`select[data-match-home="${match.home}"][data-match-away="${match.away}"]`).forEach(select => {
               try {
@@ -652,8 +608,6 @@ declare global {
                   const currentValue = parseInt(selectEl.value, 10) || 0;
                   if (currentValue !== count) {
                     selectEl.value = String(count);
-                    console.log('[Bridge] Updated event select:', playerKey, eventType, currentValue, '→', count);
-                    
                     // Обновляем визуальную иконку рядом с селектом
                     const icon = selectEl.parentElement?.querySelector('img');
                     if (icon) {

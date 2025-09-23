@@ -118,13 +118,16 @@ interface OddsState {
           }
         }
         
-        // Обновляем MatchesStore для совместимости
+        // ЕДИНЫЙ ИСТОЧНИК: обновляем MatchesStore через API (findMatchByTeams → updateMatch)
         try {
-          if ((window as any).MatchesStoreAPI) {
-            const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(home, away);
-            if (matchKey && fields) {
-              (window as any).MatchesStoreAPI.updateMatch(matchKey, fields);
+          if ((window as any).MatchesStoreAPI && fields) {
+            let matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(home, away);
+            if (!matchKey) {
+              // Конструируем ключ из id, если предоставлен сервером
+              const id = patch.id || {}; const date = id.date || fields.date || '';
+              matchKey = `${home}_${away}_${date||''}`;
             }
+            (window as any).MatchesStoreAPI.updateMatch(matchKey, { home, away, date: (patch.id?.date||fields.date||'') , ...fields });
           }
         } catch(_) {}
       }
@@ -226,17 +229,14 @@ interface OddsState {
         const away = id.away || p.away || fields.away || '';
         const date = id.date || p.date || '';
         if (!home || !away) return;
-        const key = `${home}_${away}_${date||''}`;
-        const score_home = fields.score_home; const score_away = fields.score_away;
-        (window as any).MatchesStore.update((s: any) => {
-          const cur = s.map[key] || { info: { id: key, home, away, date }, score: null, events: [], lastUpdated: null };
-          if (score_home !== undefined || score_away !== undefined) {
-            const prev = cur.score || { home: 0, away: 0 } as any;
-            cur.score = { home: score_home ?? prev.home, away: score_away ?? prev.away } as any;
+        try {
+          const api = (window as any).MatchesStoreAPI;
+          if (api) {
+            let key = api.findMatchByTeams(home, away);
+            if (!key) key = `${home}_${away}_${date||''}`;
+            api.updateMatch(key, { home, away, date, ...fields });
           }
-          cur.lastUpdated = Date.now();
-          s.map[key] = cur;
-        });
+        } catch(_) {}
       }
 
       if (p.entity === 'match_events' || p.entity === 'match_events_removed') {
