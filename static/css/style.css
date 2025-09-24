@@ -1486,4 +1486,9 @@ body.theme-blb .share-btn {
 .ls-slide[aria-hidden="true"] { pointer-events:none; }
 .ls-slide.placeholder { display:flex; align-items:center; justify-content:center; min-height:210px; }
 .stats-placeholder { opacity:.5; font-size:12px; }
+/* Skeleton rows for first stats load */
+.league-table .sk-row .sk-cell { padding:0; }
+.sk-bar { display:inline-block; width:100%; height:10px; border-radius:4px; background:linear-gradient(90deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 100%); background-size:200% 100%; animation: sk-pulse 1.4s ease-in-out infinite; }
+@keyframes sk-pulse { 0%{ background-position:0 0;} 100%{ background-position:-200% 0;} }
+@media (prefers-reduced-motion: reduce){ .sk-bar { animation:none; } }
 @media (min-width:600px){ .ls-title { font-size:15px; } }

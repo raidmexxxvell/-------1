@@ -5,18 +5,7 @@
     if(!window.Store || !window.Store.createStore) return; // core store не загружен
     if(window.LeaderboardsStore) return; // уже инициализировано
 
-    // Feature flag gating
-    const enabled = (function(){
-      try {
-        const hardDisable = /(?:[?&#])(ff|feature:league_extended_leaderboards)=0\b/.test(location.search) || /(?:[?&#])(ff|feature:league_extended_leaderboards)=0\b/.test(location.hash);
-        if(hardDisable) return false;
-        const forced = /(?:[?&#])(ff|feature:league_extended_leaderboards)=1\b/.test(location.search) || /(?:[?&#])(ff|feature:league_extended_leaderboards)=1\b/.test(location.hash);
-        if(forced) { localStorage.setItem('feature:league_extended_leaderboards','1'); }
-        const ls = localStorage.getItem('feature:league_extended_leaderboards');
-        return ls === '1';
-      } catch(_) { return false; }
-    })();
-    if(!enabled) { console.log('[LeaderboardsStore] feature disabled'); return; }
+    // Feature flag removed: always enabled now
 
     const TTL = 90_000; // 90s (SWR окно)
     const LS_KEY = 'leaderboards:cache:v1';
@@ -167,6 +156,6 @@
     const lazy = () => fetchData(false).catch(()=>{});
     if('requestIdleCallback' in window){ requestIdleCallback(lazy, { timeout: 2000 }); } else setTimeout(lazy,0);
 
-    console.log('[LeaderboardsStore] initialized (flag on)', { cached: !!cached });
+  console.log('[LeaderboardsStore] initialized', { cached: !!cached });
   } catch(e){ console.warn('[LeaderboardsStore] init failed', e); }
 })();
