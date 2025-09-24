@@ -1210,11 +1210,21 @@ def api_league_extended_leaderboards():
             'assists': assists_only
         }
         etag_val = 'lx-' + str(hash(json.dumps(payload, sort_keys=True)))
+        prev_payload = LEAGUE_EXTENDED_STATS_CACHE.get('data') if LEAGUE_EXTENDED_STATS_CACHE else None
         LEAGUE_EXTENDED_STATS_CACHE = {
             'data': payload,
             'ts': now,
             'etag': etag_val
         }
+        # WebSocket diff broadcast (best-effort)
+        try:
+            ws_mgr = app.config.get('websocket_manager')
+            if ws_mgr and hasattr(ws_mgr, 'broadcast_leaderboards_patch'):
+                # Отправляем патч только если есть предыдущее значение и изменился etag
+                if prev_payload and prev_payload != payload:
+                    ws_mgr.broadcast_leaderboards_patch(prev_payload, payload)
+        except Exception:
+            pass
         inm = request.headers.get('If-None-Match')
         if inm and inm == etag_val:
             return ('', 304)

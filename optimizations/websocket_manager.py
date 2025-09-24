@@ -4,7 +4,7 @@ WebSocket manager для real-time уведомлений при изменен�
 """
 import json
 import threading
-from typing import Dict, Set
+from typing import Dict, Set, Any
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import logging
 from datetime import datetime, timezone
@@ -283,6 +283,60 @@ class WebSocketManager:
         """Возвращает количество подключенных пользователей"""
         with self.lock:
             return len(self.connected_users)
+
+    # --- Leaderboards diff broadcast ---
+    def broadcast_leaderboards_patch(self, old_payload: Dict[str, Any] | None, new_payload: Dict[str, Any] | None):
+        """Сравнивает top10 списки и отправляет изменившиеся записи через topic league:leaderboards:patch.
+        Формат: { goals_assists?: [...], goals?: [...], assists?: [...] }
+        """
+        try:
+            if not new_payload:
+                return
+            patch: Dict[str, Any] = {}
+            for key in ('goals_assists','goals','assists'):
+                old_list = (old_payload or {}).get(key) or []
+                new_list = (new_payload or {}).get(key) or []
+                # Быстрое сравнение: если длины и сериализация совпадают — пропускаем
+                try:
+                    if len(old_list) == len(new_list):
+                        if json.dumps(old_list, sort_keys=True, ensure_ascii=False) == json.dumps(new_list, sort_keys=True, ensure_ascii=False):
+                            continue
+                except Exception:
+                    pass
+                # помечаем изменившиеся / новые элементы по player+team
+                old_map = {}
+                for r in old_list:
+                    pid = r.get('player')
+                    if pid:
+                        old_map[pid] = r
+                changed = []
+                fields = ('player','team','games','goals','assists','total')
+                for row in new_list:
+                    pid = row.get('player')
+                    if not pid:
+                        continue
+                    orig = old_map.get(pid)
+                    if not orig:
+                        changed.append(row)
+                        continue
+                    for f in fields:
+                        if row.get(f) != orig.get(f):
+                            changed.append(row)
+                            break
+                if changed:
+                    patch[key] = changed
+            if patch:
+                # Используем topic-ориентированную схему через emit_to_topic (если включено)
+                try:
+                    self.emit_to_topic('league:leaderboards:patch', 'leaderboards_patch', patch)
+                except Exception:
+                    # fallback на старый generic event
+                    try:
+                        self.socketio.emit('leaderboards_patch', { 'topic': 'league:leaderboards:patch', 'data': patch }, namespace='/')
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     # --- New: прямое событие завершения матча ---
     def notify_match_finished(self, home: str, away: str, extra: dict | None = None):
