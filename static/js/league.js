@@ -753,15 +753,13 @@
       wrap.__applyData = function(list2, updatedAt2){
         list2 = Array.isArray(list2)? list2 : [];
         const rows = tbody.children;
-        const noData = list2.length === 0;
         for(let i=0;i<10;i++){
           const r = list2[i];
           let tr = rows[i];
           if(!tr){ tr=document.createElement('tr'); tbody.appendChild(tr); }
           // If skeleton, clear
           if(tr.classList.contains('sk-row')){ tr.className=''; tr.innerHTML=''; }
-          const desired = r ? [i+1, r.player||'', r.team||'', r.games||0, r.goals||0, r.assists||0, r.total||0]
-                             : [i+1, noData && i===0 ? 'Нет данных' : '—','',0,0,0,0];
+          const desired = r ? [i+1, r.player||'', r.team||'', r.games||0, r.goals||0, r.assists||0, r.total||0] : [i+1,'—','',0,0,0,0];
           // keyed diff by position + player name
           const key = r ? (r.player||'') : ('__empty_'+i);
           if(tr.__key !== key){ tr.innerHTML=''; desired.forEach(val=>{ const td=document.createElement('td'); td.textContent=String(val); tr.appendChild(td); }); tr.__key = key; }

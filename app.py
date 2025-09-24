@@ -1134,50 +1134,76 @@ def api_league_extended_leaderboards():
         players: dict[str, dict] = {}
         try:
             if session is not None:
-                # События голов/передач
-                ev_rows = session.execute(text("""
-                    SELECT player_name, event_type, COUNT(*) AS cnt
-                    FROM match_player_events
-                    WHERE event_type IN ('goal','assist')
-                    GROUP BY player_name, event_type
-                """)).fetchall()
+                # 1) События (таблица имеет поля player, type). Используем реальные типы 'goal','assist'
+                ev_rows = []
+                try:
+                    ev_rows = session.execute(text("""
+                        SELECT player AS player_name, type AS event_type, COUNT(*) AS cnt
+                        FROM match_player_events
+                        WHERE type IN ('goal','assist') AND player != ''
+                        GROUP BY player, type
+                    """)).fetchall()
+                except Exception as e1:
+                    print('[WARN] event aggregation failed (match_player_events)', e1)
                 for r in ev_rows:
-                    name = (r.player_name or '').strip()
+                    name = (getattr(r, 'player_name', '') or '').strip()
                     if not name:
                         continue
                     p = players.setdefault(name, {'player': name, 'team': '', 'games': 0, 'goals': 0, 'assists': 0})
-                    if r.event_type == 'goal':
-                        p['goals'] += int(r.cnt or 0)
-                    elif r.event_type == 'assist':
-                        p['assists'] += int(r.cnt or 0)
-                # Игры (уникальные матчи в составе)
-                game_rows = session.execute(text("""
-                    SELECT player_name, COUNT(DISTINCT match_id) AS games
-                    FROM match_lineup_players
-                    GROUP BY player_name
-                """)).fetchall()
+                    ev_type = getattr(r, 'event_type', '')
+                    if ev_type == 'goal':
+                        p['goals'] += int(getattr(r, 'cnt', 0) or 0)
+                    elif ev_type == 'assist':
+                        p['assists'] += int(getattr(r, 'cnt', 0) or 0)
+
+                # 2) Игры: таблица match_lineups (нет match_id) -> считаем DISTINCT по паре home|away
+                game_rows = []
+                try:
+                    game_rows = session.execute(text("""
+                        SELECT player AS player_name, COUNT(DISTINCT (home || '|' || away)) AS games
+                        FROM match_lineups
+                        WHERE player != ''
+                        GROUP BY player
+                    """
+                    )).fetchall()
+                except Exception as e2:
+                    print('[WARN] games aggregation failed (match_lineups)', e2)
                 for r in game_rows:
-                    name = (r.player_name or '').strip()
+                    name = (getattr(r, 'player_name', '') or '').strip()
                     if not name:
                         continue
                     p = players.setdefault(name, {'player': name, 'team': '', 'games': 0, 'goals': 0, 'assists': 0})
-                    p['games'] = int(r.games or 0)
-                # Последняя команда игрока (упрощённо — самый последний по id)
-                team_rows = session.execute(text("""
-                    SELECT player_name, team_name
-                    FROM match_lineup_players
-                    WHERE player_name != ''
-                    ORDER BY id DESC
-                """)).fetchall()
+                    p['games'] = int(getattr(r, 'games', 0) or 0)
+
+                # 3) Последняя команда игрока: из match_lineups берём последнюю запись и вычисляем название команды по колонке team ('home'/'away')
+                team_rows = []
+                try:
+                    team_rows = session.execute(text("""
+                        SELECT id, player AS player_name, team, home, away
+                        FROM match_lineups
+                        WHERE player != ''
+                        ORDER BY id DESC
+                    """)).fetchall()
+                except Exception as e3:
+                    print('[WARN] team aggregation failed (match_lineups)', e3)
                 seen = set()
                 for r in team_rows:
-                    name = (r.player_name or '').strip()
+                    name = (getattr(r, 'player_name', '') or '').strip()
                     if not name or name in seen:
                         continue
                     seen.add(name)
                     p = players.get(name)
                     if p:
-                        p['team'] = r.team_name or ''
+                        side = (getattr(r, 'team', '') or '').strip()
+                        home_name = getattr(r, 'home', '') or ''
+                        away_name = getattr(r, 'away', '') or ''
+                        if side == 'home':
+                            p['team'] = home_name
+                        elif side == 'away':
+                            p['team'] = away_name
+                        else:
+                            # fallback: если team не 'home/away', попробуем использовать side значение напрямую
+                            p['team'] = side
         except Exception as e:
             if session is not None:
                 session.rollback()
@@ -1196,11 +1222,25 @@ def api_league_extended_leaderboards():
                 'assists': int(p.get('assists') or 0),
                 'total': int(p.get('goals') or 0) + int(p.get('assists') or 0)
             })
+        if not rows:
+            try:
+                print('[DEBUG] Extended leaderboards: no rows aggregated. Check match_player_events & match_lineup_players content.')
+                # Quick counts
+                if SessionLocal:
+                    session = SessionLocal()
+                    cnt_ev = session.execute(text("SELECT COUNT(*) FROM match_player_events WHERE event_type IN ('goal','assist')")).scalar() or 0
+                    cnt_line = session.execute(text("SELECT COUNT(*) FROM match_lineup_players")).scalar() or 0
+                    print(f'[DEBUG] Counts => events(goal/assist)={cnt_ev}, lineup_players={cnt_line}')
+                    session.close()
+            except Exception as _e:
+                print('[DEBUG] Extended leaderboards debug logging failed', _e)
 
         def sort_top(key_main):
             return sorted(rows, key=lambda x: (-x[key_main], x['games'], x['player']))[:10]
 
-        goals_assists = sorted(rows, key=lambda x: (-x['total'], x['games'], x['player']))[:10]
+    # Фильтруем игроков без участия (0 total и 0 goals и 0 assists) чтобы не засорять таблицу, если нужно
+    rows = [r for r in rows if (r['goals'] or r['assists'])]
+    goals_assists = sorted(rows, key=lambda x: (-x['total'], x['games'], x['player']))[:10]
         goals_only = sort_top('goals')
         assists_only = sort_top('assists')
         payload = {

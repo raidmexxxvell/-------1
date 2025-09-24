@@ -24,8 +24,7 @@
       etag: cached?.etag || null,
       lastUpdated: cached?.ts || 0,
       loading: false,
-      error: null,
-      fallbackTried: false
+      error: null
     };
 
     const store = window.Store.createStore('leaderboards', initial);
@@ -95,41 +94,6 @@
       if(!force && st.data.goals_assists && age < TTL){ return Promise.resolve(st); }
       if(st.loading) return Promise.resolve(st);
       store.update(s => { s.loading = true; s.error = null; });
-      function legacyFallback(){
-        const sNow = store.get();
-        if(sNow.fallbackTried) return; // уже пробовали
-        store.update(s=>{ s.fallbackTried = true; });
-        fetch('/api/leaderboard/goal-assist?limit=50', { cache:'no-store' })
-          .then(r=> r.ok? r.json(): null)
-          .then(j=>{
-            if(!j || !Array.isArray(j.items) || j.items.length===0) return;
-            const items = j.items.map(it => ({
-              player_id: it.player_id,
-              player: [it.first_name, it.last_name].filter(Boolean).join(' '),
-              team: it.team || '',
-              games: it.matches_played || 0,
-              goals: it.goals || 0,
-              assists: it.assists || 0,
-              total: it.goal_plus_assist || ((it.goals||0)+(it.assists||0))
-            }));
-            const ga = [...items];
-            const g = [...items];
-            const a = [...items];
-            ga.sort((a,b)=> (b.total - a.total) || (a.games - b.games) || a.player.localeCompare(b.player));
-            g.sort((a,b)=> (b.goals - a.goals) || (a.games - b.games) || a.player.localeCompare(b.player));
-            a.sort((a,b)=> (b.assists - a.assists) || (a.games - b.games) || a.player.localeCompare(b.player));
-            store.update(s=>{
-              s.data.goals_assists = ga.slice(0,10);
-              s.data.goals = g.slice(0,10);
-              s.data.assists = a.slice(0,10);
-              s.updatedAt = j.updated_at || s.updatedAt;
-              s.lastUpdated = Date.now();
-              s.loading = false;
-            });
-            persist(store.get());
-          })
-          .catch(()=>{});
-      }
       if(!window.fetchEtag){ // fallback
         return fetch('/api/league/stats/leaderboards', { cache: 'no-store', headers: st.etag? { 'If-None-Match': st.etag } : {} })
           .then(r=> r.status===304? null : r.json())
@@ -146,8 +110,6 @@
             });
             sortLists(store.get().data);
             persist(store.get());
-            const cur = store.get();
-            if(!cur.data.goals_assists?.length && !cur.data.goals?.length && !cur.data.assists?.length){ legacyFallback(); }
             return store.get();
           })
           .catch(e=>{ store.update(s=>{ s.loading=false; s.error=e.message||'network';}); return store.get();});
@@ -175,8 +137,6 @@
           });
           sortLists(store.get().data);
           persist(store.get());
-          const cur = store.get();
-            if(!cur.data.goals_assists?.length && !cur.data.goals?.length && !cur.data.assists?.length){ legacyFallback(); }
         },
         onStale: ()=>{ store.update(s=>{ s.loading = false; }); }
       }).catch(e=>{ store.update(s=>{ s.loading=false; s.error=e.message||'network';}); return store.get();});
