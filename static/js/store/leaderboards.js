@@ -43,6 +43,12 @@
 
     function applyPatch(patch){
       if(!patch || typeof patch !== 'object') return;
+      const before = store.get();
+      const prevSig = JSON.stringify({
+        ga: before.data.goals_assists?.map(r=>r.player+':'+r.total).join('|'),
+        g: before.data.goals?.map(r=>r.player+':'+r.goals).join('|'),
+        a: before.data.assists?.map(r=>r.player+':'+r.assists).join('|')
+      });
       store.update(s => {
         ['goals_assists','goals','assists'].forEach(key => {
           if(!patch[key]) return;
@@ -62,6 +68,17 @@
         s.data.assists && (s.data.assists = s.data.assists.slice(0,10));
         s.lastUpdated = Date.now();
       });
+      const after = store.get();
+      const newSig = JSON.stringify({
+        ga: after.data.goals_assists?.map(r=>r.player+':'+r.total).join('|'),
+        g: after.data.goals?.map(r=>r.player+':'+r.goals).join('|'),
+        a: after.data.assists?.map(r=>r.player+':'+r.assists).join('|')
+      });
+      // Если сигнатура не изменилась (или стала пустой при наличии патча) — считаем патч неприменим → полная перезагрузка
+      if(prevSig === newSig || (!after.data.goals_assists?.length && (patch.goals_assists||patch.goals||patch.assists))){
+        // fallback полный refetch (force)
+        try { fetchData(true); } catch(_) {}
+      }
       persist(store.get());
     }
 
@@ -155,6 +172,19 @@
     // ленивый старт
     const lazy = () => fetchData(false).catch(()=>{});
     if('requestIdleCallback' in window){ requestIdleCallback(lazy, { timeout: 2000 }); } else setTimeout(lazy,0);
+
+    // Periodic refresh only if no WS (graceful degradation)
+    try {
+      const hasWS = !!(window.__WEBSOCKETS_ENABLED__ || window.io);
+      if(!hasWS){
+        setInterval(()=>{
+          try {
+            const st = store.get();
+            if(Date.now() - st.lastUpdated > TTL){ fetchData(false); }
+          } catch(_) {}
+        }, Math.min(45_000, TTL)); // проверяем чаще, но refetch только по TTL
+      }
+    } catch(_) {}
 
   console.log('[LeaderboardsStore] initialized', { cached: !!cached });
   } catch(e){ console.warn('[LeaderboardsStore] init failed', e); }

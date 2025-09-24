@@ -399,6 +399,72 @@ localStorage.setItem('feature:profile_store', '1');
 
 Цель: донести до пользователя факт разблокировки достижения и выданных наград (XP/кредиты), не нарушая текущую архитектуру (без бандлера, совместимо с Vanilla JS).
 
+---
+
+## LeaderboardsStore (Расширенная статистика лиги, Swiper 12.7)
+
+Агрегированные топ‑10 списки по метрикам: "Лучший игрок (Г+П)", "Лучший бомбардир", "Лучший ассистент". Один HTTP‑запрос + дифф патчи по WS.
+
+State shape:
+```
+{
+  activeTab: 'ga'|'g'|'a',
+  data: { goals_assists: Row[], goals: Row[], assists: Row[] },
+  etag: string|null,
+  updatedAt: string|null,      // server payload timestamp
+  lastUpdated: number|null,    // local ms timestamp
+  loading: boolean,
+  error: string|null
+}
+```
+Row:
+```
+{ player_id?: number, player: string, goals?: number, assists?: number, total?: number }
+```
+
+Источник данных: GET `/api/league/stats/leaderboards` → `{ goals_assists, goals, assists, updated_at }` + ETag. Все три массива возвращаются сразу (минимизация запросов).
+
+Кэширование / SWR:
+- Client TTL = 90s (SWR окно). Если `Date.now() - lastUpdated < TTL` → повторный ensureFresh() не делает сетевой запрос.
+- ETag используется в `If-None-Match` → 304 не изменяет состояние.
+
+WebSocket диффы:
+- Сервер отправляет событие (topic `leaderboards_patch`) c payload вида `{ goals_assists?: Row[], goals?: Row[], assists?: Row[] }` — только изменившиеся записи.
+- `applyPatch` мержит по `player_id` (fallback по имени), затем пересортировка и усечение до top‑10.
+
+Сортировки:
+- goals_assists: total desc, goals desc, assists desc, player asc
+- goals: goals desc, assists desc, player asc
+- assists: assists desc, goals desc, player asc
+
+UI рендер:
+- Lazy создание DOM для невидимых слайдов (visited set)
+- Skeleton строки (10) заполняются сразу; по приходу данных выполняется keyed diff (минимальные DOM изменения)
+- Без автоперелистывания; ручная навигация стрелками
+
+Graceful degradation:
+- Если WS недоступен (`!window.__WEBSOCKETS_ENABLED__ && !window.io`) → включается фоновой интервал (≤45s) проверки TTL; реальный refetch выполняется только когда TTL истёк.
+- Если дифф не изменил сигнатуру списков (или списки стали пустыми вопреки наличию patch) → выполняется принудительный полный refetch (self-heal против неконсистентного патча).
+
+Persist:
+- Кэшируется (localStorage) `data` + `etag` для быстрой первой отрисовки, пока не пришёл актуальный ответ.
+
+Публичный API:
+- `setActiveTab(tab)`
+- `ensureFresh(force=false)`
+- `applyPatch(patch)`
+- `subscribe(listener)`
+
+Edge cases:
+- 304 → не меняем `lastUpdated`, чтобы не сбивать SWR; UI остаётся стабильным.
+- Пустые массивы корректны: skeleton скрывается после первой успешной загрузки (не 304).
+- Отсутствие `player_id` в патче (fallback режим) не приводит к дубликатам за счёт сравнения имени.
+
+Потенциальные будущие расширения:
+- Метрики xG/xA (расширение Row — UI адаптируется без изменения протокола)
+- Добавление удаления записей через специальный ключ `removed: [player_id...]`
+- Слияние с общим realtime bus для батчинга нескольких патчей в один animation frame.
+
 ### Поток данных и поведения
 
 - Источник данных: `/api/achievements` (ETag, If-None-Match). Клиентская логика использует существующий `etag-fetch.js` и слушает события `etag:success`.
