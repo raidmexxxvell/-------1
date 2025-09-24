@@ -1482,11 +1482,11 @@ body.theme-blb .share-btn {
 .ls-nav-btn { background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.1); padding:6px 10px; border-radius:8px; cursor:pointer; font-weight:600; }
 .ls-nav-btn:disabled { opacity:.35; cursor:default; }
 #ls-track { display:flex; width:300%; transition:transform .35s ease; }
-.league-stats-swiper .league-table-wrap { width:95vw; max-width:95vw; margin:0 auto; overflow-x:auto; }
-.league-stats-swiper .league-table { table-layout:fixed; }
+.league-stats-swiper .league-table-wrap { width:95vw; max-width:95vw; margin:0 auto; overflow:hidden; }
+.league-stats-swiper .league-table { table-layout:fixed; width:100%; }
 .league-stats-swiper .league-table th, .league-stats-swiper .league-table td { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 #ls-track { width:calc(3 * var(--ls-slide-w)); }
-.ls-slide { width:100%; flex:0 0 100%; padding:0 2px; }
+.ls-slide { width:100%; flex:0 0 100%; padding:0; overflow:hidden; }
 .ls-slide[aria-hidden="true"] { pointer-events:none; }
 .ls-slide.placeholder { display:flex; align-items:center; justify-content:center; min-height:210px; }
 .stats-placeholder { opacity:.5; font-size:12px; }
@@ -1504,10 +1504,14 @@ body.theme-blb .share-btn {
 .league-stats-swiper .league-table th:nth-child(n+1),
 .league-stats-swiper .league-table td:nth-child(n+1) { display: table-cell !important; }
 /* Узкие числовые колонки */
-.league-stats-swiper .league-table th:nth-last-child(-n+4),
-.league-stats-swiper .league-table td:nth-last-child(-n+4) { width:46px; }
+.league-stats-swiper .league-table th:first-child,
+.league-stats-swiper .league-table td:first-child { width:30px; text-align:center; }
+.league-stats-swiper .league-table th:nth-child(2),
+.league-stats-swiper .league-table td:nth-child(2) { width:auto; min-width:0; }
+.league-stats-swiper .league-table th:nth-child(n+3),
+.league-stats-swiper .league-table td:nth-child(n+3) { width:36px; text-align:center; }
 @media (max-width:460px){
-    .league-stats-swiper .league-table th:nth-last-child(-n+4),
-    .league-stats-swiper .league-table td:nth-last-child(-n+4) { width:40px; font-size:12px; }
-    .league-stats-swiper .league-table td:nth-child(2){ max-width:110px; }
+  .league-stats-swiper .league-table th:nth-child(n+3),
+  .league-stats-swiper .league-table td:nth-child(n+3) { width:32px; font-size:12px; }
+  .league-stats-swiper .league-table td:nth-child(2){ font-size:13px; }
 }
