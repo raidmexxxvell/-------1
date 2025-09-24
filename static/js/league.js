@@ -716,13 +716,12 @@
   // Экспортируем публичные методы, чтобы realtime-updates мог дергать refreshTable / refreshSchedule / renderResults
   window.League = { batchAppend, renderLeagueTable, renderStatsTable, renderSchedule, renderResults, setUpdatedLabelSafely, refreshTable, refreshSchedule };
 
-  // === Расширенная статистика (Swiper) ===
+  // === Расширенная статистика (Swiper) через LeaderboardsStore + feature flag ===
   function initLeagueStatsSwiper(){
-    try {
-      if (document.getElementById('ls-track').__inited) {return;}
-    } catch(_) {}
+    // Фича-флаг проверяется в самом сторе; здесь дополнительно не мешаемся
+    try { if (document.getElementById('ls-track').__inited) return; } catch(_) {}
     const track = document.getElementById('ls-track');
-    if(!track) {return;}
+    if(!track) return;
     track.__inited = true;
     const slides = Array.from(track.querySelectorAll('.ls-slide'));
     const btnPrev = document.getElementById('ls-prev');
@@ -730,93 +729,79 @@
     const title = document.getElementById('ls-title');
     const TITLES = ['Лучший игрок (Г+П)','Лучший бомбардир','Лучший ассистент'];
     let idx = 0;
-    let dataCache = null; // кэш ответа API
-    let fetching = false;
 
     function updateNav(){
-      if(btnPrev){ btnPrev.disabled = idx<=0; }
-      if(btnNext){ btnNext.disabled = idx>=slides.length-1; }
-      if(title){ title.innerHTML = '<span class="ls-arrows">⟵</span> '+TITLES[idx]+' <span class="ls-arrows">⟶</span>'; }
+      if(btnPrev) btnPrev.disabled = idx<=0;
+      if(btnNext) btnNext.disabled = idx>=slides.length-1;
+      if(title) title.innerHTML = '<span class="ls-arrows">⟵</span> '+TITLES[idx]+' <span class="ls-arrows">⟶</span>';
     }
 
-    function ensureData(){
-      if (dataCache || fetching) {return Promise.resolve(dataCache);}    
-      fetching = true;
-      const headers = { 'Cache-Control': 'no-cache' };
-      try {
-        const et = localStorage.getItem('ls:etag');
-        if (et) { headers['If-None-Match'] = et; }
-      } catch(_) {}
-      return fetch('/api/league/stats/leaderboards', { headers, cache: 'no-store' })
-        .then(r => {
-          if (r.status === 304) {
-            try { const stored = JSON.parse(localStorage.getItem('ls:data')||'null'); if (stored) { dataCache = stored; } } catch(_) {}
-            return dataCache;
-          }
-          return r.json().then(j => { 
-            dataCache = j; 
-            try { localStorage.setItem('ls:data', JSON.stringify(j)); localStorage.setItem('ls:etag', r.headers.get('ETag')||''); } catch(_) {}
-            return j; 
-          });
-        })
-        .catch(()=>dataCache)
-        .finally(()=>{ fetching=false; });
+    function buildTable(list, updatedAt){
+      const wrap = document.createElement('div'); wrap.className='league-table-wrap';
+      const table = document.createElement('table'); table.className='league-table';
+      const thead = document.createElement('thead'); thead.innerHTML = '<tr><th>#</th><th>Игрок</th><th>Команда</th><th>И</th><th>Г</th><th>П</th><th>Г+П</th></tr>';
+      const tbody = document.createElement('tbody');
+      for(let i=0;i<10;i++){
+        const r = list && list[i];
+        const tr = document.createElement('tr');
+        const cols = r ? [i+1, r.player||'', r.team||'', r.games||0, r.goals||0, r.assists||0, r.total||0] : [i+1,'—','',0,0,0,0];
+        cols.forEach(c=>{ const td=document.createElement('td'); td.textContent=String(c); tr.appendChild(td); });
+        if(i===0) tr.classList.add('rank-1'); else if(i===1) tr.classList.add('rank-2'); else if(i===2) tr.classList.add('rank-3');
+        tbody.appendChild(tr);
+      }
+      table.append(thead, tbody);
+      const upd = document.createElement('div'); upd.className='table-updated'; upd.textContent = updatedAt ? ('Обновлено: '+ new Date(updatedAt).toLocaleString()) : '';
+      wrap.append(table, upd);
+      return wrap;
     }
 
-    function renderSlide(which){
-      ensureData().then(d => {
-        if(!d){return;}
-        let arr = [];
-        if(which==='ga'){ arr = d.goals_assists||[]; }
-        else if(which==='g'){ arr = d.goals||[]; }
-        else if(which==='a'){ arr = d.assists||[]; }
-        const slide = track.querySelector('.ls-slide[data-ls="'+which+'"]');
-        if(!slide) {return;}
-        // если внутри уже есть таблица с tbody (кроме placeholder) — не перерисовываем
-        const existing = slide.querySelector('table.league-table tbody');
-        if(existing && existing.children.length>0) {return;}
-        if(slide.classList.contains('placeholder')) { slide.classList.remove('placeholder'); slide.innerHTML=''; }
-        const wrap = document.createElement('div'); wrap.className='league-table-wrap';
-        const table = document.createElement('table'); table.className='league-table';
-        const thead = document.createElement('thead');
-        thead.innerHTML = '<tr><th>#</th><th>Игрок</th><th>Команда</th><th>И</th><th>Г</th><th>П</th><th>Г+П</th></tr>';
-        const tbody = document.createElement('tbody');
-        for(let i=0;i<10;i++){
-          const r = arr[i];
-            const tr = document.createElement('tr');
-            const cols = r ? [i+1, r.player||'', r.team||'', r.games||0, r.goals||0, r.assists||0, r.total||0] : [i+1,'—','',0,0,0,0];
-            cols.forEach((c,ci)=>{ const td=document.createElement('td'); td.textContent=String(c); tr.appendChild(td); });
-            if(i===0) tr.classList.add('rank-1'); else if(i===1) tr.classList.add('rank-2'); else if(i===2) tr.classList.add('rank-3');
-            tbody.appendChild(tr);
-        }
-        table.append(thead, tbody);
-        const upd = document.createElement('div'); upd.className='table-updated'; upd.textContent = d.updated_at ? ('Обновлено: '+ new Date(d.updated_at).toLocaleString()) : '';
-        wrap.append(table, upd);
-        slide.appendChild(wrap);
+    function renderSlides(){
+      const st = window.LeaderboardsStore?.get();
+      if(!st) return;
+      slides.forEach(sl => {
+        const type = sl.getAttribute('data-ls');
+        let list = null;
+        if(type==='ga') list = st.data.goals_assists;
+        else if(type==='g') list = st.data.goals;
+        else if(type==='a') list = st.data.assists;
+        if(!list) return; // ждём загрузку
+        if(sl.__renderedVersion === st.lastUpdated) return; // уже актуально
+        sl.innerHTML='';
+        sl.appendChild(buildTable(list, st.updatedAt));
+        sl.__renderedVersion = st.lastUpdated;
       });
     }
 
-    // Рендер первого (уже есть таблица в разметке, но нужно заполнить)
-    renderSlide('ga');
-    // Навигация
     function go(n){
-      if(n<0||n>=slides.length||n===idx) {return;}
+      if(n<0||n>=slides.length||n===idx) return;
       slides[idx].classList.remove('active'); slides[idx].setAttribute('aria-hidden','true');
       idx = n;
       slides[idx].classList.add('active'); slides[idx].removeAttribute('aria-hidden');
       track.style.transform = 'translateX(' + (-idx*100) + '%)';
       updateNav();
-      const which = slides[idx].getAttribute('data-ls');
-      renderSlide(which);
+      const map = ['ga','g','a'];
+      const storeMap = { ga:'ga', g:'goals', a:'assists' };
+      try { window.LeaderboardsStoreAPI?.setActiveTab(storeMap[map[idx]]); } catch(_) {}
+      renderSlides();
     }
     btnPrev && btnPrev.addEventListener('click', ()=>go(idx-1));
     btnNext && btnNext.addEventListener('click', ()=>go(idx+1));
-    // Swipe support
     let startX=0, dragging=false;
     track.addEventListener('pointerdown', e=>{ dragging=true; startX=e.clientX; });
     track.addEventListener('pointerup', e=>{ if(!dragging) return; const dx=e.clientX-startX; dragging=false; if(Math.abs(dx)>40){ if(dx<0) go(idx+1); else go(idx-1);} });
-    track.addEventListener('pointerleave', e=>{ if(dragging){ dragging=false; }});
-    track.addEventListener('pointermove', e=>{ /* можно добавить превью сдвига */ });
+    track.addEventListener('pointerleave', ()=>{ if(dragging) dragging=false; });
+
+    // Подписка на стор
+    (function waitStore(){
+      if(window.LeaderboardsStore){
+        try { window.LeaderboardsStore.subscribe(()=>{ renderSlides(); }); } catch(_) {}
+        try { window.LeaderboardsStoreAPI?.ensureFresh(); } catch(_) {}
+        renderSlides();
+      } else {
+        setTimeout(waitStore,120);
+      }
+    })();
+
     updateNav();
   }
   window.initLeagueStatsSwiper = initLeagueStatsSwiper;
