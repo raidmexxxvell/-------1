@@ -844,6 +844,14 @@ MATCH_DETAILS_TTL = 30  # сек
 # Глобальный кэш таблицы бомбардиров
 SCORERS_CACHE = {'ts': 0, 'items': []}
 
+# Расширенный кэш расширенных лидербордов статистики игроков (Goals+Assists / Goals / Assists)
+LEAGUE_EXTENDED_STATS_CACHE = {
+    'data': None,   # {'updated_at': iso, 'goals_assists': [...], 'goals': [...], 'assists': [...], 'etag': '...'}
+    'ts': 0,
+    'etag': None
+}
+LEAGUE_EXTENDED_STATS_TTL = 30  # секунды — обновляется быстро после событий, но не чаще чем раз в 30с
+
 # Ranks cache for odds models (avoid frequent Sheets reads)
 RANKS_CACHE = {'data': None, 'ts': 0}
 
@@ -1095,6 +1103,128 @@ LEADER_SERVER_CACHE = {'data': None, 'ts': 0, 'etag': ''}
 LEADER_PRIZES_CACHE = {'data': None, 'ts': 0, 'etag': ''}
 LEADER_TTL = 60 * 60  # 1 час
 LEADERBOARD_ITEMS_CAP = int(os.environ.get('LEADERBOARD_ITEMS_CAP', '100'))  # safety cap for items length
+
+@app.route('/api/league/stats/leaderboards')
+def api_league_extended_leaderboards():
+    """Агрегированные лидерборды лиги: Goals+Assists, Goals, Assists (top 10).
+    Используется во вкладке расширенной статистики. Минимизируем нагрузку:
+    - Один SQL проход по событиям + составам
+    - Кэш в памяти на 30 секунд с ETag
+    - Условные запросы If-None-Match
+    """
+    try:
+        global LEAGUE_EXTENDED_STATS_CACHE
+        now = time.time()
+        cache = LEAGUE_EXTENDED_STATS_CACHE
+        # Быстрый путь — свежий кэш
+        if cache['data'] and (now - cache['ts'] < LEAGUE_EXTENDED_STATS_TTL):
+            etag = cache.get('etag')
+            inm = request.headers.get('If-None-Match')
+            if etag and inm and inm == etag:
+                return ('', 304)
+            resp = make_response(jsonify(cache['data']))
+            if etag:
+                resp.headers['ETag'] = etag
+            resp.headers['Cache-Control'] = 'no-store'
+            return resp
+
+        session: Session | None = None
+        if SessionLocal:
+            session = SessionLocal()
+        players: dict[str, dict] = {}
+        try:
+            if session is not None:
+                # События голов/передач
+                ev_rows = session.execute(text("""
+                    SELECT player_name, event_type, COUNT(*) AS cnt
+                    FROM match_player_events
+                    WHERE event_type IN ('goal','assist')
+                    GROUP BY player_name, event_type
+                """)).fetchall()
+                for r in ev_rows:
+                    name = (r.player_name or '').strip()
+                    if not name:
+                        continue
+                    p = players.setdefault(name, {'player': name, 'team': '', 'games': 0, 'goals': 0, 'assists': 0})
+                    if r.event_type == 'goal':
+                        p['goals'] += int(r.cnt or 0)
+                    elif r.event_type == 'assist':
+                        p['assists'] += int(r.cnt or 0)
+                # Игры (уникальные матчи в составе)
+                game_rows = session.execute(text("""
+                    SELECT player_name, COUNT(DISTINCT match_id) AS games
+                    FROM match_lineup_players
+                    GROUP BY player_name
+                """)).fetchall()
+                for r in game_rows:
+                    name = (r.player_name or '').strip()
+                    if not name:
+                        continue
+                    p = players.setdefault(name, {'player': name, 'team': '', 'games': 0, 'goals': 0, 'assists': 0})
+                    p['games'] = int(r.games or 0)
+                # Последняя команда игрока (упрощённо — самый последний по id)
+                team_rows = session.execute(text("""
+                    SELECT player_name, team_name
+                    FROM match_lineup_players
+                    WHERE player_name != ''
+                    ORDER BY id DESC
+                """)).fetchall()
+                seen = set()
+                for r in team_rows:
+                    name = (r.player_name or '').strip()
+                    if not name or name in seen:
+                        continue
+                    seen.add(name)
+                    p = players.get(name)
+                    if p:
+                        p['team'] = r.team_name or ''
+        except Exception as e:
+            if session is not None:
+                session.rollback()
+            print('[WARN] extended leaderboards aggregation failed', e)
+        finally:
+            if session is not None:
+                session.close()
+
+        rows = []
+        for p in players.values():
+            rows.append({
+                'player': p['player'],
+                'team': p.get('team') or '',
+                'games': int(p.get('games') or 0),
+                'goals': int(p.get('goals') or 0),
+                'assists': int(p.get('assists') or 0),
+                'total': int(p.get('goals') or 0) + int(p.get('assists') or 0)
+            })
+
+        def sort_top(key_main):
+            return sorted(rows, key=lambda x: (-x[key_main], x['games'], x['player']))[:10]
+
+        goals_assists = sorted(rows, key=lambda x: (-x['total'], x['games'], x['player']))[:10]
+        goals_only = sort_top('goals')
+        assists_only = sort_top('assists')
+        payload = {
+            'updated_at': datetime.utcnow().isoformat() + 'Z',
+            'goals_assists': goals_assists,
+            'goals': goals_only,
+            'assists': assists_only
+        }
+        etag_val = 'lx-' + str(hash(json.dumps(payload, sort_keys=True)))
+        LEAGUE_EXTENDED_STATS_CACHE = {
+            'data': payload,
+            'ts': now,
+            'etag': etag_val
+        }
+        inm = request.headers.get('If-None-Match')
+        if inm and inm == etag_val:
+            return ('', 304)
+        resp = make_response(jsonify(payload))
+        resp.headers['ETag'] = etag_val
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except Exception as e:
+        print('[ERROR] api_league_extended_leaderboards:', e)
+        return jsonify({'error': 'internal_error'}), 500
 
 def _week_period_start_msk_to_utc(now_utc: datetime|None = None) -> datetime:
     """Возвращает UTC-время начала текущего лидерборд-периода: понедельник 03:00 по МСК (UTC+3).

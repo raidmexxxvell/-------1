@@ -1473,3 +1473,17 @@ body.theme-blb .share-btn {
     0% { color: #ffd166; }
     100% { color: inherit; }
 }
+
+/* === League Extended Stats Swiper === */
+.league-stats-swiper { position:relative; overflow:hidden; }
+.league-stats-swiper .ls-header { display:flex; align-items:center; justify-content:space-between; padding:4px 4px 8px; }
+.ls-title { font-weight:800; font-size:14px; text-align:center; flex:1; }
+.ls-arrows { opacity:.35; font-size:12px; margin:0 4px; }
+.ls-nav-btn { background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.1); padding:6px 10px; border-radius:8px; cursor:pointer; font-weight:600; }
+.ls-nav-btn:disabled { opacity:.35; cursor:default; }
+#ls-track { display:flex; width:300%; transition:transform .35s ease; }
+.ls-slide { width:100%; flex:0 0 100%; padding:0 2px; }
+.ls-slide[aria-hidden="true"] { pointer-events:none; }
+.ls-slide.placeholder { display:flex; align-items:center; justify-content:center; min-height:210px; }
+.stats-placeholder { opacity:.5; font-size:12px; }
+@media (min-width:600px){ .ls-title { font-size:15px; } }

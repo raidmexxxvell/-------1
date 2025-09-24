@@ -276,22 +276,36 @@
                     </div>
                 </div>
                 <div id="ufo-stats" class="ufo-pane" style="display:none;">
-                    <div class="league-table-wrap">
-                        <table class="league-table" id="stats-table">
-                            <thead>
-                                <tr>
-                                    <th>Игрок</th>
-                                    <th>И</th>
-                                    <th>Г</th>
-                                    <th>П</th>
-                                    <th>Г+П</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <!-- до 10 строк будут заполнены через JS -->
-                            </tbody>
-                        </table>
-                        <div class="table-updated" id="stats-table-updated"></div>
+                    <div class="league-stats-swiper" id="league-stats-swiper" aria-roledescription="carousel">
+                        <div class="ls-header">
+                            <button class="ls-nav-btn" id="ls-prev" aria-label="Предыдущая таблица" disabled>←</button>
+                            <div class="ls-title" id="ls-title" aria-live="polite"><span class="ls-arrows">⟵</span> Лучший игрок (Г+П) <span class="ls-arrows">⟶</span></div>
+                            <button class="ls-nav-btn" id="ls-next" aria-label="Следующая таблица">→</button>
+                        </div>
+                        <div class="ls-track" id="ls-track">
+                            <!-- Слайд 0: Goals+Assists (текущая таблица) -->
+                            <div class="ls-slide active" data-ls="ga">
+                                <div class="league-table-wrap">
+                                    <table class="league-table" id="stats-table-ga">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th><th>Игрок</th><th>Команда</th><th>И</th><th>Г</th><th>П</th><th>Г+П</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody></tbody>
+                                    </table>
+                                    <div class="table-updated" id="stats-ga-updated"></div>
+                                </div>
+                            </div>
+                            <!-- Слайд 1: Goals -->
+                            <div class="ls-slide" data-ls="g" aria-hidden="true">
+                                <div class="league-table-wrap placeholder"><div class="stats-placeholder">Загрузка...</div></div>
+                            </div>
+                            <!-- Слайд 2: Assists -->
+                            <div class="ls-slide" data-ls="a" aria-hidden="true">
+                                <div class="league-table-wrap placeholder"><div class="stats-placeholder">Загрузка...</div></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div id="ufo-schedule" class="ufo-pane" style="display:none;">Загрузка расписания...</div>

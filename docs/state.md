@@ -39,11 +39,13 @@
 - `window.MatchesStoreAPI` — расширенный API для работы с матчами:
   - `updateMatchStats(matchKey, stats)` — обновление статистики матча
   - `getMatchStats(matchKey)` — получение статистики матча
+  - `getMatch(matchKey)` — получение полной записи матча (info/score/events/stats/rosters)
+  - `updateMatch(matchKey, fields)` — универсальный патч полей записи матча (info/score/events/rosters/stats)
   - `findMatchByTeams(home, away)` — поиск матча по командам
 
 ## Статистика матчей и составы команд (обновлено)
 
-### Единый источник истины через MatchesStore
+### Единый источник истины через MatchesStore (обновлено)
 **Проблема**: До внедрения использовались множественные источники данных:
 - Локальный кэш: `mdPane.__lastRosters`, `mdPane.__lastEvents`
 - Независимые fetch запросы из `profile-match-advanced.js`
@@ -51,6 +53,8 @@
 - MatchesStore (частично)
 
 Это создавало рассинхронизацию — разные части системы обновлялись в разное время и перезаписывали друг друга.
+
+СЕНТ 2025: закреплено правило SSOT (Single Source of Truth) для матчей — первичным источником истины является `MatchesStore`. Реестр событий `__MatchEventsRegistry` используется только как вспомогательный кэш/фоллбек, но все подтверждённые данные (счёт, события, составы, статистика) проходят через `MatchesStoreAPI.updateMatch()`.
 
 ### Решение: Store-Driven UI
 **Статистика матча** (✅ РАБОТАЕТ):
@@ -67,7 +71,7 @@
 
 ### Архитектура обновлений
 ```
-WebSocket Event → ws_listeners.ts → MatchesStore → match_legacy_bridge.ts → UI Update
+WebSocket (data_patch/topic_update) → ws_listeners.ts → MatchesStoreAPI.updateMatch → MatchesStore → match_legacy_bridge.ts → UI
 ```
 
 **Ключевые принципы:**
@@ -216,6 +220,17 @@ interface MatchStats {
 - Поиск текущего матча: по текстам в `#md-home-name`/`#md-away-name` сопоставляет записи из `MatchesStore.map` и выбирает последнюю по `lastUpdated`.
  - Анти‑мерцание счёта: мост всегда передаёт «эффективный счёт» в оригинальный рендер (store.score → кэш панели → парсинг DOM), а после рендера восстанавливает счёт, если легаси выставил placeholder `— : —`/`- : -`.
  - Store‑driven события для пользователей: установлен глобальный слушатель `eventsRegistryUpdate` (только для не‑админов и текущего матча), который обновляет кэш панели и вызывает `renderRostersFromStore()` с debounce (~120 мс) — события игроков синхронизируются без refetch и без мерцаний.
+
+### ДО/ПОСЛЕ (счёт и события)
+
+ДО:
+- Счёт и события обновлялись через несколько разнонаправленных путей (WS → прямой DOM, topic_update → рефетч, локальные кэши в модуле деталей матча).
+- Легаси-скрипты иногда проставляли placeholder `— : —`, что вызывало мерцание.
+
+ПОСЛЕ:
+- Любые патчи по матчу нормализуются в `ws_listeners.ts` и записываются в `MatchesStore` через `MatchesStoreAPI.updateMatch()`.
+- UI берёт данные через мост `match_legacy_bridge.ts`, который теперь в первую очередь читает `MatchesStoreAPI` и больше не инициирует placeholder.
+- Прямые DOM‑записи счёта сохранились только как визуальный апдейт (без изменения источника данных) и не конфликтуют со стором.
 
 ## Shop интеграция со стором (Этап 5 завершен)
 
