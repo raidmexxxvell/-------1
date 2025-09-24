@@ -1497,3 +1497,10 @@ body.theme-blb .share-btn {
 @keyframes sk-pulse { 0%{ background-position:0 0;} 100%{ background-position:-200% 0;} }
 @media (prefers-reduced-motion: reduce){ .sk-bar { animation:none; } }
 @media (min-width:600px){ .ls-title { font-size:15px; } }
+/* Override: в общем стилях могут скрываться столбцы для компактных таблиц.
+    Для расширенной статистики всегда показываем все 7 колонок и заголовок. */
+.league-stats-swiper .league-table thead { display: table-header-group !important; }
+.league-stats-swiper .league-table th,
+.league-stats-swiper .league-table td { display: table-cell !important; }
+.league-stats-swiper .league-table th:nth-child(n+1),
+.league-stats-swiper .league-table td:nth-child(n+1) { display: table-cell !important; }
