@@ -5033,9 +5033,9 @@ def _team_overview_from_results_snapshot(db: Session, team_name: str) -> dict:
             tga = g2 if is_team_home else g1
             matches += 1
             gf += tgf; ga += tga
-            if tgf > tga: w += 1; last5.append('W')
-            elif tgf == tga: d += 1; last5.append('D')
-            else: l += 1; last5.append('L')
+            if tgf > tga: w += 1; last5.append('В')
+            elif tgf == tga: d += 1; last5.append('Н')
+            else: l += 1; last5.append('П')
             if tga == 0: cs += 1
             # собираем последние матчи с соперником (для секции «Форма»)
             try:
@@ -5048,7 +5048,7 @@ def _team_overview_from_results_snapshot(db: Session, team_name: str) -> dict:
                 recent_buf.append({
                     'opponent': opp or None,
                     'score': score_txt,
-                    'result': ('W' if tgf>tga else ('D' if tgf==tga else 'L')),
+                    'result': ('В' if tgf>tga else ('Н' if tgf==tga else 'П')),
                     'date': dt
                 })
             except Exception:
@@ -5184,9 +5184,9 @@ def api_team_overview():
                             is_home = team_id and h_id == team_id
                             tgf = hs if is_home else as_
                             tga = as_ if is_home else hs
-                            if tgf > tga: last5.append('W')
-                            elif tgf == tga: last5.append('D')
-                            else: last5.append('L')
+                            if tgf > tga: last5.append('В')
+                            elif tgf == tga: last5.append('Н')
+                            else: last5.append('П')
                             if len(recent) < 5:
                                 opp_id = a_id if is_home else h_id
                                 opp_name_row = db.execute(text("SELECT name FROM teams WHERE id=:id"), { 'id': opp_id }).first()
@@ -5198,7 +5198,7 @@ def api_team_overview():
                                     else: dt_iso = str(upd_at)
                                 except Exception:
                                     dt_iso = None
-                                recent.append({ 'date': dt_iso, 'opponent': opp_name, 'score': score_text, 'result': ('W' if tgf>tga else ('D' if tgf==tga else 'L')) })
+                                recent.append({ 'date': dt_iso, 'opponent': opp_name, 'score': score_text, 'result': ('В' if tgf>tga else ('Н' if tgf==tga else 'П')) })
                         except Exception:
                             continue
                 # Если team_id отсутствует (искали по имени), достроим last5/recent по join-у с teams
@@ -5224,7 +5224,7 @@ def api_team_overview():
                                 is_home = (str(h_name or '').lower() == nm_low)
                                 tgf = hs if is_home else as_
                                 tga = as_ if is_home else hs
-                                last5.append('W' if tgf>tga else ('D' if tgf==tga else 'L'))
+                                last5.append('В' if tgf>tga else ('Н' if tgf==tga else 'П'))
                                 if len(recent) < 5:
                                     opp_name = a_name if is_home else h_name
                                     score_text = f"{tgf}:{tga}"
@@ -5234,7 +5234,7 @@ def api_team_overview():
                                         else: dt_iso = str(upd_at)
                                     except Exception:
                                         dt_iso = None
-                                    recent.append({ 'date': dt_iso, 'opponent': opp_name, 'score': score_text, 'result': ('W' if tgf>tga else ('D' if tgf==tga else 'L')) })
+                                    recent.append({ 'date': dt_iso, 'opponent': opp_name, 'score': score_text, 'result': ('В' if tgf>tga else ('Н' if tgf==tga else 'П')) })
                             except Exception:
                                 continue
                     except Exception:

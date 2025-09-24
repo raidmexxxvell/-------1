@@ -462,12 +462,36 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 #ufo-team .badge-draw { background: rgba(139,139,145,0.18); color: #d1d5db; border: 1px solid rgba(139,139,145,0.35); }
 #ufo-team .badge-loss { background: rgba(239,68,68,0.18); color: #ef4444; border: 1px solid rgba(239,68,68,0.35); }
 
-/* Адаптив: на узких экранах перенос по 3/4 в ряд */
-@media (max-width: 520px){
-    #ufo-team .team-form { grid-template-columns: repeat(3, 1fr); }
+/* Всегда отображаем 5 игр в ряду */
+@media (max-width: 400px){
+    #ufo-team .team-form { 
+        grid-template-columns: repeat(5, 1fr); 
+        gap: 4px; /* Минимальные отступы на очень маленьких экранах */
+    }
+    #ufo-team .form-item {
+        padding: 4px; /* Минимальные внутренние отступы */
+    }
+    #ufo-team .form-item .logo-wrap { width: 28px; height: 28px; } /* Ещё меньше логотипы */
+    #ufo-team .form-item .logo { width: 28px; height: 28px; }
+    #ufo-team .form-date { font-size: 10px; } /* Уменьшаем размер шрифта дат */
+    #ufo-team .form-item .meta { font-size: 10px; } /* Уменьшаем размер мета-информации */
+}
+@media (min-width: 401px) and (max-width: 520px){
+    #ufo-team .team-form { 
+        grid-template-columns: repeat(5, 1fr); 
+        gap: 6px; /* Уменьшаем отступы на мобильных */
+    }
+    #ufo-team .form-item {
+        padding: 6px; /* Уменьшаем внутренние отступы */
+    }
+    #ufo-team .form-item .logo-wrap { width: 32px; height: 32px; } /* Уменьшаем размер логотипов */
+    #ufo-team .form-item .logo { width: 32px; height: 32px; }
 }
 @media (min-width: 521px) and (max-width: 680px){
-    #ufo-team .team-form { grid-template-columns: repeat(4, 1fr); }
+    #ufo-team .team-form { 
+        grid-template-columns: repeat(5, 1fr); 
+        gap: 8px;
+    }
 }
 
 /* Статистика: крупная карточка + мини-карточки */
@@ -493,11 +517,11 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 #ufo-team .stat-summary { position:relative; }
 #ufo-team .summary-right { padding-left:10px; }
-#ufo-team .gauge svg { height:90px; }
-#ufo-team .gauge .gauge-text { position:static; transform:none; margin-top:-32px; display:flex; flex-direction:column; align-items:center; }
+#ufo-team .gauge svg { height:100px; }
+#ufo-team .gauge .gauge-text { position:static; transform:none; margin-top:-40px; display:flex; flex-direction:column; align-items:center; }
 #ufo-team .gauge svg { overflow: visible; }
-#ufo-team .gauge path.track { stroke: rgba(255,255,255,0.08); stroke-width: 10; fill:none; stroke-linecap:round; }
-#ufo-team .gauge path.segment { stroke-width: 10; fill:none; stroke-linecap: round; filter: drop-shadow(0 0 2px rgba(0,0,0,0.3)); }
+#ufo-team .gauge path.track { stroke: rgba(255,255,255,0.08); stroke-width: 12; fill:none; stroke-linecap:round; }
+#ufo-team .gauge path.segment { stroke-width: 12; fill:none; stroke-linecap: round; filter: drop-shadow(0 0 2px rgba(0,0,0,0.3)); }
 #ufo-team .gauge path.segment.seg-win { stroke: #10b981; }
 #ufo-team .gauge path.segment.seg-draw { stroke: #9aa4b2; }
 #ufo-team .gauge path.segment.seg-loss { stroke: #ef4444; }

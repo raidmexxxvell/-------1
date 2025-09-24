@@ -92,13 +92,13 @@
       const scoreOverlay = document.createElement('div'); scoreOverlay.className='score-badge';
       const badge = document.createElement('div'); badge.className = 'badge';
       if (typeof r === 'string') {
-        badge.className += ' ' + (r==='W'?'badge-win':(r==='D'?'badge-draw':'badge-loss'));
+        badge.className += ' ' + (r==='В'?'badge-win':(r==='Н'?'badge-draw':'badge-loss'));
         badge.textContent = r;
         dt.textContent = '';
         scoreOverlay.textContent = '';
       } else {
-        const rr = r?.result || 'D';
-        badge.className += ' ' + (rr==='W'?'badge-win':(rr==='D'?'badge-draw':'badge-loss'));
+        const rr = r?.result || 'Н';
+        badge.className += ' ' + (rr==='В'?'badge-win':(rr==='Н'?'badge-draw':'badge-loss'));
         badge.textContent = rr;
         try { dt.textContent = r?.date ? new Date(r.date).toLocaleDateString() : ''; } catch(_) { dt.textContent = ''; }
         scoreOverlay.textContent = r?.score || '';
@@ -127,10 +127,10 @@
     const sum = w+d+l;
   if (total && sum && sum !== total){ const k= total/sum; wn=w*k; dn=d*k; ln=l*k; }
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-  svg.setAttribute('width','160'); svg.setAttribute('height','90'); svg.setAttribute('viewBox','0 0 160 90');
+  svg.setAttribute('width','160'); svg.setAttribute('height','100'); svg.setAttribute('viewBox','0 0 160 100');
   // Переворачиваем вертикально, чтобы дуга была сверху
   svg.style.transform = 'scaleY(-1)';
-  const centerX=80, centerY=20, radius=50; // центр дуги намного выше, радиус больше для лучшей видимости
+  const centerX=80, centerY=10, radius=55; // центр дуги ещё выше, радиус больше для лучшей видимости
     // Фон-трек
     const track = document.createElementNS('http://www.w3.org/2000/svg','path');
     track.setAttribute('d', describeArc(centerX, centerY, radius, 180, 0));
@@ -138,11 +138,11 @@
   svg.appendChild(track);
     // Подготовка сегментов
   const segments = [];
-  if (wn>0) { segments.push({label:'Победы', short:'W', value:w, adj:wn, colorClass:'seg-win'}); }
-  if (dn>0) { segments.push({label:'Ничьи', short:'D', value:d, adj:dn, colorClass:'seg-draw'}); }
-  if (ln>0) { segments.push({label:'Поражения', short:'L', value:l, adj:ln, colorClass:'seg-loss'}); }
+  if (wn>0) { segments.push({label:'Победы', short:'В', value:w, adj:wn, colorClass:'seg-win'}); }
+  if (dn>0) { segments.push({label:'Ничьи', short:'Н', value:d, adj:dn, colorClass:'seg-draw'}); }
+  if (ln>0) { segments.push({label:'Поражения', short:'П', value:l, adj:ln, colorClass:'seg-loss'}); }
     const usableAngle = 180;
-    const gapDeg = segments.length>1 ? 4 : 0; // межсегментный визуальный зазор
+    const gapDeg = segments.length>1 ? 6 : 0; // увеличенный межсегментный визуальный зазор
     const totalGap = gapDeg * (segments.length - 1);
     const scale = usableAngle - totalGap;
     let cursor = 180; // старт слева
@@ -153,7 +153,7 @@
       const path = document.createElementNS('http://www.w3.org/2000/svg','path');
       const innerGap = gapDeg && idx < segments.length-1 ? gapDeg : 0;
       // Для аккуратных закруглений слегка уменьшаем дугу
-      const pad = raw>4 ? 1.5 : 0; // не убивать совсем короткие
+      const pad = raw>6 ? 2 : 0; // увеличенное закругление для лучшего разделения
       const realStart = startAngle - pad;
       const realEnd = endAngle + pad;
       path.setAttribute('d', describeArc(centerX, centerY, radius, realStart, realEnd));
