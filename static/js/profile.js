@@ -550,6 +550,20 @@
                     scoreEl.textContent = '0 : 0';
                     const fetchScore = async () => {
                         try {
+                            // STORE-AWARE GUARD: если MatchesStore содержит свежий счёт (<40s) — применяем и выходим
+                            try {
+                                if (window.MatchesStoreAPI && m.home && m.away) {
+                                    const k = window.MatchesStoreAPI.findMatchByTeams(m.home, m.away);
+                                    if (k) {
+                                        const entry = window.MatchesStoreAPI.getMatch(k);
+                                        if (entry?.score && entry.lastUpdated && (Date.now() - entry.lastUpdated) < 40000) {
+                                            const txtStore = `${Number(entry.score.home)} : ${Number(entry.score.away)}`;
+                                            if (scoreEl.textContent !== txtStore) { scoreEl.textContent = txtStore; }
+                                            return; // не делаем сетевой запрос
+                                        }
+                                    }
+                                }
+                            } catch(_) {}
                             const r = await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`);
                             const d = await r.json();
                             if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') { const txt = `${Number(d.score_home)} : ${Number(d.score_away)}`; if (scoreEl.textContent !== txt) {scoreEl.textContent = txt;} try { window.MatchState?.set(stateKey, { score: txt }); } catch(_) {} }

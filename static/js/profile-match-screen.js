@@ -66,6 +66,23 @@
     async function fetchScore(){
       try {
         if (isWsActive()) { return; }
+        // STORE-AWARE GUARD: если MatchesStore уже содержит свежий счёт (<30s) — пропускаем fetch, избегая гонок
+        try {
+          if (window.MatchesStoreAPI && match?.home && match?.away) {
+            const k = window.MatchesStoreAPI.findMatchByTeams(match.home, match.away);
+            if (k) {
+              const entry = window.MatchesStoreAPI.getMatch(k);
+              if (entry?.score && entry.lastUpdated && (Date.now() - entry.lastUpdated) < 30000) {
+                // Применим текст из стора если DOM отстал
+                const txt = `${Number(entry.score.home)} : ${Number(entry.score.away)}`;
+                if (!/\d+\s*:\s*\d+/.test((score.textContent||'')) || score.textContent.trim() !== txt) {
+                  score.textContent = txt;
+                }
+                return; // не делаем сетевой вызов
+              }
+            }
+          }
+        } catch(_) {}
         const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`, { headers: etag? { 'If-None-Match': etag }: {} });
         if(r.status===304) { return; }
         if(!r.ok) { return; }

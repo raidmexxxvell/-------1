@@ -88,6 +88,29 @@
           console.log('[LiveScore] Пропускаем fetch - защита от админ-конфликта');
           return; 
         }
+
+        // STORE-AWARE GUARD: если стор уже содержит валидный счёт (оба числа >=0) и он совпадает с DOM либо новее по сигнатуре — пропускаем сетевой запрос/применение
+        try {
+          if (window.MatchesStoreAPI && match?.home && match?.away) {
+            const mkKey = () => {
+              try { return window.MatchesStoreAPI.findMatchByTeams(match.home, match.away); } catch(_) { return null; }
+            };
+            const k = mkKey();
+            if (k) {
+              const entry = window.MatchesStoreAPI.getMatch(k);
+              if (entry && entry.score && typeof entry.score.home === 'number' && typeof entry.score.away === 'number') {
+                const storeSig = generateScoreSig(entry.score.home, entry.score.away);
+                if (state.sig && storeSig === state.sig) {
+                  // Счёт уже применён – нет смысла фетчить чаще (минимизируем окна мерцания)
+                  // Но если прошло > 60s с последнего обновления — позволим fetch как валидацию
+                  if (entry.lastUpdated && (Date.now() - entry.lastUpdated) < 60000) {
+                    return; 
+                  }
+                }
+              }
+            }
+          }
+        } catch(_) {}
         
         // Проверяем не слишком ли частые админ-действия
         const timeSinceAdmin = Date.now() - state.lastAdminAction;
@@ -125,7 +148,26 @@
             } catch(_) {}
           }
         } else {
-          console.warn('[LiveScore] fetchScore вернул некорректные данные, DOM не обновлен');
+          // Если стор уже содержит валидный счёт – не шумим в консоль (уменьшаем "мерцание" логов)
+          try {
+            let suppressed = false;
+            if (window.MatchesStoreAPI && match?.home && match?.away) {
+              const k = window.MatchesStoreAPI.findMatchByTeams(match.home, match.away);
+              if (k) {
+                const entry = window.MatchesStoreAPI.getMatch(k);
+                if (entry?.score && typeof entry.score.home==='number' && typeof entry.score.away==='number') {
+                  suppressed = true;
+                }
+              }
+            }
+            if (!suppressed) {
+              console.warn('[LiveScore] fetchScore вернул некорректные данные, DOM не обновлен');
+            } else {
+              console.log('[LiveScore] fetchScore некорректен, но стор содержит валидный счет — пропускаем предупреждение');
+            }
+          } catch(_) {
+            console.warn('[LiveScore] fetchScore вернул некорректные данные, DOM не обновлен');
+          }
         }
       } catch(e) {
         console.warn('[LiveScore] Ошибка fetchScore:', e);

@@ -118,6 +118,11 @@ declare global {
         const h = (fields.score_home !== undefined) ? Number(fields.score_home) : prev.home;
         const a = (fields.score_away !== undefined) ? Number(fields.score_away) : prev.away;
         cur.score = { home: h, away: a } as any;
+        // Обновляем UI совместимость: кэшированный текст счёта, чтобы legacy MatchState.get() сразу отдавал правильное значение
+        try {
+          if (!cur.ui) { cur.ui = {}; }
+          cur.ui.scoreText = `${Number(h)} : ${Number(a)}`;
+        } catch(_) {}
       }
       // События
       try {
