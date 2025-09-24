@@ -692,6 +692,15 @@
                     var s=document.createElement('script'); s.defer=true; s.type='module'; s.src=distBase+n+'?v='+v; s.onerror=function(){}; document.head.appendChild(s);
                 });
             }
+            // Explicitly load leaderboards store (legacy path) AFTER core/app/user/ui to ensure createStore exists.
+            try {
+                var lb=document.createElement('script');
+                lb.defer=true; // maintain order, non-blocking
+                lb.src='/static/js/store/leaderboards.js?v='+v;
+                lb.onload=function(){ console.log('[Boot] LeaderboardsStore script loaded'); };
+                lb.onerror=function(){ console.warn('[Boot] Failed to load leaderboards store'); };
+                document.head.appendChild(lb);
+            } catch(e){ console.warn('[Boot] LeaderboardsStore inject error', e); }
         });
     })();
     </script>
