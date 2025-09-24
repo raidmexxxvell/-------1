@@ -736,42 +736,53 @@
       if(title) title.innerHTML = '<span class="ls-arrows">⟵</span> '+TITLES[idx]+' <span class="ls-arrows">⟶</span>';
     }
 
-    function buildTable(list, updatedAt){
+    function buildTable(list, updatedAt, type){
+      // Конфигурация колонок по слайду
+      const COL_CONFIG = {
+        // Лучший игрок (Г+П) — короче: убираем "Команда" чтобы влезло на мобильных
+        'ga': {
+          header: ['#','Игрок','И','Г','П','Г+П'],
+          row: (r,i)=> [i+1, r?.player||'—', r?.games||0, r?.goals||0, r?.assists||0, r? (r.total|| ( (r.goals||0)+(r.assists||0) )) : 0]
+        },
+        // Бомбардир
+        'g': {
+          header: ['#','Игрок','Команда','И','Г'],
+          row: (r,i)=> [i+1, r?.player||'—', r?.team||'', r?.games||0, r?.goals||0]
+        },
+        // Ассистент
+        'a': {
+          header: ['#','Игрок','Команда','И','П'],
+          row: (r,i)=> [i+1, r?.player||'—', r?.team||'', r?.games||0, r?.assists||0]
+        }
+      };
+      const cfg = COL_CONFIG[type] || COL_CONFIG.ga;
+      const colCount = cfg.header.length;
       const wrap = document.createElement('div'); wrap.className='league-table-wrap';
       const table = document.createElement('table'); table.className='league-table';
-      const thead = document.createElement('thead'); thead.innerHTML = '<tr><th>#</th><th>Игрок</th><th>Команда</th><th>И</th><th>Г</th><th>П</th><th>Г+П</th></tr>';
+      const thead = document.createElement('thead'); thead.innerHTML = '<tr>' + cfg.header.map(h=>'<th>'+h+'</th>').join('') + '</tr>';
       const tbody = document.createElement('tbody');
       // skeleton initial fill
       for(let i=0;i<10;i++){
         const tr=document.createElement('tr'); tr.className='sk-row';
-        for(let c=0;c<7;c++){ const td=document.createElement('td'); if(c>0){ td.className='sk-cell'; } td.innerHTML='<span class="sk-bar"></span>'; tr.appendChild(td);} tbody.appendChild(tr);
+        for(let c=0;c<colCount;c++){ const td=document.createElement('td'); if(c>0){ td.className='sk-cell'; } td.innerHTML='<span class="sk-bar"></span>'; tr.appendChild(td);} tbody.appendChild(tr);
       }
       table.append(thead, tbody);
       const upd = document.createElement('div'); upd.className='table-updated'; upd.textContent = updatedAt ? ('Обновлено: '+ new Date(updatedAt).toLocaleString()) : '';
       wrap.append(table, upd);
-      // attach keyed diff helper
       wrap.__applyData = function(list2, updatedAt2){
         list2 = Array.isArray(list2)? list2 : [];
         const rows = tbody.children;
         for(let i=0;i<10;i++){
           const r = list2[i];
-          let tr = rows[i];
-          if(!tr){ tr=document.createElement('tr'); tbody.appendChild(tr); }
-          // If skeleton, clear
+          let tr = rows[i]; if(!tr){ tr=document.createElement('tr'); tbody.appendChild(tr); }
           if(tr.classList.contains('sk-row')){ tr.className=''; tr.innerHTML=''; }
-          const desired = r ? [i+1, r.player||'', r.team||'', r.games||0, r.goals||0, r.assists||0, r.total||0] : [i+1,'—','',0,0,0,0];
-          // keyed diff by position + player name
+          const desired = cfg.row(r,i);
           const key = r ? (r.player||'') : ('__empty_'+i);
-          if(tr.__key !== key){ tr.innerHTML=''; desired.forEach(val=>{ const td=document.createElement('td'); td.textContent=String(val); tr.appendChild(td); }); tr.__key = key; }
-          else {
-            // update only changed cells (skip index col 0 always stable)
-            for(let c=1;c<desired.length;c++){
-              const td = tr.children[c];
-              const txt = String(desired[c]);
-              if(td && td.textContent !== txt) td.textContent = txt;
-            }
+          if(tr.__key !== key || tr.children.length !== desired.length){
+            tr.innerHTML=''; desired.forEach(val=>{ const td=document.createElement('td'); td.textContent=String(val); tr.appendChild(td); }); tr.__key = key;
+          } else {
+            for(let c=1;c<desired.length;c++){ const td = tr.children[c]; const txt = String(desired[c]); if(td && td.textContent !== txt) td.textContent = txt; }
           }
-          // rank classes adjust
           tr.classList.remove('rank-1','rank-2','rank-3');
           if(i===0) tr.classList.add('rank-1'); else if(i===1) tr.classList.add('rank-2'); else if(i===2) tr.classList.add('rank-3');
         }
@@ -797,7 +808,7 @@
           if(!sl.__tableWrap){
             sl.innerHTML='';
             // пустой массив -> buildTable нарисует skeleton
-            sl.__tableWrap = buildTable([], st.updatedAt);
+            sl.__tableWrap = buildTable([], st.updatedAt, type);
             sl.appendChild(sl.__tableWrap);
           }
           return; // ждём данные
@@ -805,7 +816,7 @@
         if(sl.__renderedVersion === st.lastUpdated) return; // актуально
         if(!sl.__tableWrap){
           sl.innerHTML='';
-          sl.__tableWrap = buildTable(list, st.updatedAt);
+          sl.__tableWrap = buildTable(list, st.updatedAt, type);
           sl.appendChild(sl.__tableWrap);
         }
         if(sl.__tableWrap && sl.__tableWrap.__applyData){ sl.__tableWrap.__applyData(list, st.updatedAt); }

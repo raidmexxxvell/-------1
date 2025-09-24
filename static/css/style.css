@@ -1504,3 +1504,11 @@ body.theme-blb .share-btn {
 .league-stats-swiper .league-table td { display: table-cell !important; }
 .league-stats-swiper .league-table th:nth-child(n+1),
 .league-stats-swiper .league-table td:nth-child(n+1) { display: table-cell !important; }
+/* Узкие числовые колонки */
+.league-stats-swiper .league-table th:nth-last-child(-n+4),
+.league-stats-swiper .league-table td:nth-last-child(-n+4) { width:46px; }
+@media (max-width:460px){
+    .league-stats-swiper .league-table th:nth-last-child(-n+4),
+    .league-stats-swiper .league-table td:nth-last-child(-n+4) { width:40px; font-size:12px; }
+    .league-stats-swiper .league-table td:nth-child(2){ max-width:110px; }
+}
