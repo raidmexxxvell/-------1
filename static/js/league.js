@@ -792,7 +792,16 @@
         if(type==='ga') list = st.data.goals_assists;
         else if(type==='g') list = st.data.goals;
         else if(type==='a') list = st.data.assists;
-        if(!list) return; // данные ещё не пришли
+        // Если данных ещё нет — гарантируем отображение скелета (первая загрузка)
+        if(!list){
+          if(!sl.__tableWrap){
+            sl.innerHTML='';
+            // пустой массив -> buildTable нарисует skeleton
+            sl.__tableWrap = buildTable([], st.updatedAt);
+            sl.appendChild(sl.__tableWrap);
+          }
+          return; // ждём данные
+        }
         if(sl.__renderedVersion === st.lastUpdated) return; // актуально
         if(!sl.__tableWrap){
           sl.innerHTML='';
@@ -829,7 +838,7 @@
     (function waitStore(){
       if(window.LeaderboardsStore){
         try { window.LeaderboardsStore.subscribe(()=>{ renderSlides(); }); } catch(_) {}
-        try { window.LeaderboardsStoreAPI?.ensureFresh(); } catch(_) {}
+        try { window.LeaderboardsStoreAPI?.ensureFresh(true); } catch(_) {}
         renderSlides();
       } else {
         setTimeout(waitStore,120);
