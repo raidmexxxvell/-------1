@@ -1485,7 +1485,6 @@ body.theme-blb .share-btn {
 .league-stats-swiper .league-table-wrap { width:95vw; max-width:95vw; margin:0 auto; overflow-x:auto; }
 .league-stats-swiper .league-table { table-layout:fixed; }
 .league-stats-swiper .league-table th, .league-stats-swiper .league-table td { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.league-stats-swiper { --ls-slide-w:100%; }
 #ls-track { width:calc(3 * var(--ls-slide-w)); }
 .ls-slide { width:100%; flex:0 0 100%; padding:0 2px; }
 .ls-slide[aria-hidden="true"] { pointer-events:none; }
