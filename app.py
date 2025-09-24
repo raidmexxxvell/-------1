@@ -1238,9 +1238,9 @@ def api_league_extended_leaderboards():
         def sort_top(key_main):
             return sorted(rows, key=lambda x: (-x[key_main], x['games'], x['player']))[:10]
 
-    # Фильтруем игроков без участия (0 total и 0 goals и 0 assists) чтобы не засорять таблицу, если нужно
-    rows = [r for r in rows if (r['goals'] or r['assists'])]
-    goals_assists = sorted(rows, key=lambda x: (-x['total'], x['games'], x['player']))[:10]
+        # Фильтруем игроков без участия (0 total) чтобы не показывать пустые строки
+        rows = [r for r in rows if (r['goals'] or r['assists'])]
+        goals_assists = sorted(rows, key=lambda x: (-x['total'], x['games'], x['player']))[:10]
         goals_only = sort_top('goals')
         assists_only = sort_top('assists')
         payload = {
@@ -1260,7 +1260,6 @@ def api_league_extended_leaderboards():
         try:
             ws_mgr = app.config.get('websocket_manager')
             if ws_mgr and hasattr(ws_mgr, 'broadcast_leaderboards_patch'):
-                # Отправляем патч только если есть предыдущее значение и изменился etag
                 if prev_payload and prev_payload != payload:
                     ws_mgr.broadcast_leaderboards_patch(prev_payload, payload)
         except Exception:
