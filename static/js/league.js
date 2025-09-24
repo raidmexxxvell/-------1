@@ -746,13 +746,13 @@
         },
         // Бомбардир
         'g': {
-          header: ['#','Игрок','Команда','И','Г'],
-          row: (r,i)=> [i+1, r?.player||'—', r?.team||'', r?.games||0, r?.goals||0]
+          header: ['#','Игрок','И','Г'],
+          row: (r,i)=> [i+1, r?.player||'—', r?.games||0, r?.goals||0]
         },
         // Ассистент
         'a': {
-          header: ['#','Игрок','Команда','И','П'],
-          row: (r,i)=> [i+1, r?.player||'—', r?.team||'', r?.games||0, r?.assists||0]
+          header: ['#','Игрок','И','П'],
+          row: (r,i)=> [i+1, r?.player||'—', r?.games||0, r?.assists||0]
         }
       };
       const cfg = COL_CONFIG[type] || COL_CONFIG.ga;
