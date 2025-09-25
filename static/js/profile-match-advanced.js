@@ -55,6 +55,49 @@
   } catch(_) { /* избегаем принудительного плейсхолдера чтобы не вызывать мерцание */ }
     try { if (match.date || match.time){ const d=match.date? new Date(match.date):null; const ds=d?d.toLocaleDateString():''; dt.textContent = `${ds}${match.time? ' '+match.time:''}`; } else {dt.textContent='';} } catch(_) { dt.textContent = match.time||''; }
     const subtabs = mdPane.querySelector('.modal-subtabs');
+    // Seed MatchesStore with base entry to keep LiveScore subscriptions consistent
+    try {
+      const storeApi = window.MatchesStoreAPI;
+      if (storeApi) {
+        const dateSeed = (match?.datetime || match?.date || '').toString().slice(0,10);
+        let scoreHomeSeed = null; let scoreAwaySeed = null;
+        if (details && typeof details?.score?.home === 'number' && typeof details?.score?.away === 'number') {
+          scoreHomeSeed = Number(details.score.home);
+          scoreAwaySeed = Number(details.score.away);
+        } else {
+          try {
+            const rawTxt = (score?.textContent || '').trim();
+            const m = rawTxt.match(/(\d+)\s*:\s*(\d+)/);
+            if (m) {
+              scoreHomeSeed = Number(m[1]);
+              scoreAwaySeed = Number(m[2]);
+            }
+          } catch(_) {}
+        }
+        const payload = { home: match?.home || '', away: match?.away || '', date: dateSeed };
+        if (scoreHomeSeed != null && scoreAwaySeed != null && Number.isFinite(scoreHomeSeed) && Number.isFinite(scoreAwaySeed)) {
+          payload.score = { home: scoreHomeSeed, away: scoreAwaySeed };
+        }
+        let matchKey = null;
+        if (typeof storeApi.addOrMergeMatch === 'function') {
+          matchKey = storeApi.addOrMergeMatch(payload);
+        } else if (typeof storeApi.ensureMatch === 'function') {
+          matchKey = storeApi.ensureMatch(payload.home, payload.away, payload.date);
+          if (payload.score) {
+            try { storeApi.updateMatch(matchKey, { home: payload.home, away: payload.away, date: payload.date, score_home: payload.score.home, score_away: payload.score.away }); } catch(_) {}
+          }
+        }
+        if (matchKey && details) {
+          const patch = {};
+          if (Array.isArray(details?.events)) { patch.events = details.events; }
+          if (details?.rosters && (Array.isArray(details.rosters.home) || Array.isArray(details.rosters.away))) { patch.rosters = details.rosters; }
+          if (details?.stats && typeof details.stats === 'object') { patch.stats = details.stats; }
+          if (Object.keys(patch).length) {
+            try { storeApi.updateMatch(matchKey, Object.assign({ home: payload.home, away: payload.away, date: payload.date }, patch)); } catch(_) {}
+          }
+        }
+      }
+    } catch(e){ console.warn('[MatchAdvanced] Не удалось прогреть MatchesStore:', e); }
     // PR-2a: topic-based автоподписка на детали матча (если включено)
   let __topic = null;
   let __topics = [];

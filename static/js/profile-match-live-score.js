@@ -162,23 +162,67 @@
 
     // Подписка на стор: единый источник истины
     let storeUnsub = null;
+    let storeRetryAttempts = 0;
+    let storeRetryTimer = null;
+    const scheduleStoreRetry = () => {
+      try { if (storeRetryTimer) { clearTimeout(storeRetryTimer); } } catch(_) {}
+      const backoffMs = 350 + Math.min(4, storeRetryAttempts) * 250;
+      storeRetryTimer = setTimeout(subscribeStore, backoffMs);
+    };
     const subscribeStore = () => {
       try {
-        if(!window.MatchesStoreAPI || !match?.home || !match?.away) return;
-        const key = window.MatchesStoreAPI.findMatchByTeams(match.home, match.away);
-        if(!key) return;
+        if (storeUnsub) { return; }
+        const storeApi = window.MatchesStoreAPI;
+        if(!storeApi || !match?.home || !match?.away) return;
+        const dateSeed = (match?.datetime || match?.date || '').toString().slice(0,10);
+        try {
+          const payload = { home: match.home||'', away: match.away||'', date: dateSeed };
+          let seedScore = null;
+          try {
+            const txt = (scoreEl.textContent||'').trim();
+            const m = txt.match(/(\d+)\s*:\s*(\d+)/);
+            if (m) { seedScore = { home: Number(m[1]), away: Number(m[2]) }; }
+            else if (state.sig && typeof state.currentScore.home==='number' && typeof state.currentScore.away==='number') {
+              seedScore = { home: state.currentScore.home, away: state.currentScore.away };
+            }
+          } catch(_) {}
+          if (seedScore && Number.isFinite(seedScore.home) && Number.isFinite(seedScore.away)) {
+            payload.score = seedScore;
+          }
+          if (typeof storeApi.addOrMergeMatch === 'function') {
+            storeApi.addOrMergeMatch(payload);
+          } else if (typeof storeApi.ensureMatch === 'function') {
+            const keyEnsured = storeApi.ensureMatch(payload.home, payload.away, payload.date);
+            if (payload.score) {
+              try { storeApi.updateMatch(keyEnsured, { home: payload.home, away: payload.away, date: payload.date, score_home: payload.score.home, score_away: payload.score.away }); } catch(_) {}
+            }
+          }
+        } catch(_) {}
+        const key = storeApi.findMatchByTeams(match.home, match.away);
+        if(!key) {
+          storeRetryAttempts += 1;
+          if (storeRetryAttempts <= 5) {
+            console.log('[LiveScore] Матч не найден в сторе, повторная попытка подписки', storeRetryAttempts);
+            scheduleStoreRetry();
+          } else {
+            console.warn('[LiveScore] Не удалось найти матч в сторе после нескольких попыток:', match.home, match.away);
+          }
+          return;
+        }
+        storeRetryAttempts = 0;
+        try { if (storeRetryTimer) { clearTimeout(storeRetryTimer); storeRetryTimer = null; } } catch(_) {}
         // Первичная гидратация
-        const entry = window.MatchesStoreAPI.getMatch(key);
+        const entry = storeApi.getMatch(key);
         if(entry?.score && typeof entry.score.home==='number' && typeof entry.score.away==='number') {
           applyScore(entry.score.home, entry.score.away);
         }
-        storeUnsub = window.MatchesStoreAPI.subscribe((st)=>{
+        storeUnsub = storeApi.subscribe((st)=>{
           try {
             const e2 = st.map[key];
             if(e2?.score && typeof e2.score.home==='number' && typeof e2.score.away==='number') {
               applyScore(e2.score.home, e2.score.away);
             }
-          } catch(_){}
+          } catch(_){ }
         });
         console.log('[LiveScore] Подписка на стор активна для', key);
       } catch(e){ console.warn('[LiveScore] Не удалось подписаться на стор:', e); }
@@ -193,6 +237,7 @@
       try { if (scorePoll) { clearInterval(scorePoll); } } catch(_) {}
       try { if (pollWatch) { clearInterval(pollWatch); } } catch(_) {}
       try { if (storeUnsub) { storeUnsub(); storeUnsub=null; } } catch(_) {}
+      try { if (storeRetryTimer) { clearTimeout(storeRetryTimer); storeRetryTimer=null; } } catch(_) {}
       originalCancel();
     };
 
