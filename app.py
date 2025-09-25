@@ -181,7 +181,7 @@ except Exception:
     Compress = None
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Text, DateTime, Date, func, case, and_, Index, text
+    create_engine, Column, Integer, String, Text, DateTime, Date, func, case, and_, or_, Index, text
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
@@ -4348,6 +4348,149 @@ def _dc_outcome_probs(lam: float, mu: float, rho: float, max_goals: int = 8) -> 
                 mat[i][j] = mat[i][j] / s
     return P, mat
 
+# ---------------------- Team form helpers (last 5 finished matches) ----------------------
+def _team_form_cached(team_name: str) -> dict:
+    """Возвращает словарь с данными формы команды за последние 5 завершённых матчей.
+    Структура: {matches, points, goals_for, goals_against, goal_diff, avg_total, index}
+    index в [0..1] – агрегат очков и разницы голов.
+    Кэшируется через multi-level cache (cache_type='team_form').
+    """
+    name = (team_name or '').strip()
+    if not name:
+        return {'matches':0,'points':0,'goals_for':0,'goals_against':0,'goal_diff':0,'avg_total':0.0,'index':0.0}
+    norm_key = _norm_team_key(name)
+    # Попытка из кэша
+    if cache_manager:
+        cached = cache_manager.get('team_form', norm_key)
+        if cached:
+            return cached
+    # Если нет БД – возврат пустой формы
+    if SessionLocal is None:
+        data = {'matches':0,'points':0,'goals_for':0,'goals_against':0,'goal_diff':0,'avg_total':0.0,'index':0.0}
+        if cache_manager:
+            cache_manager.set('team_form', data, norm_key)
+        return data
+    db = get_db()
+    try:
+        rows = (
+            db.query(Match)
+              .filter(
+                  Match.status == 'finished',
+                  or_(
+                      Match.home_team.has(Team.name == name),  # type: ignore[arg-type]
+                      Match.away_team.has(Team.name == name)   # type: ignore[arg-type]
+                  )
+              )
+              .order_by(Match.match_date.desc())
+              .limit(5)
+              .all()
+        )
+    except Exception:
+        rows = []
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+    matches = len(rows)
+    points = gf = ga = 0
+    totals_sum = 0
+    for r in rows:
+        try:
+            h, a = int(r.home_score or 0), int(r.away_score or 0)
+            is_home = False
+            try:
+                if r.home_team and r.home_team.name == name:
+                    is_home = True
+            except Exception:
+                pass
+            tgf = h if is_home else a
+            tga = a if is_home else h
+            gf += tgf; ga += tga
+            totals_sum += (h + a)
+            if tgf > tga:
+                points += 3
+            elif tgf == tga:
+                points += 1
+        except Exception:
+            continue
+    goal_diff = gf - ga
+    avg_total = (totals_sum / matches) if matches else 0.0
+    # Индекс формы: 60% очки, 40% нормализованная разница голов
+    # points_ratio в [0..1]; goal_diff_norm приблизительно в [-1..1] -> сдвигаем & ограничиваем
+    if matches:
+        points_ratio = points / (matches * 3)
+        # средняя разница голов на матч (обычно в диапазоне ~[-5;5], нормируем делением на 5)
+        avg_goal_diff_per_match = goal_diff / matches
+        goal_diff_norm = max(-1.0, min(1.0, avg_goal_diff_per_match / 5.0))  # [-1,1]
+        # Преобразуем в [0..1]
+        goal_diff_scaled = 0.5 + 0.5 * goal_diff_norm
+        index = max(0.0, min(1.0, 0.6 * points_ratio + 0.4 * goal_diff_scaled))
+    else:
+        index = 0.0
+    data = {
+        'matches': matches,
+        'points': points,
+        'goals_for': gf,
+        'goals_against': ga,
+        'goal_diff': goal_diff,
+        'avg_total': round(avg_total, 3),
+        'index': round(index, 4)
+    }
+    if cache_manager:
+        try:
+            cache_manager.set('team_form', data, norm_key)
+        except Exception:
+            pass
+    return data
+
+def _compute_form_adjustment(home: str, away: str) -> dict:
+    """Возвращает структуру с индексами формы двух команд и разницей.
+    Используется для корректировки вероятностей 1X2 и выбора динамических линий тоталов.
+    """
+    fh = _team_form_cached(home)
+    fa = _team_form_cached(away)
+    return {
+        'home': fh,
+        'away': fa,
+        'diff_index': (fh.get('index',0.0) - fa.get('index',0.0))
+    }
+
+def _dynamic_total_lines(home: str, away: str) -> list[float]:
+    """Подбирает динамические линии тоталов на основе ожидаемого тотала (Poisson) и средней результативности последних игр.
+    Линии: [L-1, L, L+1] где L = floor(E)+0.5, E – сглаженная оценка (0.5 * (lam+mu) + 0.5 * avg_form_total).
+    Ограничиваем диапазон 2.5 .. 8.5.
+    """
+    try:
+        lam, mu = _estimate_goal_rates(home, away)
+        base_total = lam + mu
+    except Exception:
+        base_total = 4.2
+    form = _compute_form_adjustment(home, away)
+    ht = form['home'].get('avg_total') or 0.0
+    at = form['away'].get('avg_total') or 0.0
+    if ht > 0 and at > 0:
+        avg_form_total = (ht + at) / 2.0
+    else:
+        avg_form_total = ht or at or base_total
+    expected = 0.5 * base_total + 0.5 * avg_form_total
+    import math
+    central = math.floor(expected) + 0.5
+    # Коридор
+    central = max(2.5, min(8.5, central))
+    lines = [central - 1.0, central, central + 1.0]
+    # Убедимся что все >=2.5 и <=9.5
+    out = []
+    for ln in lines:
+        if 2.5 <= ln <= 9.5:
+            out.append(round(ln, 1))
+    # Удалим дубли
+    uniq = []
+    for ln in out:
+        if ln not in uniq:
+            uniq.append(ln)
+    return sorted(uniq)
+
 def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict:
     """Коэффициенты 1X2 по Dixon–Coles (Поассоны с коррекцией)."""
     # Единое округление коэффициентов: 2 знака, ROUND_HALF_UP (как в ставках/отображении)
@@ -4399,6 +4542,9 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
         draw_max_prob = 0.35
 
     lam, mu = _estimate_goal_rates(home, away)
+    # --- Коррекция по форме ---
+    form_meta = _compute_form_adjustment(home, away)
+    diff_index = form_meta.get('diff_index', 0.0)  # >0 значит форма хозяев лучше
     probs, _mat = _dc_outcome_probs(lam, mu, rho=rho, max_goals=max_goals)
     # Нормализуем вероятности и ограничим минимум/максимум для реалистичности на нейтральном поле
     pH = min(0.92, max(0.05, probs['H']))
@@ -4407,6 +4553,28 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
     s = pH + pD + pA
     if s > 0:
         pH, pD, pA = pH/s, pD/s, pA/s
+
+    # Применим корректировку по форме: усиливаем вероятность победы команды с лучшей формой.
+    # Ограничим влияние до ±12% (alpha * diff_index, где diff_index в [-1,1]).
+    try:
+        alpha = float(os.environ.get('BET_FORM_MAX_INFL', '0.12'))  # максимум 12% относительного сдвига
+    except Exception:
+        alpha = 0.12
+    if diff_index and abs(diff_index) > 1e-6 and alpha > 0:
+        k = max(-alpha, min(alpha, alpha * diff_index))
+        # k>0 => усиливаем хозяев, ослабляем гостей
+        if k > 0:
+            pH *= (1.0 + k)
+            pA *= (1.0 - k)
+        else:
+            # k<0 => усиливаем гостей
+            kk = abs(k)
+            pA *= (1.0 + kk)
+            pH *= (1.0 - kk)
+        # Нормализация с сохранением ничьей пропорционально
+        s_adj = pH + pD + pA
+        if s_adj > 0:
+            pH, pD, pA = pH/s_adj, pD/s_adj, pA/s_adj
 
     # Дополнительно сгладим pH/pA к среднему при паритете, чтобы кэфы были ближе к равным
     try:
@@ -4536,11 +4704,20 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
             return _round_odd(1.0 / (p * overround))
         except Exception:
             return 1.10
-    return {
+    odds = {
         'home': to_odds(pH),
         'draw': to_odds(pD),
         'away': to_odds(pA)
     }
+    # Включим мета-информацию о применённой форме (для возможного расширения payload)
+    odds['_meta'] = {
+        'form': {
+            'home_index': form_meta['home'].get('index'),
+            'away_index': form_meta['away'].get('index'),
+            'diff_index': diff_index
+        }
+    }
+    return odds
 
 def _compute_totals_odds(home: str, away: str, line: float) -> dict:
     """Коэффициенты тотала (Over/Under) по Dixon–Coles. Возвращает {'over': k, 'under': k}."""
@@ -6584,8 +6761,10 @@ def _build_betting_tours_payload():
                 except Exception:
                     dk = None
                 m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''), dk)
+                # Динамические линии тоталов на основе формы и ожидаемого тотала
                 totals = []
-                for ln in (3.5, 4.5, 5.5):
+                dyn_lines = _dynamic_total_lines(m.get('home',''), m.get('away','')) or [3.5,4.5,5.5]
+                for ln in dyn_lines:
                     totals.append({'line': ln, 'odds': _compute_totals_odds(m.get('home',''), m.get('away',''), ln)})
                 sp_pen = _compute_specials_odds(m.get('home',''), m.get('away',''), 'penalty')
                 sp_red = _compute_specials_odds(m.get('home',''), m.get('away',''), 'redcard')
@@ -6620,7 +6799,8 @@ def _build_odds_fields(home: str, away: str) -> dict:
             dk = None
         odds_main = _compute_match_odds(home, away, dk)
         totals = []
-        for ln in (3.5, 4.5, 5.5):
+        dyn_lines = _dynamic_total_lines(home, away) or [3.5,4.5,5.5]
+        for ln in dyn_lines:
             totals.append({'line': ln, 'odds': _compute_totals_odds(home, away, ln)})
         sp_pen = _compute_specials_odds(home, away, 'penalty')
         sp_red = _compute_specials_odds(home, away, 'redcard')
