@@ -482,7 +482,7 @@ declare global {
       }
     }
     
-    // Извлекаем данные с fallback на кэш
+  // Извлекаем данные с fallback на кэш
     const rosters = storeData?.rosters || (mdPane as any).__lastRosters || { home: [], away: [] };
     const events = storeData?.events || (mdPane as any).__lastEvents || { home: [], away: [] };
     // Вычисляем эффективный счёт, чтобы избежать мерцания «— : —» при частичных патчах
@@ -526,6 +526,33 @@ declare global {
       } catch(_) {}
     }
     
+    // --- Подготовка сигнатур для диффа (минимизация полных ререндеров) ---
+    const buildRostersSig = (r: any): string => {
+      try {
+        const h = (r.home||[]).map((p: any)=> (p.id||p.player_id||p.name||p.player||p.title||'').toString().trim().toLowerCase()).sort();
+        const a = (r.away||[]).map((p: any)=> (p.id||p.player_id||p.name||p.player||p.title||'').toString().trim().toLowerCase()).sort();
+        return 'h:'+h.join(',')+'|a:'+a.join(',');
+      } catch { return 'r-empty'; }
+    };
+    const buildEventsSig = (ev: any): string => {
+      try {
+        if (Array.isArray(ev)) {
+          return ev.map(e=> (e.side||'h')+':' + (e.player||e.team||'') + ':' + (e.type||e.kind||'event')).sort().join('|');
+        }
+        if (ev && typeof ev === 'object') {
+          const h = (ev.home||[]).map((e:any)=>'h:'+(e.player||'')+':' + (e.type||'event'));
+            const a = (ev.away||[]).map((e:any)=>'a:'+(e.player||'')+':' + (e.type||'event'));
+          return h.concat(a).sort().join('|');
+        }
+        return 'e-empty';
+      } catch { return 'e-empty'; }
+    };
+    const rostersSig = buildRostersSig(rosters);
+    const eventsSigRaw = buildEventsSig(events);
+
+    const lastRostersSig = (mdPane as any).__lastRostersSig;
+    const lastEventsSig = (mdPane as any).__lastEventsSig;
+
     // Нормализуем события в формат, который ожидает legacy код
     let eventsFormatted: { home: any[]; away: any[] } = { home: [], away: [] };
     if (Array.isArray(events)) {
@@ -548,6 +575,28 @@ declare global {
         type: e.type || 'event'
       }));
     }
+
+    // Если составы не изменились, а изменились только события – делаем лёгкий дифф-апдейт без полного рендера
+    const onlyEventsChanged = (lastRostersSig && lastRostersSig === rostersSig) && (eventsSigRaw !== lastEventsSig);
+    if (onlyEventsChanged) {
+      // Обновляем кэш
+      (mdPane as any).__lastEvents = events;
+      (mdPane as any).__lastEventsSig = eventsSigRaw;
+      try {
+        if (score) {
+          const scoreEl = document.getElementById('md-score');
+          if (scoreEl) {
+            const txt = `${score.home} : ${score.away}`;
+            if (scoreEl.textContent?.trim() !== txt && !(/[—-]\s*:\s*[—-]/).test(scoreEl.textContent||'')) {
+              scoreEl.textContent = txt;
+            }
+          }
+        }
+      } catch(_) {}
+      // Инкрементальное обновление иконок / селектов
+      try { updateEventIconsOnly(match, eventsFormatted); } catch(err){ console.warn('[Bridge] Incremental events update failed:', err); }
+      return; // Прерываем дальнейший тяжёлый рендер
+    }
     
     // Вызываем оригинальную render функцию с данными из стора
     try {
@@ -568,6 +617,24 @@ declare global {
         events: eventsFormatted,
         score: score // всегда передаём эффективный счёт, чтобы оригинальный рендер не ставил «— : —»
       };
+
+      // Защитно выставляем счёт ДО вызова оригинального рендера (уменьшает окно мерцания)
+      try {
+        if (score) {
+          const scoreEl = document.getElementById('md-score');
+          if (scoreEl) {
+            const desired = `${score.home} : ${score.away}`;
+            const cur = scoreEl.textContent?.trim() || '';
+            if (cur === '— : —' || cur === '- : -' || cur === '' || cur !== desired) {
+              scoreEl.textContent = desired;
+            }
+          }
+        }
+      } catch(_) {}
+
+      // Сохраняем сигнатуры после полноценного рендера
+      (mdPane as any).__lastRostersSig = rostersSig;
+      (mdPane as any).__lastEventsSig = eventsSigRaw;
       
       renderFunc(match, detailsObj, mdPane, els);
       
@@ -587,121 +654,7 @@ declare global {
           
           // Принудительно обновляем события в UI, если они не отобразились
           if (eventsFormatted && (eventsFormatted.home.length > 0 || eventsFormatted.away.length > 0)) {
-            // Обновляем все селекты событий на основе реальных данных из EventsRegistry
-            document.querySelectorAll(`select[data-match-home="${match.home}"][data-match-away="${match.away}"]`).forEach(select => {
-              try {
-                const selectEl = select as HTMLSelectElement;
-                const playerKey = (selectEl.getAttribute('data-player') || '').toLowerCase().trim();
-                const eventType = selectEl.getAttribute('data-event-type');
-                const team = selectEl.getAttribute('data-team');
-                
-                if (playerKey && eventType && team) {
-                  const sideEvents = (eventsFormatted as any)[team] || [];
-                  let count = 0;
-                  
-                  sideEvents.forEach((event: any) => {
-                    if ((event.player || '').toLowerCase().trim() === playerKey && event.type === eventType) {
-                      count++;
-                    }
-                  });
-                  
-                  const currentValue = parseInt(selectEl.value, 10) || 0;
-                  if (currentValue !== count) {
-                    selectEl.value = String(count);
-                    // Обновляем визуальную иконку рядом с селектом
-                    const icon = selectEl.parentElement?.querySelector('img');
-                    if (icon) {
-                      (icon as HTMLImageElement).style.opacity = count > 0 ? '1' : '0.25';
-                    }
-                  }
-                }
-              } catch(err) {
-                console.warn('[Bridge] Error updating event select:', err);
-              }
-            });
-            
-            // Для обычных пользователей: обновляем иконки событий
-            document.querySelectorAll('.roster-table tbody tr').forEach(row => {
-              try {
-                const nameCell = row.querySelector('td:first-child');
-                if (!nameCell) return;
-                
-                const playerName = nameCell.textContent?.trim() || '';
-                const playerKey = playerName.toLowerCase().trim();
-                
-                // Находим все иконки событий в этой строке
-                const cells = row.querySelectorAll('td');
-                if (cells.length >= 5) { // Имя + 4 иконки
-                  const yellowCell = cells[1];
-                  const redCell = cells[2]; 
-                  const assistCell = cells[3];
-                  const goalCell = cells[4];
-                  
-                  // Обновляем каждый тип события
-                  const updateEventIcon = (cell: Element, eventType: string, sideEvents: any[]) => {
-                    let count = 0;
-                    sideEvents.forEach((event: any) => {
-                      if ((event.player || '').toLowerCase().trim() === playerKey && event.type === eventType) {
-                        count++;
-                      }
-                    });
-                    
-                    if (count > 0) {
-                      const existingIcon = cell.querySelector('img');
-                      if (!existingIcon) {
-                        // Создаем иконку если её нет
-                        const wrap = document.createElement('div');
-                        wrap.style.display = 'flex';
-                        wrap.style.alignItems = 'center';
-                        wrap.style.justifyContent = 'center';
-                        wrap.style.gap = '4px';
-                        
-                        const img = document.createElement('img');
-                        img.style.width = '18px';
-                        img.style.height = '18px';
-                        img.style.objectFit = 'contain';
-                        
-                        const srcMap: { [key: string]: string } = {
-                          'yellow': '/static/img/icons/yellow.png',
-                          'red': '/static/img/icons/red.png',
-                          'assist': '/static/img/icons/assist.png',
-                          'goal': '/static/img/icons/goal.png'
-                        };
-                        img.src = srcMap[eventType] || '/static/img/icons/placeholder.png';
-                        
-                        wrap.appendChild(img);
-                        
-                        if ((eventType === 'goal' || eventType === 'assist') && count > 1) {
-                          const badge = document.createElement('span');
-                          badge.textContent = 'x' + count;
-                          badge.style.fontSize = '11px';
-                          badge.style.opacity = '0.8';
-                          wrap.appendChild(badge);
-                        }
-                        
-                        cell.innerHTML = '';
-                        cell.appendChild(wrap);
-                      }
-                    } else {
-                      // Убираем иконку если событий нет
-                      cell.innerHTML = '';
-                    }
-                  };
-                  
-                  // Определяем команду текущей строки
-                  const homePane = document.getElementById('roster-home');
-                  const isHomeTeam = homePane?.contains(row as Node);
-                  const teamEvents = isHomeTeam ? eventsFormatted.home : eventsFormatted.away;
-                  
-                  updateEventIcon(yellowCell, 'yellow', teamEvents);
-                  updateEventIcon(redCell, 'red', teamEvents);
-                  updateEventIcon(assistCell, 'assist', teamEvents);
-                  updateEventIcon(goalCell, 'goal', teamEvents);
-                }
-              } catch(err) {
-                console.warn('[Bridge] Error updating event icons for row:', err);
-              }
-            });
+            updateEventIconsOnly(match, eventsFormatted);
           }
         } catch(err) {
           console.warn('[Bridge] Error in immediate restoration:', err);
@@ -759,6 +712,68 @@ declare global {
 
   let lastSig: string|null = null;
   let debounceTimer: any = null;
+
+  // Вспомогательная функция обновления иконок / селектов (повторное использование и для инкрементальных апдейтов)
+  function updateEventIconsOnly(match: any, eventsFormatted: {home:any[]; away:any[]}){
+    try {
+      // Обновляем селекты (админ)
+      document.querySelectorAll(`select[data-match-home="${match.home}"][data-match-away="${match.away}"]`).forEach(select => {
+        try {
+          const selectEl = select as HTMLSelectElement;
+          const playerKey = (selectEl.getAttribute('data-player') || '').toLowerCase().trim();
+          const eventType = selectEl.getAttribute('data-event-type');
+          const team = selectEl.getAttribute('data-team');
+          if (playerKey && eventType && team) {
+            const sideEvents = (eventsFormatted as any)[team] || [];
+            let count = 0;
+            for (const ev of sideEvents) {
+              if ((ev.player || '').toLowerCase().trim() === playerKey && ev.type === eventType) count++;
+            }
+            const currentValue = parseInt(selectEl.value, 10) || 0;
+            if (currentValue !== count) {
+              selectEl.value = String(count);
+              const icon = selectEl.parentElement?.querySelector('img');
+              if (icon) (icon as HTMLImageElement).style.opacity = count > 0 ? '1' : '0.25';
+            }
+          }
+        } catch(err){ console.warn('[Bridge] Event select update error:', err); }
+      });
+      // Обновляем иконки в таблицах состава
+      document.querySelectorAll('.roster-table tbody tr').forEach(row => {
+        try {
+          const nameCell = row.querySelector('td:first-child'); if(!nameCell) return;
+          const playerName = nameCell.textContent?.trim() || '';
+          const playerKey = playerName.toLowerCase().trim();
+          const cells = row.querySelectorAll('td'); if(cells.length < 5) return;
+          const yellowCell = cells[1]; const redCell = cells[2]; const assistCell = cells[3]; const goalCell = cells[4];
+          const homePane = document.getElementById('roster-home');
+          const isHomeTeam = homePane?.contains(row as Node);
+          const teamEvents = isHomeTeam ? eventsFormatted.home : eventsFormatted.away;
+          const updateEventIcon = (cell: Element, eventType: string) => {
+            let count = 0; for(const ev of teamEvents){ if((ev.player||'').toLowerCase().trim()===playerKey && ev.type===eventType) count++; }
+            if(count>0){
+              const existingIcon = cell.querySelector('img');
+              if(!existingIcon){
+                const wrap = document.createElement('div'); wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.justifyContent='center'; wrap.style.gap='4px';
+                const img = document.createElement('img'); img.style.width='18px'; img.style.height='18px'; img.style.objectFit='contain';
+                const srcMap: any = { yellow:'/static/img/icons/yellow.png', red:'/static/img/icons/red.png', assist:'/static/img/icons/assist.png', goal:'/static/img/icons/goal.png' };
+                img.src = srcMap[eventType] || '/static/img/icons/placeholder.png'; wrap.appendChild(img);
+                if((eventType==='goal'||eventType==='assist') && count>1){ const badge=document.createElement('span'); badge.textContent='x'+count; badge.style.fontSize='11px'; badge.style.opacity='0.8'; wrap.appendChild(badge);}                
+                cell.innerHTML=''; cell.appendChild(wrap);
+              } else {
+                // если есть badge и изменилось количество – обновим
+                const badge = cell.querySelector('span'); if(badge && (eventType==='goal'||eventType==='assist')){ badge.textContent='x'+count; }
+              }
+            } else { cell.innerHTML=''; }
+          };
+          updateEventIcon(yellowCell,'yellow');
+          updateEventIcon(redCell,'red');
+          updateEventIcon(assistCell,'assist');
+          updateEventIcon(goalCell,'goal');
+        } catch(err){ console.warn('[Bridge] Event icons row update error:', err); }
+      });
+    } catch(err){ console.warn('[Bridge] updateEventIconsOnly fatal:', err); }
+  }
 
   // КРИТИЧНО: Подписка на обновления событий реестра для пользователей (store-driven)
   (function installEventsRegistryListener(){
