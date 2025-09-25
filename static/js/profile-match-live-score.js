@@ -50,129 +50,24 @@
     
     const applyScore=(sh,sa)=>{ 
       try { 
-        if(sh==null || sa==null) {return false;}
-        // Валидация входных значений
-        if (typeof sh !== 'number' || typeof sa !== 'number') { return false; }
-        if (!Number.isFinite(sh) || !Number.isFinite(sa)) { return false; }
-        if (sh < 0 || sa < 0) { return false; }
+        if(sh==null || sa==null) return false;
+        if(typeof sh!=='number'|| typeof sa!=='number'|| !Number.isFinite(sh)|| !Number.isFinite(sa) || sh<0||sa<0) return false;
         const newSig = generateScoreSig(sh, sa);
-        
-        // КРИТИЧНО: Проверяем сигнатуру - если счет не изменился, пропускаем
-        if (state.sig && newSig === state.sig) {
-          console.log('[LiveScore] Пропускаем обновление - сигнатура не изменилась:', newSig);
-          return false;
+        if(state.sig && newSig===state.sig) return false; // уже отображено
+        const txt = `${sh} : ${sa}`;
+        // Меняем только если реально отличается или плейсхолдер
+        const cur = (scoreEl.textContent||'').trim();
+        if(cur!==txt) {
+          scoreEl.textContent = txt;
         }
-        
-        const newScoreText = `${Number(sh)} : ${Number(sa)}`;
-        console.log('[LiveScore] Применяем счет:', newScoreText, 'сигнатура:', newSig);
-        
-        scoreEl.textContent = newScoreText;
         state.sig = newSig;
-        
-        // КРИТИЧНО: Сохраняем актуальный счет в state для инкрементов
-        state.currentScore.home = Number(sh) || 0;
-        state.currentScore.away = Number(sa) || 0;
-        
+        state.currentScore.home = sh; state.currentScore.away = sa;
         return true;
-      } catch(_){
-        return false;
-      }
+      } catch { return false; }
     };
     
-    const fetchScore=async()=>{ 
-      try { 
-        // Если WS активен по нашему топику - не фетчим
-        if (isWsActive()) { console.log('[LiveScore] WS активен — fetchScore пропущен'); return; }
-        // Защита: не перетирать админское обновление (как в статистике - больший период)
-        if (Date.now() < state.noFetchUntil) { 
-          console.log('[LiveScore] Пропускаем fetch - защита от админ-конфликта');
-          return; 
-        }
-
-        // STORE-AWARE GUARD: если стор уже содержит валидный счёт (оба числа >=0) и он совпадает с DOM либо новее по сигнатуре — пропускаем сетевой запрос/применение
-        try {
-          if (window.MatchesStoreAPI && match?.home && match?.away) {
-            const mkKey = () => {
-              try { return window.MatchesStoreAPI.findMatchByTeams(match.home, match.away); } catch(_) { return null; }
-            };
-            const k = mkKey();
-            if (k) {
-              const entry = window.MatchesStoreAPI.getMatch(k);
-              if (entry && entry.score && typeof entry.score.home === 'number' && typeof entry.score.away === 'number') {
-                const storeSig = generateScoreSig(entry.score.home, entry.score.away);
-                if (state.sig && storeSig === state.sig) {
-                  // Счёт уже применён – нет смысла фетчить чаще (минимизируем окна мерцания)
-                  // Но если прошло > 60s с последнего обновления — позволим fetch как валидацию
-                  if (entry.lastUpdated && (Date.now() - entry.lastUpdated) < 60000) {
-                    return; 
-                  }
-                }
-              }
-            }
-          }
-        } catch(_) {}
-        
-        // Проверяем не слишком ли частые админ-действия
-        const timeSinceAdmin = Date.now() - state.lastAdminAction;
-        if (timeSinceAdmin < 10000) { // 10 секунд защита вместо 6
-          console.log('[LiveScore] Пропускаем fetch - недавнее админ-действие');
-          return;
-        }
-        
-        const url = `/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`;
-        
-        // Используем ETag как в статистике
-        const headers = state.etag ? { 'If-None-Match': state.etag } : {};
-        const r = await fetch(url, { headers }); 
-        
-        if (r.status === 304) {
-          console.log('[LiveScore] 304 Not Modified - счет не изменился');
-          return;
-        }
-        // Пытаемся распознать JSON только для успешных кодов
-        if (!r.ok) { console.warn('[LiveScore] fetchScore non-ok status', r.status); return; }
-        const d = await r.json().catch(()=>null); 
-        if (!d || typeof d !== 'object') { console.warn('[LiveScore] fetchScore invalid JSON'); return; }
-        const newEtag = r.headers.get('ETag');
-        
-        if (typeof d?.score_home==='number' && typeof d?.score_away==='number' && Number.isFinite(d.score_home) && Number.isFinite(d.score_away)) {
-          // Уважение окна защиты: не применять результат fetch если защита активна
-          if (Date.now() < state.noFetchUntil) { console.log('[LiveScore] Защита активна — не применяем fetch-результат'); return; }
-          const applied = applyScore(Math.max(0,d.score_home), Math.max(0,d.score_away));
-          if (applied) {
-            state.etag = newEtag;
-            console.log('[LiveScore] Счет обновлен из API:', d.score_home, ':', d.score_away);
-            try {
-              const ev = new CustomEvent('matchScoreUpdate', { detail: { home: match.home, away: match.away, score_home: d.score_home, score_away: d.score_away, source: 'fetch' } });
-              document.dispatchEvent(ev);
-            } catch(_) {}
-          }
-        } else {
-          // Если стор уже содержит валидный счёт – не шумим в консоль (уменьшаем "мерцание" логов)
-          try {
-            let suppressed = false;
-            if (window.MatchesStoreAPI && match?.home && match?.away) {
-              const k = window.MatchesStoreAPI.findMatchByTeams(match.home, match.away);
-              if (k) {
-                const entry = window.MatchesStoreAPI.getMatch(k);
-                if (entry?.score && typeof entry.score.home==='number' && typeof entry.score.away==='number') {
-                  suppressed = true;
-                }
-              }
-            }
-            if (!suppressed) {
-              console.warn('[LiveScore] fetchScore вернул некорректные данные, DOM не обновлен');
-            } else {
-              console.log('[LiveScore] fetchScore некорректен, но стор содержит валидный счет — пропускаем предупреждение');
-            }
-          } catch(_) {
-            console.warn('[LiveScore] fetchScore вернул некорректные данные, DOM не обновлен');
-          }
-        }
-      } catch(e) {
-        console.warn('[LiveScore] Ошибка fetchScore:', e);
-      }
-    };
+    // fetchScore удалён – счёт теперь обновляется только из стора / WebSocket патч -> стор
+    const fetchScore = ()=>{};
     const ensureAdminCtrls=()=>{ try { if(adminScoreCtrlsAdded) {return;} const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):''; const isAdmin=!!(adminId && currentId && String(adminId)===currentId); if(!isAdmin) {return;} if(mdPane.querySelector('.admin-score-ctrls')){ adminScoreCtrlsAdded=true; return; }
         const mkBtn=(t)=>{ const b=document.createElement('button'); b.className='details-btn'; b.textContent=t; b.style.padding='2px 8px'; b.style.minWidth='unset'; return b; };
         const row=document.createElement('div'); row.className='admin-score-ctrls'; row.style.marginTop='6px'; row.style.display='flex'; row.style.gap='10px'; row.style.alignItems='center'; row.style.justifyContent='center';
@@ -265,44 +160,30 @@
       } catch(_){} 
     };
 
-    // WebSocket listener для мгновенного обновления счета (как в статистике)
-    let wsScoreRefreshHandler = null;
-    
-    // Создаем обработчик WebSocket событий
-    wsScoreRefreshHandler = (e) => {
+    // Подписка на стор: единый источник истины
+    let storeUnsub = null;
+    const subscribeStore = () => {
       try {
-        const { home, away, score_home, score_away, source } = e.detail || {};
-        if (!home || !away) { return; }
-        
-        // Защита: только для нашего матча
-        if (String(home) !== (match.home || '') || String(away) !== (match.away || '')) { 
-          return; 
+        if(!window.MatchesStoreAPI || !match?.home || !match?.away) return;
+        const key = window.MatchesStoreAPI.findMatchByTeams(match.home, match.away);
+        if(!key) return;
+        // Первичная гидратация
+        const entry = window.MatchesStoreAPI.getMatch(key);
+        if(entry?.score && typeof entry.score.home==='number' && typeof entry.score.away==='number') {
+          applyScore(entry.score.home, entry.score.away);
         }
-        
-        console.log('[LiveScore] Получено WebSocket обновление счета:', score_home, ':', score_away, 'источник:', source);
-        
-        // Если это административное изменение - защита от конфликтов
-        if (source === 'admin') {
-          state.lastAdminAction = Date.now();
-          state.noFetchUntil = Date.now() + 12000; // 12 секунд защита
-        }
-        
-        // Применяем счет с проверкой сигнатуры
-        if (typeof score_home === 'number' && typeof score_away === 'number') {
-          const applied = applyScore(score_home, score_away);
-          if (applied) {
-            console.log('[LiveScore] Счет обновлен через WebSocket');
-          }
-        }
-      } catch(err) {
-        console.error('[LiveScore] Ошибка обработки WebSocket события:', err);
-      }
+        storeUnsub = window.MatchesStoreAPI.subscribe((st)=>{
+          try {
+            const e2 = st.map[key];
+            if(e2?.score && typeof e2.score.home==='number' && typeof e2.score.away==='number') {
+              applyScore(e2.score.home, e2.score.away);
+            }
+          } catch(_){}
+        });
+        console.log('[LiveScore] Подписка на стор активна для', key);
+      } catch(e){ console.warn('[LiveScore] Не удалось подписаться на стор:', e); }
     };
-    
-    // Слушаем разные типы событий обновления счета
-    document.addEventListener('scoreUpdatedByAdmin', wsScoreRefreshHandler);
-    document.addEventListener('matchScoreUpdate', wsScoreRefreshHandler); // общее событие
-    document.addEventListener('ws:score_update', wsScoreRefreshHandler); // из WebSocket
+    subscribeStore();
     
     // Cleanup при отмене
     const originalCancel = mdPane.__scoreSetupCancel || (() => {});
@@ -311,13 +192,7 @@
       try { if (state.timer) { clearTimeout(state.timer); } } catch(_) {}
       try { if (scorePoll) { clearInterval(scorePoll); } } catch(_) {}
       try { if (pollWatch) { clearInterval(pollWatch); } } catch(_) {}
-      try { 
-        if (wsScoreRefreshHandler) {
-          document.removeEventListener('scoreUpdatedByAdmin', wsScoreRefreshHandler);
-          document.removeEventListener('matchScoreUpdate', wsScoreRefreshHandler);
-          document.removeEventListener('ws:score_update', wsScoreRefreshHandler);
-        }
-      } catch(_) {}
+      try { if (storeUnsub) { storeUnsub(); storeUnsub=null; } } catch(_) {}
       originalCancel();
     };
 
@@ -367,78 +242,8 @@
           // Если счёта нет — показываем 0:0
           try { if(scoreEl.textContent.trim()==='— : —') {scoreEl.textContent='0 : 0';} } catch(_){}
           // Админ: если сервер не live, но локально live — мягко выставим live (инициализируем счёт)
-          if (isAdmin && !serverLive && localLive) {
-            try {
-              const r0 = await fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`);
-              const d0 = await r0.json().catch(()=>({}));
-              if (d0?.score_home==null && d0?.score_away==null) {
-                const tg=window.Telegram?.WebApp||null; const fd0=new FormData();
-                fd0.append('initData', tg?.initData||''); fd0.append('home', match.home||''); fd0.append('away', match.away||'');
-                await fetch('/api/match/status/set-live',{ method:'POST', body:fd0 }).catch(()=>{});
-              }
-            } catch(_){}
-          }
-          // Polling логика как в статистике - отключается при активных WebSocket
-            const schedule = () => { 
-            if (state.cancelled) { return; }
-            if (isWsActive()) { 
-              console.log('[LiveScore] Поллинг отключен - полагаемся на WS топики');
-              return; 
-            }
-            const base = 15000; // 15 секунд базовый интервал
-            const jitter = 5000; // 5 секунд джиттер
-            const delay = base + Math.floor(Math.random() * jitter);
-            state.timer = setTimeout(scorePollingLoop, delay);
-          };
-          
-          const scorePollingLoop = async () => {
-            if (state.cancelled) { return; }
-            if (document.hidden) { schedule(); return; }
-            if (state.busy) { schedule(); return; }
-            if (isWsActive()) { 
-              console.log('[LiveScore] Поллинг отключен - полагаемся на WS топики');
-              schedule(); 
-              return; 
-            }
-            
-            state.busy = true;
-            try {
-              await fetchScore();
-            } finally {
-              state.busy = false;
-              schedule();
-            }
-          };
-          
-          // Мониторинг состояния WebSocket как в статистике
-          const syncPolling = () => {
-            try {
-              const needPoll = !isWsActive();
-              console.log('[LiveScore] Проверка polling:', needPoll ? 'включен' : 'выключен');
-              
-              if (needPoll) {
-                if (!state.timer) { 
-                  console.log('[LiveScore] Запускаем polling');
-                  fetchScore(); // первичная загрузка
-                  schedule(); 
-                }
-              } else {
-                if (state.timer) { 
-                  console.log('[LiveScore] Останавливаем polling - WebSocket активен');
-                  clearTimeout(state.timer); 
-                  state.timer = null; 
-                }
-              }
-            } catch(e) {
-              console.error('[LiveScore] Ошибка syncPolling:', e);
-            }
-          };
-          
-          // Первичный запуск
-          syncPolling();
-          
-          // Периодическая проверка состояния WebSocket (как в статистике)
-          pollWatch = setInterval(syncPolling, 5000);
+          // Admin bootstrap без прямого fetch счёта: статус live можно активировать вручную через UI при необходимости
+          // Polling удалён – WebSocket -> Store -> подписка
           
           ensureAdminCtrls();
         }

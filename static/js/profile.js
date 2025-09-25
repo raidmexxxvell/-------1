@@ -541,37 +541,8 @@
             const scoreEl = document.createElement('div'); scoreEl.className='score'; scoreEl.textContent='VS';
             center.append(L(m.home), scoreEl, L(m.away));
             card.appendChild(center);
-            // Если матч идёт — показываем счёт и обновляем
-            try {
-                const stateKey = (()=>{ try { return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${String(m.date||m.datetime||'').slice(0,10)}`; } catch(_) { return `${m.home||''}__${m.away||''}`; } })();
-                try { const prev = window.MatchState?.get(stateKey); if (prev && prev.score) {scoreEl.textContent = prev.score;} } catch(_) {}
-                const isLive = (window.MatchUtils ? window.MatchUtils.isLiveNow(m) : false);
-                if (isLive) {
-                    scoreEl.textContent = '0 : 0';
-                    const fetchScore = async () => {
-                        try {
-                            // STORE-AWARE GUARD: если MatchesStore содержит свежий счёт (<40s) — применяем и выходим
-                            try {
-                                if (window.MatchesStoreAPI && m.home && m.away) {
-                                    const k = window.MatchesStoreAPI.findMatchByTeams(m.home, m.away);
-                                    if (k) {
-                                        const entry = window.MatchesStoreAPI.getMatch(k);
-                                        if (entry?.score && entry.lastUpdated && (Date.now() - entry.lastUpdated) < 40000) {
-                                            const txtStore = `${Number(entry.score.home)} : ${Number(entry.score.away)}`;
-                                            if (scoreEl.textContent !== txtStore) { scoreEl.textContent = txtStore; }
-                                            return; // не делаем сетевой запрос
-                                        }
-                                    }
-                                }
-                            } catch(_) {}
-                            const r = await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`);
-                            const d = await r.json();
-                            if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') { const txt = `${Number(d.score_home)} : ${Number(d.score_away)}`; if (scoreEl.textContent !== txt) {scoreEl.textContent = txt;} try { window.MatchState?.set(stateKey, { score: txt }); } catch(_) {} }
-                        } catch(_) {}
-                    };
-                    fetchScore();
-                }
-            } catch(_) {}
+            // Счёт теперь обновляется только через единый ScoreDOMAdapter (MatchesStore → подписка)
+            try { window.ScoreDOMAdapter?.attach && window.ScoreDOMAdapter.attach(scoreEl, { home: m.home, away: m.away }); } catch(_) {}
             // Горизонтальная полоса голосования — через унифицированный helper
             const wrap = window.VoteInline?.create?.({ home: m.home, away: m.away, date: m.date || m.datetime, getTeamColor });
             // Показываем блок только если матч в ставочных турах
@@ -2019,12 +1990,31 @@ if(!window.openMatchScreen){
                 const inpH = scoreBox.querySelector('#sc-h');
                 const inpA = scoreBox.querySelector('#sc-a');
                 const btn = scoreBox.querySelector('#sc-save');
-                // загрузим текущий счёт
-                fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`)
-                    .then(r=>r.json()).then(d => {
-                        if (typeof d.score_home === 'number') {inpH.value = d.score_home;}
-                        if (typeof d.score_away === 'number') {inpA.value = d.score_away;}
-                    }).catch(()=>{});
+                // Инициализация значений счёта: только из стора (единый источник)
+                try {
+                    if (window.MatchesStoreAPI && match.home && match.away) {
+                        const mk = window.MatchesStoreAPI.findMatchByTeams(match.home, match.away);
+                        if (mk) {
+                            const entry = window.MatchesStoreAPI.getMatch(mk);
+                            if (entry?.score) {
+                                if (typeof entry.score.home === 'number') { inpH.value = entry.score.home; }
+                                if (typeof entry.score.away === 'number') { inpA.value = entry.score.away; }
+                            }
+                        }
+                        window.MatchesStoreAPI.subscribe(()=>{
+                            try {
+                                const mk2 = window.MatchesStoreAPI.findMatchByTeams(match.home, match.away);
+                                if (mk2) {
+                                    const e2 = window.MatchesStoreAPI.getMatch(mk2);
+                                    if (e2?.score) {
+                                        if (typeof e2.score.home === 'number' && inpH.value !== String(e2.score.home)) inpH.value = e2.score.home;
+                                        if (typeof e2.score.away === 'number' && inpA.value !== String(e2.score.away)) inpA.value = e2.score.away;
+                                    }
+                                }
+                            } catch(_){}
+                        });
+                    }
+                } catch(_){}
                 btn.addEventListener('click', async () => {
                     const tg = window.Telegram?.WebApp || null;
                     const fd = new FormData();

@@ -49,46 +49,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
                         const sh = fields.score_home;
                         const sa = fields.score_away;
                         if (typeof sh === 'number' && typeof sa === 'number') {
-                            console.log('[WS Listeners] Обновляем счет через WebSocket:', sh, ':', sa);
-                            // Отправляем централизованное событие для всех score компонентов
+                            console.log('[WS Listeners] Счёт патч (websocket) → стор событие:', sh, ':', sa);
                             const scoreEvent = new CustomEvent('matchScoreUpdate', {
-                                detail: {
-                                    home,
-                                    away,
-                                    score_home: sh,
-                                    score_away: sa,
-                                    timestamp: Date.now(),
-                                    source: 'websocket'
-                                }
+                                detail: { home, away, score_home: sh, score_away: sa, timestamp: Date.now(), source: 'websocket' }
                             });
                             document.dispatchEvent(scoreEvent);
-                            // Legacy поддержка: обновляем DOM элементы напрямую (как в стабильном коммите)
-                            const matchElements = document.querySelectorAll(`[data-match-home="${home}"][data-match-away="${away}"]`);
-                            const newScoreText = `${sh} : ${sa}`;
-                            matchElements.forEach((element) => {
-                                const scoreElement = element.querySelector('.match-score') || element.querySelector('.score');
-                                if (scoreElement && scoreElement.textContent?.trim() !== newScoreText) {
-                                    scoreElement.textContent = newScoreText;
-                                    // Добавляем анимацию как в стабильном коммите
-                                    scoreElement.classList.add('score-updated');
-                                    setTimeout(() => {
-                                        try {
-                                            scoreElement.classList.remove('score-updated');
-                                        }
-                                        catch (_) { }
-                                    }, 2000);
-                                }
-                            });
-                            // Также обновляем основной элемент счета в деталях матча
-                            const scoreEl = document.getElementById('md-score');
-                            if (scoreEl && scoreEl.textContent?.trim() !== newScoreText) {
-                                scoreEl.textContent = newScoreText;
-                                console.log('[WS Listeners] Обновлен основной счет:', newScoreText);
-                            }
+                            // DOM больше напрямую не трогаем (единый подписчик на стор обновит UI)
                         }
-                    }
-                    catch (e) {
-                        console.error('[WS Listeners] Ошибка обновления счета:', e);
+                    } catch (e) {
+                        console.error('[WS Listeners] Ошибка подготовки события matchScoreUpdate:', e);
                     }
                 }
                 // Обновляем MatchesStore для совместимости

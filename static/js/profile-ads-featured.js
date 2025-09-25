@@ -157,9 +157,10 @@
       const center = document.createElement('div'); center.className='match-center';
   const loadLogo = (imgEl, teamName) => { try { (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(imgEl, teamName||''); } catch(_) {} };
   const L = (name)=>{ const t=document.createElement('div'); t.className='team'; const i=document.createElement('img'); i.className='logo'; loadLogo(i,name||''); const n=document.createElement('div'); n.className='team-name'; n.textContent=name||''; t.append(i,n); return t; };
-      const scoreEl=document.createElement('div'); scoreEl.className='score'; scoreEl.textContent='VS';
+  const scoreEl=document.createElement('div'); scoreEl.className='score'; scoreEl.textContent='VS';
       center.append(L(m.home), scoreEl, L(m.away)); card.appendChild(center);
-      try { if (window.MatchUtils?.isLiveNow(m)) { scoreEl.textContent='0 : 0'; (async()=>{ try { const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`); const d=await r.json(); if (typeof d?.score_home==='number' && typeof d?.score_away==='number') {scoreEl.textContent=`${Number(d.score_home)} : ${Number(d.score_away)}`;} } catch(_){} })(); } } catch(_) {}
+  // Подключаемся к единому адаптеру счёта (никаких прямых fetch здесь)
+  try { window.ScoreDOMAdapter?.attach && window.ScoreDOMAdapter.attach(scoreEl, { home: m.home, away: m.away }); } catch(_) {}
       const wrap=document.createElement('div'); wrap.className='vote-inline';
       const title=document.createElement('div'); title.className='vote-title'; title.textContent='Голосование';
       const bar=document.createElement('div'); bar.className='vote-strip';

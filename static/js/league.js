@@ -188,70 +188,14 @@
       const tr = document.createElement('tr');
       for (let j = 0; j < 8; j++) {
         const td = document.createElement('td');
-        const val = (r[j] ?? '').toString();
-        if (j === 1) {
-          // Колонка с названием команды — делаем кликабельной
-          const nameEl = document.createElement('span');
-          nameEl.className = 'team-name';
-          nameEl.setAttribute('data-team-name', val);
-          nameEl.textContent = val;
-          td.appendChild(nameEl);
-        } else {
-          td.textContent = val;
-        }
+        td.textContent = (r[j] ?? '').toString();
         tr.appendChild(td);
       }
       nodes.push(tr);
     }
     batchAppend(tbody, nodes, 10);
     raf(() => {
-      try {
-        const trs = tbody.querySelectorAll('tr');
-        trs.forEach((rowEl, idx) => {
-          if (idx === 1) {rowEl.classList.add('rank-1');}
-          if (idx === 2) {rowEl.classList.add('rank-2');}
-          if (idx === 3) {rowEl.classList.add('rank-3');}
-        });
-      } catch(_) {}
-      if (updatedTextEl && data?.updated_at) {setUpdatedLabelSafely(updatedTextEl, data.updated_at);}
-    });
-  }
-
-  function renderStatsTable(tableEl, updatedEl, data) {
-    if (!tableEl) {return;}
-    const tbody = tableEl.querySelector('tbody');
-    if (!tbody) {return;}
-    tbody.innerHTML = '';
-    const rows = data?.values || [];
-    const MAX_ROWS = 10; // показываем максимум 10
-    const nodes = [];
-    const isEmpty = !Array.isArray(rows) || rows.length === 0;
-    for (let i = 0; i < MAX_ROWS; i++) {
-      const r = rows[i] || [];
-      const tr = document.createElement('tr');
-      for (let j = 0; j < 5; j++) { // 5 колонок: Name, Matches, Goals, Assists, Total
-        const td = document.createElement('td');
-        let val = (r[j] ?? '').toString();
-        // Если данных нет — рендерим стабильный скелет: имя пусто, числовые колонки = 0
-        if (isEmpty && j > 0) {val = '0';}
-        td.textContent = val;
-        tr.appendChild(td);
-      }
-      if (i === 0) {tr.classList.add('rank-1');}
-      else if (i === 1) {tr.classList.add('rank-2');}
-      else if (i === 2) {tr.classList.add('rank-3');}
-      nodes.push(tr);
-    }
-    batchAppend(tbody, nodes, 10);
-    raf(() => {
-      try { 
-        if (updatedEl && data?.updated_at) {updatedEl.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`;} 
-      } catch(_) {}
-      try {
-        // Проставляем сигнатуру первых 10 строк для дедупликации дальнейших рендеров
-        const sig = JSON.stringify((rows||[]).slice(0,10));
-        if (tableEl.dataset) {tableEl.dataset.sig = sig;}
-      } catch(_) {}
+      try { if (updatedTextEl && data?.updated_at) { updatedTextEl.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } } catch(_) {}
     });
   }
 
@@ -352,38 +296,10 @@
       } catch(_) {}
       try {
         if (isLive && !finStore[mkKey(m)]) {
-          score.textContent = '0 : 0';
-          const fetchScore = async () => {
-            try {
-              // STORE-AWARE GUARD: если стор уже содержит счёт и он обновлялся <45s назад — используем его.
-              try {
-                if (window.MatchesStoreAPI && m.home && m.away) {
-                  const k = window.MatchesStoreAPI.findMatchByTeams(m.home, m.away);
-                  if (k) {
-                    const entry = window.MatchesStoreAPI.getMatch(k);
-                    if (entry?.score && entry.lastUpdated && (Date.now() - entry.lastUpdated) < 45000) {
-                      const txtStore = `${Number(entry.score.home)} : ${Number(entry.score.away)}`;
-                      if (score.textContent !== txtStore) { score.textContent = txtStore; }
-                      // Обновим MatchState кэш для обратной совместимости
-                      try { window.MatchState?.set && window.MatchState.set(k,{ score: txtStore }); } catch(_){}
-                      return; // пропускаем сетевой запрос
-                    }
-                  }
-                }
-              } catch(_) {}
-              const r = await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`);
-              const d = await r.json();
-              if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') {
-                const txt = `${Number(d.score_home)} : ${Number(d.score_away)}`;
-                if (score.textContent !== txt) {score.textContent = txt;}
-                MatchState.set(stateKey, { score: txt });
-              }
-            } catch(_) {}
-          };
-          fetchScore();
+          if(!/\d+\s*:\s*\d+/.test((score.textContent||'').trim())) { score.textContent='0 : 0'; }
+          window.ScoreDOMAdapter?.attach && window.ScoreDOMAdapter.attach(score, { home: m.home, away: m.away });
         } else if (finStore[mkKey(m)]) {
-          // Попробуем сразу показать финальный счёт (однократный fetch)
-          (async()=>{ try { const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`); const d=await r.json(); if (typeof d?.score_home==='number' && typeof d?.score_away==='number') { const txt=`${Number(d.score_home)} : ${Number(d.score_away)}`; score.textContent=txt; MatchState.set(stateKey,{ score: txt }); } } catch(_){} })();
+          window.ScoreDOMAdapter?.attach && window.ScoreDOMAdapter.attach(score, { home: m.home, away: m.away });
         }
       } catch(_) {}
 

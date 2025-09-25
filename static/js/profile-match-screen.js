@@ -59,55 +59,22 @@
     homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; if(streamPane) {streamPane.style.display='none';} statsPane.style.display='none';
     function simpleRoster(pane,list){ pane.innerHTML=''; const ul=document.createElement('ul'); ul.style.listStyle='none'; ul.style.padding='0'; if(!list||!list.length){ const li=document.createElement('li'); li.textContent='Нет данных'; li.style.opacity='.6'; ul.appendChild(li);} else {list.forEach(n=>{ const li=document.createElement('li'); li.textContent=n; ul.appendChild(li); });} pane.appendChild(ul); }
     try { const homeList = Array.isArray(details?.rosters?.home)? details.rosters.home: []; const awayList = Array.isArray(details?.rosters?.away)? details.rosters.away: []; simpleRoster(homePane, homeList); simpleRoster(awayPane, awayList); } catch(_) { simpleRoster(homePane,[]); simpleRoster(awayPane,[]); }
-    let scorePoll=null; let etag=null;
-    const applyScore=(sh,sa)=>{ try { if (typeof sh!=='number'||typeof sa!=='number'||!Number.isFinite(sh)||!Number.isFinite(sa)||sh<0||sa<0) {return;} const txt=`${Number(sh)} : ${Number(sa)}`; if(score.textContent!==txt) { score.textContent=txt; } try { const keyCache=(window.MatchUtils? window.MatchUtils.matchKey(match): null) || window.__CURRENT_MATCH_KEY__; window.MatchState?.set && window.MatchState.set(keyCache,{ score: txt }); } catch(_){} } catch(_) {} };
-  const wsTopics = (function(){ try { const h=(match?.home||'').toLowerCase().trim(); const a=(match?.away||'').toLowerCase().trim(); const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):'')); const d=raw?raw.slice(0,10):''; return [`match:${h}__${a}__${d}:details`, `match:${h}__${a}__:details`]; } catch(_) { return []; } })();
-  const isWsActive = ()=>{ try { if(!window.__WEBSOCKETS_ENABLED__) return false; if(!wsTopics.length) return false; if (window.__WEBSOCKETS_CONNECTED && window.__WS_TOPIC_SUBSCRIBED) { for (const t of wsTopics){ if (window.__WS_TOPIC_SUBSCRIBED.has(t)) return true; } } const ru=window.realtimeUpdater; if (ru && ru.getTopicEnabled?.() && ru.hasTopic){ for (const t of wsTopics){ if (ru.hasTopic(t)) return true; } } return false; } catch(_) { return false; } };
-    async function fetchScore(){
-      try {
-        if (isWsActive()) { return; }
-        // STORE-AWARE GUARD: если MatchesStore уже содержит свежий счёт (<30s) — пропускаем fetch, избегая гонок
-        try {
-          if (window.MatchesStoreAPI && match?.home && match?.away) {
-            const k = window.MatchesStoreAPI.findMatchByTeams(match.home, match.away);
-            if (k) {
-              const entry = window.MatchesStoreAPI.getMatch(k);
-              if (entry?.score && entry.lastUpdated && (Date.now() - entry.lastUpdated) < 30000) {
-                // Применим текст из стора если DOM отстал
-                const txt = `${Number(entry.score.home)} : ${Number(entry.score.away)}`;
-                if (!/\d+\s*:\s*\d+/.test((score.textContent||'')) || score.textContent.trim() !== txt) {
-                  score.textContent = txt;
-                }
-                return; // не делаем сетевой вызов
-              }
-            }
-          }
-        } catch(_) {}
-        const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`, { headers: etag? { 'If-None-Match': etag }: {} });
-        if(r.status===304) { return; }
-        if(!r.ok) { return; }
-        const d=await r.json().catch(()=>null);
-        if(d && typeof d.score_home==='number' && typeof d.score_away==='number') {applyScore(d.score_home,d.score_away); etag = r.headers.get('ETag');}
-      } catch(_) {}
-    }
+  // Стор-ориентированное обновление счёта: используем общий адаптер
+  try { window.ScoreDOMAdapter?.attach && window.ScoreDOMAdapter.attach(score, { home: match.home, away: match.away }); } catch(_) {}
+  let scorePoll=null; // оставляем переменную для обратной совместимости (не используется)
+  const applyScore=()=>{}; // больше не нужен локальный апдейтер
+  // polling + fetchScore удалены — счёт приходит через стор
     try {
       fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`)
         .then(r=>r.json())
         .then(s=>{
-          if(s?.status==='live'){
+            if(s?.status==='live'){
             const alreadyBadge = dt.querySelector('.live-badge');
             if(!alreadyBadge){
               const live=document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); dt.appendChild(live);
             }
-            // Если в кэше нет счета и на экране нет цифр — покажем временный 0:0 только один раз
+            // Плейсхолдер если пусто
             if(!/\d+\s*:\s*\d+/.test((score.textContent||'').trim())) {score.textContent='0 : 0';}
-            fetchScore();
-            // Поллинг включаем только если нет активного WS топика
-            if (!isWsActive()) {
-              scorePoll=setInterval(()=>{ if(!isWsActive()) { fetchScore(); } },15000);
-            } else {
-              console.log('[MatchScreen] WS активен — polling счёта не включаем');
-            }
           }
         }).catch(()=>{});
     } catch(_) {}

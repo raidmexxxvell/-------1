@@ -766,36 +766,29 @@ class RealtimeUpdater {
     }
     
     updateMatchScore(home, away, data) {
-        // Обновляем отображение счета матча без мерцания и в едином формате
-        const matchElements = document.querySelectorAll(`[data-match-home="${home}"][data-match-away="${away}"]`);
+        // ЕДИНЫЙ ПУТЬ: обновляем только стор; DOM обновится через ScoreDOMAdapter / подписчиков
         const sh = (typeof data?.score_home === 'number') ? data.score_home : null;
         const sa = (typeof data?.score_away === 'number') ? data.score_away : null;
         if (sh == null || sa == null) { return; }
-        const txt = `${sh} : ${sa}`;
-        matchElements.forEach(element => {
-            const scoreElement = element.querySelector('.match-score') || element.querySelector('.score');
-            if (!scoreElement) { return; }
-            if (scoreElement.textContent !== txt) {
-                scoreElement.textContent = txt;
-                // Добавляем анимацию обновления
-                scoreElement.classList.add('score-updated');
-                setTimeout(() => { try { scoreElement.classList.remove('score-updated'); } catch(_) {} }, 2000);
-            }
-        });
-        // Дополнительно обновляем счёт в модальном окне деталей матча, если открыт именно этот матч
         try {
-            const mdPane = document.getElementById('ufo-match-details');
-            if (mdPane && mdPane.style.display !== 'none') {
-                const curH = mdPane.getAttribute('data-match-home') || '';
-                const curA = mdPane.getAttribute('data-match-away') || '';
-                if (curH === home && curA === away) {
-                    const scoreEl = document.getElementById('md-score');
-                    if (scoreEl && scoreEl.textContent !== txt) {
-                        scoreEl.textContent = txt;
-                    }
+            if (window.MatchesStoreAPI) {
+                let k = window.MatchesStoreAPI.findMatchByTeams(home, away);
+                if (!k) {
+                    // создаём минимальную запись, если отсутствует
+                    window.MatchesStoreAPI.addOrMergeMatch?.({ home, away, score: { home: sh, away: sa }, lastUpdated: Date.now() });
+                    k = window.MatchesStoreAPI.findMatchByTeams(home, away);
                 }
+                if (k) {
+                    window.MatchesStoreAPI.updateMatch(k, { home, away, score: { home: sh, away: sa }, lastUpdated: Date.now() });
+                }
+            } else {
+                // Fallback: если стора нет, оставляем прежнее поведение (минимально) — лёгкая инлайновая подсветка
+                const txt = `${sh} : ${sa}`;
+                const matchElements = document.querySelectorAll(`[data-match-home="${home}"][data-match-away="${away}"]`);
+                matchElements.forEach(el => { const scoreElement = el.querySelector('.match-score') || el.querySelector('.score'); if(scoreElement && scoreElement.textContent !== txt){ scoreElement.textContent = txt; scoreElement.classList.add('score-updated'); setTimeout(()=>{ try { scoreElement.classList.remove('score-updated'); } catch(_){} }, 2000);} });
+                try { const mdPane=document.getElementById('ufo-match-details'); if(mdPane && mdPane.style.display!=='none'){ const curH=mdPane.getAttribute('data-match-home')||''; const curA=mdPane.getAttribute('data-match-away')||''; if(curH===home && curA===away){ const scoreEl=document.getElementById('md-score'); if(scoreEl && scoreEl.textContent!==txt){ scoreEl.textContent=txt; } } } } catch(_){}
             }
-        } catch(_){}
+        } catch(e){ /* silent */ }
     }
     
     showNotification(message) {
