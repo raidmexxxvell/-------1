@@ -770,6 +770,21 @@ class RealtimeUpdater {
         const sh = (typeof data?.score_home === 'number') ? data.score_home : null;
         const sa = (typeof data?.score_away === 'number') ? data.score_away : null;
         if (sh == null || sa == null) { return; }
+                // --- SCORE UPDATE LOGGING (race diagnostics) ---
+                try {
+                        if (!window.__scoreUpdates) { window.__scoreUpdates = []; }
+                } catch(_) {}
+                const ts = Date.now();
+                let prevStoreScore = null;
+                try {
+                        if (window.MatchesStoreAPI) {
+                                const existingKey = window.MatchesStoreAPI.findMatchByTeams(home, away);
+                                if (existingKey) {
+                                        const entry = window.MatchesStoreAPI.getMatch(existingKey);
+                                        if (entry?.score) { prevStoreScore = { home: entry.score.home, away: entry.score.away, txt: `${entry.score.home} : ${entry.score.away}` }; }
+                                }
+                        }
+                } catch(_) {}
         try {
             if (window.MatchesStoreAPI) {
                 // Гарантируем наличие записи и сразу кладём счёт
@@ -780,6 +795,19 @@ class RealtimeUpdater {
                 })();
                 if (k) {
                   window.MatchesStoreAPI.updateMatch(k, { home, away, score_home: sh, score_away: sa });
+                                    try {
+                                        const after = window.MatchesStoreAPI.getMatch(k);
+                                        const newScoreTxt = after?.score ? `${after.score.home} : ${after.score.away}` : null;
+                                        const changed = !prevStoreScore || (prevStoreScore.home !== sh || prevStoreScore.away !== sa);
+                                        const rec = { ts, source: 'realtime-updates.updateMatchScore', home, away, newScore: { home: sh, away: sa }, prev: prevStoreScore, matchKey: k, changed };
+                                        window.__scoreUpdates.push(rec);
+                                        if (window.__scoreUpdates.length > 400) { window.__scoreUpdates.splice(0, window.__scoreUpdates.length - 400); }
+                                        if (window.localStorage?.getItem('debug:score_log') === '1') {
+                                            // Цветной лог для визуальной диагностики
+                                            const color = changed ? 'color:#22c55e' : 'color:#9ca3af';
+                                            console.log('%c[ScoreUpdate]', color, rec);
+                                        }
+                                    } catch(_) {}
                 }
             } else {
                 // Fallback: если стора нет, оставляем прежнее поведение (минимально) — лёгкая инлайновая подсветка
@@ -787,6 +815,12 @@ class RealtimeUpdater {
                 const matchElements = document.querySelectorAll(`[data-match-home="${home}"][data-match-away="${away}"]`);
                 matchElements.forEach(el => { const scoreElement = el.querySelector('.match-score') || el.querySelector('.score'); if(scoreElement && scoreElement.textContent !== txt){ scoreElement.textContent = txt; scoreElement.classList.add('score-updated'); setTimeout(()=>{ try { scoreElement.classList.remove('score-updated'); } catch(_){} }, 2000);} });
                 try { const mdPane=document.getElementById('ufo-match-details'); if(mdPane && mdPane.style.display!=='none'){ const curH=mdPane.getAttribute('data-match-home')||''; const curA=mdPane.getAttribute('data-match-away')||''; if(curH===home && curA===away){ const scoreEl=document.getElementById('md-score'); if(scoreEl && scoreEl.textContent!==txt){ scoreEl.textContent=txt; } } } } catch(_){}
+                                try {
+                                    const rec = { ts, source: 'realtime-updates.updateMatchScore:fallback', home, away, newScore: { home: sh, away: sa }, prev: prevStoreScore, matchKey: null, changed: true };
+                                    window.__scoreUpdates.push(rec);
+                                    if (window.__scoreUpdates.length > 400) { window.__scoreUpdates.splice(0, window.__scoreUpdates.length - 400); }
+                                    if (window.localStorage?.getItem('debug:score_log') === '1') { console.log('%c[ScoreUpdate]', 'color:#f59e0b', rec); }
+                                } catch(_) {}
             }
         } catch(e){ /* silent */ }
     }
