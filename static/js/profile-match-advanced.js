@@ -57,6 +57,7 @@
     const subtabs = mdPane.querySelector('.modal-subtabs');
     // PR-2a: topic-based автоподписка на детали матча (если включено)
   let __topic = null;
+  let __topics = [];
     try {
       if(window.__WS_TOPIC_SUBS__ && window.realtimeUpdater){
         const h=(match?.home||'').toLowerCase().trim();
@@ -64,25 +65,37 @@
         const raw=(match?.date?String(match.date):(match?.datetime?String(match.datetime):''));
         const d=raw?raw.slice(0,10):'';
   const scheme = (window.__WS_TOPIC_SCHEME__ === 'with_date') ? 'with_date' : 'no_date';
-  __topic = (scheme === 'with_date') ? `match:${h}__${a}__${d}:details` : `match:${h}__${a}__:details`;
-  console.log('[WS Матч] Подписываемся на топик:', __topic, 'схема:', scheme, 'WS включен:', !!window.__WEBSOCKETS_ENABLED__, 'Топики включены:', !!window.__WS_TOPIC_SUBS__);
+  const baseTopic = `match:${h}__${a}`;
+  const preferredTopic = (scheme === 'with_date' && d) ? `${baseTopic}__${d}:details` : `${baseTopic}__:details`;
+  const datedTopic = d ? `${baseTopic}__${d}:details` : null;
+  const legacyTopic = `${baseTopic}__:details`;
+  const plannedTopics = [];
+  if (preferredTopic) { plannedTopics.push(preferredTopic); }
+  if (datedTopic) { plannedTopics.push(datedTopic); }
+  if (legacyTopic) { plannedTopics.push(legacyTopic); }
+  __topics = Array.from(new Set(plannedTopics.filter(Boolean)));
+  __topic = __topics[0] || null;
+  try { mdPane.__wsTopics = __topics.slice(); } catch(_){}
+  console.log('[WS Матч] Топики для подписки:', __topics, 'предпочтительная схема:', scheme, 'WS включен:', !!window.__WEBSOCKETS_ENABLED__, 'Топики включены:', !!window.__WS_TOPIC_SUBS__);
         // небольшая задержка чтобы дождаться connect
         setTimeout(()=>{ 
           try { 
             const ru = window.realtimeUpdater;
-            // Анти-дребезг: не отправляем повторную подписку, если уже есть или была попытка <1.5с назад
-            try { window.__WS_LAST_SUBSCRIBE_TS = window.__WS_LAST_SUBSCRIBE_TS || new Map(); } catch(_){}
-            const lastTs = (function(){ try { return window.__WS_LAST_SUBSCRIBE_TS?.get?.(__topic) || 0; } catch(_) { return 0; } })();
-            const recently = (Date.now() - lastTs) < 1500;
-            const already = (function(){ try { return !!window.__WS_TOPIC_SUBSCRIBED?.has?.(__topic); } catch(_) { return false; } })();
-            if (already || recently) {
-              console.log('[WS Матч] Пропускаем повторную подписку:', __topic, 'already=', already, 'recently=', recently);
-              return;
-            }
-            console.log('[WS Матч] Попытка подписки на топик:', __topic);
-            ru.subscribeTopic(__topic);
-            try { window.__WS_LAST_SUBSCRIBE_TS?.set?.(__topic, Date.now()); } catch(_){}
-            console.log('[WS Матч] Подписка выполнена для:', __topic);
+            __topics.forEach((topic)=>{
+              // Анти-дребезг: не отправляем повторную подписку, если уже есть или была попытка <1.5с назад
+              try { window.__WS_LAST_SUBSCRIBE_TS = window.__WS_LAST_SUBSCRIBE_TS || new Map(); } catch(_){ }
+              const lastTs = (function(){ try { return window.__WS_LAST_SUBSCRIBE_TS?.get?.(topic) || 0; } catch(_) { return 0; } })();
+              const recently = (Date.now() - lastTs) < 1500;
+              const already = (function(){ try { return !!window.__WS_TOPIC_SUBSCRIBED?.has?.(topic); } catch(_) { return false; } })();
+              if (already || recently) {
+                console.log('[WS Матч] Пропускаем повторную подписку:', topic, 'already=', already, 'recently=', recently);
+                return;
+              }
+              console.log('[WS Матч] Попытка подписки на топик:', topic);
+              ru.subscribeTopic(topic);
+              try { window.__WS_LAST_SUBSCRIBE_TS?.set?.(topic, Date.now()); } catch(_){ }
+              console.log('[WS Матч] Подписка выполнена для:', topic);
+            });
           } catch(e){
             console.error('[WS Матч] Ошибка подписки:', e);
           } 
@@ -319,7 +332,7 @@
         }; btn.addEventListener('click', async()=>{ const ok=await confirmFinish(); if(!ok) {return;} const tg=window.Telegram?.WebApp||null; btn.disabled=true; const old=btn.textContent; btn.textContent='Завершаю...'; try { const fd=new FormData(); fd.append('initData', tg?.initData||''); fd.append('home', match.home||''); fd.append('away', match.away||''); const r=await fetch('/api/match/settle',{ method:'POST', body:fd }); const d=await r.json().catch(()=>({})); if(!r.ok || d?.error) {throw new Error(d?.error||'Ошибка завершения');} try { window.showAlert?.('Матч завершён','success'); } catch(_){} try { if(d && d.total_bets!==undefined){ const msg=`Ставки: всего ${d.total_bets}, открытых до расчёта ${d.open_before}, изменено ${d.changed||0}, выиграло ${d.won||0}, проиграло ${d.lost||0}`; window.showAlert?.(msg,'info'); } } catch(_){} try { const dateStr=(match?.datetime||match?.date||'').toString().slice(0,10); const key=`stream:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${dateStr}`; localStorage.removeItem(key); const sp=document.getElementById('md-pane-stream'); if(sp){ sp.style.display='none'; sp.innerHTML='<div class=\"stream-wrap\"><div class=\"stream-skeleton\">Трансляция недоступна</div></div>'; } } catch(_){} try { finStore[mKey]=true; } catch(_){} await fullRefresh(); try { btn.style.display='none'; const statusEl=mdPane.querySelector('.match-details-topbar .status-text'); if(statusEl) {statusEl.textContent='Матч завершен';} } catch(_){} } catch(e){ console.error('finish match error', e); try { window.showAlert?.(e?.message||'Ошибка','error'); } catch(_){} } finally { btn.disabled=false; btn.textContent=old; } }); topbar.appendChild(btn); } } catch(_){}
   // finish button delegated
   let adminCtx=null; try { if(window.MatchAdmin?.setup){ adminCtx=window.MatchAdmin.setup(match,{ mdPane }); } } catch(_){}
-  const back=document.getElementById('match-back'); if(back) {back.onclick=()=>{ try { if(__topic && window.__WS_TOPIC_SUBS__ && window.realtimeUpdater) {window.realtimeUpdater.unsubscribeTopic(__topic);} } catch(_){} try { if(mdPane.__onDetailsUpdate) {document.removeEventListener('matchDetailsUpdate', mdPane.__onDetailsUpdate);} } catch(_){} try { if(mdPane.__detailsPollCancel) {mdPane.__detailsPollCancel();} } catch(_){} try { const statsHost=document.getElementById('md-pane-stats'); if(statsHost && statsHost.__statsPollCancel) {statsHost.__statsPollCancel();} } catch(_){} homePane.innerHTML=''; awayPane.innerHTML=''; try { if(adminCtx) {adminCtx.cleanup();} } catch(_){} try { if(liveScoreCtx) {liveScoreCtx.cleanup();} } catch(_){} try { if(window.Streams?.resetOnLeave) {window.Streams.resetOnLeave(mdPane);} } catch(_){} try { const spLeak=document.getElementById('md-pane-stream'); if(spLeak) {spLeak.classList.remove('fs-mode');} } catch(_){} try { document.body.classList.remove('allow-landscape'); } catch(_){} mdPane.style.display='none'; schedulePane.style.display=''; window.scrollTo({ top:0, behavior:'smooth' }); try { document.getElementById('ufo-subtabs').style.display=''; } catch(_){} };}
+  const back=document.getElementById('match-back'); if(back) {back.onclick=()=>{ try { if(window.__WS_TOPIC_SUBS__ && window.realtimeUpdater) { const topicsToClean = Array.isArray(__topics) && __topics.length ? __topics : (__topic ? [__topic] : []); topicsToClean.forEach((topic)=>{ try { window.realtimeUpdater.unsubscribeTopic(topic); } catch(_){} }); } } catch(_){} try { if(mdPane.__onDetailsUpdate) {document.removeEventListener('matchDetailsUpdate', mdPane.__onDetailsUpdate);} } catch(_){} try { if(mdPane.__detailsPollCancel) {mdPane.__detailsPollCancel();} } catch(_){} try { const statsHost=document.getElementById('md-pane-stats'); if(statsHost && statsHost.__statsPollCancel) {statsHost.__statsPollCancel();} } catch(_){} homePane.innerHTML=''; awayPane.innerHTML=''; try { if(adminCtx) {adminCtx.cleanup();} } catch(_){} try { if(liveScoreCtx) {liveScoreCtx.cleanup();} } catch(_){} try { if(window.Streams?.resetOnLeave) {window.Streams.resetOnLeave(mdPane);} } catch(_){} try { const spLeak=document.getElementById('md-pane-stream'); if(spLeak) {spLeak.classList.remove('fs-mode');} } catch(_){} try { document.body.classList.remove('allow-landscape'); } catch(_){} mdPane.style.display='none'; schedulePane.style.display=''; window.scrollTo({ top:0, behavior:'smooth' }); try { document.getElementById('ufo-subtabs').style.display=''; } catch(_){} };}
   }
   window.MatchAdvanced = { openMatchScreen };
   try { window.openMatchScreen = openMatchScreen; } catch(_) {}
