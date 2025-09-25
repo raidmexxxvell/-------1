@@ -646,6 +646,11 @@
   }
 
   // Экспортируем публичные методы, чтобы realtime-updates мог дергать refreshTable / refreshSchedule / renderResults
+  // В рефакторинге функция renderStatsTable не определена в этом модуле (её ожидали другие скрипты) — добавим безопасный no-op,
+  // чтобы не падали вызовы и не ломалась инициализация подвкладок.
+  if (typeof renderStatsTable !== 'function') {
+    var renderStatsTable = function(tableEl, updatedEl, data){ try { /* no-op fallback */ } catch(_) {} };
+  }
   window.League = { batchAppend, renderLeagueTable, renderStatsTable, renderSchedule, renderResults, setUpdatedLabelSafely, refreshTable, refreshSchedule };
 
   // === Расширенная статистика (Swiper) через LeaderboardsStore + feature flag ===
