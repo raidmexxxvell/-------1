@@ -172,6 +172,40 @@ declare global {
     return null;
   }
 
+  /** Создать запись матча если её нет; возвращает ключ */
+  function addOrMergeMatch(payload: { home: string; away: string; date?: string; score?: { home:number; away:number } }): string {
+    const h = (payload.home||'').toString();
+    const a = (payload.away||'').toString();
+    let key = findMatchByTeams(h,a);
+    if (key) {
+      // merge score if provided
+      if (payload.score) {
+        updateMatch(key, { home: h, away: a, date: payload.date, score_home: payload.score.home, score_away: payload.score.away });
+      } else {
+        updateMatch(key, { home: h, away: a, date: payload.date });
+      }
+      return key;
+    }
+    // создаём новый ключ (без даты — используем нормализацию)
+    key = `${h.toLowerCase().trim()}__${a.toLowerCase().trim()}`;
+    (window as any).MatchesStore.update((st: MatchesState) => {
+      st.map[key] = {
+        info: { id: key, home: h, away: a, date: payload.date },
+        score: payload.score ? { home: Number(payload.score.home)||0, away: Number(payload.score.away)||0 } : null,
+        events: [],
+        stats: null,
+        rosters: null,
+        ui: { scoreText: payload.score ? `${Number(payload.score.home)} : ${Number(payload.score.away)}` : undefined },
+        lastUpdated: Date.now()
+      } as MatchEntry;
+    });
+    return key;
+  }
+
+  function ensureMatch(home: string, away: string, date?: string): string {
+    return addOrMergeMatch({ home, away, date });
+  }
+
   // Экспортируем API для использования в других модулях
   (window as any).MatchesStoreAPI = {
     updateMatchStats,
@@ -179,6 +213,8 @@ declare global {
     getMatch,
     updateMatch,
     findMatchByTeams,
+    addOrMergeMatch,
+    ensureMatch,
     subscribe: matches.subscribe,
     get: matches.get
   };

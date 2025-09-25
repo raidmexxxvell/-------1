@@ -772,14 +772,14 @@ class RealtimeUpdater {
         if (sh == null || sa == null) { return; }
         try {
             if (window.MatchesStoreAPI) {
-                let k = window.MatchesStoreAPI.findMatchByTeams(home, away);
-                if (!k) {
-                    // создаём минимальную запись, если отсутствует
-                    window.MatchesStoreAPI.addOrMergeMatch?.({ home, away, score: { home: sh, away: sa }, lastUpdated: Date.now() });
-                    k = window.MatchesStoreAPI.findMatchByTeams(home, away);
-                }
+                // Гарантируем наличие записи и сразу кладём счёт
+                const k = window.MatchesStoreAPI.addOrMergeMatch ? window.MatchesStoreAPI.addOrMergeMatch({ home, away, score: { home: sh, away: sa } }) : (function(){
+                  let tmp = window.MatchesStoreAPI.findMatchByTeams(home, away);
+                  if(!tmp){ window.MatchesStoreAPI.updateMatch((home.toLowerCase().trim()+"__"+away.toLowerCase().trim()), { home, away, score_home: sh, score_away: sa }); tmp = window.MatchesStoreAPI.findMatchByTeams(home, away); }
+                  return tmp;
+                })();
                 if (k) {
-                    window.MatchesStoreAPI.updateMatch(k, { home, away, score: { home: sh, away: sa }, lastUpdated: Date.now() });
+                  window.MatchesStoreAPI.updateMatch(k, { home, away, score_home: sh, score_away: sa });
                 }
             } else {
                 // Fallback: если стора нет, оставляем прежнее поведение (минимально) — лёгкая инлайновая подсветка

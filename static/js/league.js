@@ -298,8 +298,10 @@
         if (isLive && !finStore[mkKey(m)]) {
           if(!/\d+\s*:\s*\d+/.test((score.textContent||'').trim())) { score.textContent='0 : 0'; }
           window.ScoreDOMAdapter?.attach && window.ScoreDOMAdapter.attach(score, { home: m.home, away: m.away });
+          try { window.MatchesStoreAPI?.addOrMergeMatch && window.MatchesStoreAPI.addOrMergeMatch({ home: m.home||'', away: m.away||'', date: (m.date||m.datetime||'').toString().slice(0,10), score: { home: Number(score.textContent.split(':')[0])||0, away: Number(score.textContent.split(':')[1])||0 } }); } catch(_) {}
         } else if (finStore[mkKey(m)]) {
           window.ScoreDOMAdapter?.attach && window.ScoreDOMAdapter.attach(score, { home: m.home, away: m.away });
+          try { window.MatchesStoreAPI?.addOrMergeMatch && window.MatchesStoreAPI.addOrMergeMatch({ home: m.home||'', away: m.away||'', date: (m.date||m.datetime||'').toString().slice(0,10) }); } catch(_) {}
         }
       } catch(_) {}
 
