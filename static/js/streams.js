@@ -4,58 +4,70 @@
 // Пример ключа: `${home.toLowerCase()}__${away.toLowerCase()}__${dateYYYYMMDD}`
 // Если дата не критична, можно оставить пустой третий сегмент: `${home}__${away}__`.
 
-(function(){
+(function () {
   const DBG = true; // включено подробное логирование потоков
   // Хранилище соответствий: ключ → объект трансляции (локальный fallback)
   const registry = {
     // 'дождь__звезда__2025-08-16': { vkVideoId: '123456789_987654321', autoplay: 0 },
     // 'дождь__звезда__': { vkPostUrl: 'https://vk.com/video-123456_654321', autoplay: 0 },
   };
-  function normName(s){
-    try { return (s||'').toLowerCase().replace(/ё/g,'е').trim(); } catch(_) { return (s||''); }
+  function normName(s) {
+    try {
+      return (s || '').toLowerCase().replace(/ё/g, 'е').trim();
+    } catch (_) {
+      return s || '';
+    }
   }
-  function makeKey(match){
-    const h = normName(match?.home||'');
-    const a = normName(match?.away||'');
+  function makeKey(match) {
+    const h = normName(match?.home || '');
+    const a = normName(match?.away || '');
     let d = '';
-    try{
-      const raw = match?.date ? String(match.date) : (match?.datetime ? String(match.datetime) : '');
-      d = raw ? raw.slice(0,10) : '';
-    }catch(_){ d=''; }
+    try {
+      const raw = match?.date ? String(match.date) : match?.datetime ? String(match.datetime) : '';
+      d = raw ? raw.slice(0, 10) : '';
+    } catch (_) {
+      d = '';
+    }
     return `${h}__${a}__${d}`;
   }
-  function findStream(match){
-  const keyExact = makeKey(match);
-  
-  return registry[keyExact] || null;
+  function findStream(match) {
+    const keyExact = makeKey(match);
+
+    return registry[keyExact] || null;
   }
 
-  function vUrl(u){
-    try { const v = Number(localStorage.getItem('appVersion:lastSeen')||'0')||0; return v? (u + (u.includes('?')?'&':'?') + 'v='+v): u; } catch(_) { return u; }
+  function vUrl(u) {
+    try {
+      const v = Number(localStorage.getItem('appVersion:lastSeen') || '0') || 0;
+      return v ? u + (u.includes('?') ? '&' : '?') + 'v=' + v : u;
+    } catch (_) {
+      return u;
+    }
   }
 
-  function buildIframeSrc(info){
-    if (!info) { return ''; }
+  function buildIframeSrc(info) {
+    if (!info) {
+      return '';
+    }
     if (info.vkVideoId) {
       const [oid, vid] = String(info.vkVideoId).split('_');
-      return `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid||'')}&id=${encodeURIComponent(vid||'')}&hd=2&autoplay=${info.autoplay?1:0}`;
+      return `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid || '')}&id=${encodeURIComponent(vid || '')}&hd=2&autoplay=${info.autoplay ? 1 : 0}`;
     }
     if (info.vkPostUrl) {
       try {
         const m = String(info.vkPostUrl).match(/\/video(-?\d+_\d+)/);
         if (m && m[1]) {
           const [oid, vid] = m[1].split('_');
-          return `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid||'')}&id=${encodeURIComponent(vid||'')}&hd=2&autoplay=${info.autoplay?1:0}`;
+          return `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid || '')}&id=${encodeURIComponent(vid || '')}&hd=2&autoplay=${info.autoplay ? 1 : 0}`;
         }
-      } catch(_) {}
+      } catch (_) {}
       return info.vkPostUrl;
     }
     return '';
   }
 
-
-  function ensurePane(mdPane, match){
-  // Создаём (или возвращаем) панель для потока
+  function ensurePane(mdPane, match) {
+    // Создаём (или возвращаем) панель для потока
     let pane = document.getElementById('md-pane-stream');
     const body = mdPane.querySelector('.modal-body');
 
@@ -64,17 +76,18 @@
       pane.id = 'md-pane-stream';
       pane.className = 'md-pane';
       pane.style.display = 'none';
-      pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
-      if (body) { body.appendChild(pane); }
-      
+      pane.innerHTML =
+        '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
+      if (body) {
+        body.appendChild(pane);
+      }
     } else {
       // Если панель уже существует, убедимся, что она находится в текущем mdPane
       try {
         if (body && pane.parentNode !== body) {
           body.appendChild(pane);
-          
         }
-      } catch(_) {}
+      } catch (_) {}
     }
 
     // Обнуляем инициализацию при смене матча
@@ -83,58 +96,73 @@
       // Смена матча — сбрасываем состояние, но оставляем display='none' до активации вкладки
       pane.__inited = false;
       pane.__streamInfo = null;
-      pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
+      pane.innerHTML =
+        '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
       pane.setAttribute('data-match-key', key);
-      if(pane.style.display!=='none') { pane.style.display='none'; }
+      if (pane.style.display !== 'none') {
+        pane.style.display = 'none';
+      }
     }
     return pane;
   }
 
-  function ensureTab(subtabs, match){
+  function ensureTab(subtabs, match) {
     let tab = subtabs?.querySelector('[data-mdtab="stream"]');
     if (!tab) {
-      tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
+      tab = document.createElement('div');
+      tab.className = 'subtab-item';
+      tab.setAttribute('data-mdtab', 'stream');
+      tab.textContent = 'Трансляция';
       subtabs.appendChild(tab);
-  
     }
-    if (match) { tab.setAttribute('data-match-key', makeKey(match)); }
+    if (match) {
+      tab.setAttribute('data-match-key', makeKey(match));
+    }
     return tab;
   }
 
-  function buildStreamInto(pane, info, match){
-    if (!info || pane.__inited) { return !!pane.__inited; }
-  // Строим iframe с видео
-  const host = document.createElement('div'); host.className = 'stream-wrap';
-    const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
+  function buildStreamInto(pane, info, match) {
+    if (!info || pane.__inited) {
+      return !!pane.__inited;
+    }
+    // Строим iframe с видео
+    const host = document.createElement('div');
+    host.className = 'stream-wrap';
+    const ratio = document.createElement('div');
+    ratio.className = 'stream-aspect';
     const ifr = document.createElement('iframe');
     // используем vUrl для перебивки кэша версии приложения (если применимо)
     ifr.src = vUrl(buildIframeSrc(info));
-    ifr.setAttribute('allowfullscreen','true');
-    ifr.setAttribute('webkitallowfullscreen','true');
-    ifr.setAttribute('mozallowfullscreen','true');
+    ifr.setAttribute('allowfullscreen', 'true');
+    ifr.setAttribute('webkitallowfullscreen', 'true');
+    ifr.setAttribute('mozallowfullscreen', 'true');
     ifr.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; screen-wake-lock;';
     ifr.referrerPolicy = 'strict-origin-when-cross-origin';
-    
+
     // Добавляем обработчик двойного тапа для полноэкранного режима на мобильных
     let lastTapTime = 0;
-    ifr.addEventListener('touchend', (e) => {
-      const now = Date.now();
-      if (now - lastTapTime < 300) {
-        e.preventDefault();
-        // Попытка входа в полноэкранный режим
-        try {
-          if (ifr.requestFullscreen) {
-            ifr.requestFullscreen();
-          } else if (ifr.webkitRequestFullscreen) {
-            ifr.webkitRequestFullscreen();
-          } else if (ifr.mozRequestFullScreen) {
-            ifr.mozRequestFullScreen();
-          }
-        } catch(_) {}
-      }
-      lastTapTime = now;
-    }, { passive: false });
-    
+    ifr.addEventListener(
+      'touchend',
+      e => {
+        const now = Date.now();
+        if (now - lastTapTime < 300) {
+          e.preventDefault();
+          // Попытка входа в полноэкранный режим
+          try {
+            if (ifr.requestFullscreen) {
+              ifr.requestFullscreen();
+            } else if (ifr.webkitRequestFullscreen) {
+              ifr.webkitRequestFullscreen();
+            } else if (ifr.mozRequestFullScreen) {
+              ifr.mozRequestFullScreen();
+            }
+          } catch (_) {}
+        }
+        lastTapTime = now;
+      },
+      { passive: false }
+    );
+
     // Кнопка «на весь экран»: специальная версия для Telegram WebApp на мобильных
     const fsBtn = document.createElement('button');
     fsBtn.className = 'stream-fs-btn';
@@ -142,189 +170,185 @@
     fsBtn.title = 'На весь экран';
     fsBtn.setAttribute('aria-label', 'На весь экран');
     fsBtn.innerHTML = '&#x26F6;'; // ⛶
-    
+
     // Проверяем среду выполнения
     const isTelegramWebApp = typeof window.Telegram !== 'undefined' && window.Telegram.WebApp;
-    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent
+    );
     const isTelegramMobile = isTelegramWebApp && isMobile;
-    
+
     const enterFs = () => {
-      
-      
       // В Telegram WebApp на мобильных устройствах Fullscreen API часто заблокирован
       // Сразу переходим к псевдо-фуллскрину для лучшего UX
       if (isTelegramMobile) {
-        
-        try { 
-          pane.classList.add('fs-mode'); 
+        try {
+          pane.classList.add('fs-mode');
           document.body.classList.add('allow-landscape');
           // Принудительно разворачиваем в ландшафт на мобильном устройстве
           if (window.screen && window.screen.orientation && window.screen.orientation.lock) {
-            window.screen.orientation.lock('landscape').catch(e => {
-              
-            });
+            window.screen.orientation.lock('landscape').catch(e => {});
           }
-          
+
           return;
-        } catch(e) { 
-           
-        }
+        } catch (e) {}
       }
-      
+
       // Для остальных случаев пробуем нативный API
       let ok = false;
       try {
-        if (ratio.requestFullscreen) { 
-          ratio.requestFullscreen().then(()=>{ 
-             
-          }).catch(e=>{ 
-             
-            // Fallback к псевдо-фуллскрину
-            try { 
-              pane.classList.add('fs-mode'); 
-              document.body.classList.add('allow-landscape'); 
-            } catch(_) {}
-          }); 
-          ok = true; 
-        }
-        else if (ratio.webkitRequestFullscreen) { 
-          ratio.webkitRequestFullscreen(); 
-          ok = true; 
-          
-        }
-        else if (ratio.mozRequestFullScreen) { 
-          ratio.mozRequestFullScreen(); 
-          ok = true; 
-          
-        }
-        else if (ifr.requestFullscreen) {
-          ifr.requestFullscreen().then(()=>{ 
-             
-          }).catch(e=>{ 
-            
-            // Fallback к псевдо-фуллскрину
-            try { 
-              pane.classList.add('fs-mode'); 
-              document.body.classList.add('allow-landscape'); 
-            } catch(_) {}
-          });
+        if (ratio.requestFullscreen) {
+          ratio
+            .requestFullscreen()
+            .then(() => {})
+            .catch(e => {
+              // Fallback к псевдо-фуллскрину
+              try {
+                pane.classList.add('fs-mode');
+                document.body.classList.add('allow-landscape');
+              } catch (_) {}
+            });
+          ok = true;
+        } else if (ratio.webkitRequestFullscreen) {
+          ratio.webkitRequestFullscreen();
+          ok = true;
+        } else if (ratio.mozRequestFullScreen) {
+          ratio.mozRequestFullScreen();
+          ok = true;
+        } else if (ifr.requestFullscreen) {
+          ifr
+            .requestFullscreen()
+            .then(() => {})
+            .catch(e => {
+              // Fallback к псевдо-фуллскрину
+              try {
+                pane.classList.add('fs-mode');
+                document.body.classList.add('allow-landscape');
+              } catch (_) {}
+            });
           ok = true;
         }
-      } catch(e) { 
-         
-      }
-      
+      } catch (e) {}
+
       if (!ok) {
-        
-        try { 
-          pane.classList.add('fs-mode'); 
-          document.body.classList.add('allow-landscape'); 
-          
-        } catch(e) { 
-           
-        }
+        try {
+          pane.classList.add('fs-mode');
+          document.body.classList.add('allow-landscape');
+        } catch (e) {}
       }
     };
-    
-    const exitPseudo = () => { 
-      try { 
+
+    const exitPseudo = () => {
+      try {
         pane.classList.remove('fs-mode');
         // Разблокируем ориентацию
         if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
           window.screen.orientation.unlock();
         }
-        
-      } catch(e) { 
-         
-      } 
+      } catch (e) {}
     };
-    
-    fsBtn.addEventListener('click', (e)=>{ 
-      e.preventDefault(); 
+
+    fsBtn.addEventListener('click', e => {
+      e.preventDefault();
       e.stopPropagation();
-      
-      
+
       try {
         // Проверяем, уже в фуллскрине ли мы
-        const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
+        const isFullscreen =
+          document.fullscreenElement ||
+          document.webkitFullscreenElement ||
+          document.mozFullScreenElement;
         if (isFullscreen) {
-          
-          if (document.exitFullscreen) { document.exitFullscreen(); }
-          else if (document.webkitExitFullscreen) { document.webkitExitFullscreen(); }
-          else if (document.mozCancelFullScreen) { document.mozCancelFullScreen(); }
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
+          } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+          } else if (document.mozCancelFullScreen) {
+            document.mozCancelFullScreen();
+          }
           return;
         }
-      } catch(e) { 
-         
-      }
-      
+      } catch (e) {}
+
       // Переключаем псевдо-фуллскрин
       if (pane.classList?.contains('fs-mode')) {
-        exitPseudo(); 
+        exitPseudo();
       } else {
         enterFs();
       }
     });
-    
+
     // Слушаем события изменения фуллскрина для очистки псевдо-режима
     const handleFullscreenChange = () => {
       try {
-        const fs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
+        const fs =
+          document.fullscreenElement ||
+          document.webkitFullscreenElement ||
+          document.mozFullScreenElement;
         if (!fs && pane.classList?.contains('fs-mode')) {
-          
         } else if (!fs) {
           exitPseudo();
         }
-      } catch(e) { 
-         
-      }
+      } catch (e) {}
     };
-    
+
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('mozfullscreenchange', handleFullscreenChange);
 
-    ratio.appendChild(ifr); host.appendChild(ratio); host.appendChild(fsBtn);
-  pane.innerHTML='';
-  pane.appendChild(host);
+    ratio.appendChild(ifr);
+    host.appendChild(ratio);
+    host.appendChild(fsBtn);
+    pane.innerHTML = '';
+    pane.appendChild(host);
     pane.__inited = true;
-    try { typeof window.initStreamComments === 'function' && window.initStreamComments(pane, match); } catch(_) {}
+    try {
+      typeof window.initStreamComments === 'function' && window.initStreamComments(pane, match);
+    } catch (_) {}
     return true;
   }
 
-  async function fetchServerStream(match){
-    try{
-      let dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
+  async function fetchServerStream(match) {
+    try {
+      let dateStr = (match?.datetime || match?.date || '').toString().slice(0, 10);
       if (!dateStr) {
         try {
           const cmk = window.__CURRENT_MATCH_KEY__ || '';
           const parts = cmk.split('__');
-          if (parts.length >= 3 && parts[2]) { dateStr = parts[2]; }
-        } catch(_) {}
+          if (parts.length >= 3 && parts[2]) {
+            dateStr = parts[2];
+          }
+        } catch (_) {}
       }
-  
+
       // Первая попытка: с датой (если есть)
       let ans = null;
-      const base = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`;
+      const base = `/api/streams/get?home=${encodeURIComponent(match.home || '')}&away=${encodeURIComponent(match.away || '')}`;
       if (dateStr) {
         const url1 = `${base}&date=${encodeURIComponent(dateStr)}`;
         try {
           const r1 = await fetch(url1, { cache: 'no-store' });
           ans = await r1.json();
-          if (ans && ans.available && (ans.vkVideoId || ans.vkPostUrl)) { return ans; }
-        } catch(_) {}
+          if (ans && ans.available && (ans.vkVideoId || ans.vkPostUrl)) {
+            return ans;
+          }
+        } catch (_) {}
       }
       // Вторая попытка: без даты (сервер теперь отдаёт последнюю свежую)
       try {
         const r2 = await fetch(base, { cache: 'no-store' });
         const ans2 = await r2.json();
-        if (ans2 && ans2.available && (ans2.vkVideoId || ans2.vkPostUrl)) { return ans2; }
-      } catch(_) {}
-    }catch(_){/* noop */}
+        if (ans2 && ans2.available && (ans2.vkVideoId || ans2.vkPostUrl)) {
+          return ans2;
+        }
+      } catch (_) {}
+    } catch (_) {
+      /* noop */
+    }
     return null;
   }
 
-  function setupMatchStream(mdPane, subtabs, match){
+  function setupMatchStream(mdPane, subtabs, match) {
     // Всегда создаём вкладку и панель сразу (скелет), чтобы пользователь видел «Трансляция».
     const pane = ensurePane(mdPane, match);
     const tab = ensureTab(subtabs, match);
@@ -339,26 +363,37 @@
     mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1;
     const reqId = mdPane.__streamSetupSeq;
     mdPane.__streamSetupKey = expectedKey;
-    fetchServerStream(match).then((ans)=>{
-      if (!ans) { return; } // оставляем скелет
-      const currentKey = mdPane.getAttribute('data-match-key') || expectedKey;
-      if (currentKey !== expectedKey) { return; }
-      if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== expectedKey) { return; }
-      pane.__streamInfo = ans;
-      if (tab?.classList?.contains('active')) {
-        try { buildStreamInto(pane, ans, match); } catch(_) {}
-      }
-    }).catch(()=>{});
+    fetchServerStream(match)
+      .then(ans => {
+        if (!ans) {
+          return;
+        } // оставляем скелет
+        const currentKey = mdPane.getAttribute('data-match-key') || expectedKey;
+        if (currentKey !== expectedKey) {
+          return;
+        }
+        if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== expectedKey) {
+          return;
+        }
+        pane.__streamInfo = ans;
+        if (tab?.classList?.contains('active')) {
+          try {
+            buildStreamInto(pane, ans, match);
+          } catch (_) {}
+        }
+      })
+      .catch(() => {});
     return pane;
   }
 
-  function onStreamTabActivated(pane, match){
-  if (!pane) { return; }
-  // Активирована вкладка «Трансляция»
+  function onStreamTabActivated(pane, match) {
+    if (!pane) {
+      return;
+    }
+    // Активирована вкладка «Трансляция»
     // Безопасность: проверяем, что pane относится к текущему матчу
     const key = makeKey(match);
     if (pane.getAttribute('data-match-key') !== key) {
-      
       pane.__inited = false;
       pane.__streamInfo = null;
       pane.setAttribute('data-match-key', key);
@@ -366,67 +401,104 @@
     if (!pane.__inited) {
       const info = pane.__streamInfo || findStream(match);
       if (info) {
-        
-        setTimeout(()=>buildStreamInto(pane, info, match), 50);
+        setTimeout(() => buildStreamInto(pane, info, match), 50);
       } else {
         // Попробуем ещё раз спросить сервер и построить
         const expectedKey = key;
         // Пер-запрос маркируем токеном, чтобы игнорировать устаревшие ответы
         pane.__streamTabSeq = (pane.__streamTabSeq || 0) + 1;
         const reqId = pane.__streamTabSeq;
-        fetchServerStream(match).then((ans)=>{
-          // Проверяем, что мы всё ещё на этом матче
-          if (!ans) {  const sk=pane.querySelector('.stream-skeleton'); if (sk) { sk.textContent='Трансляция недоступна'; } return; }
-          const mdKey = (mdPaneFrom(pane)?.getAttribute('data-match-key') || expectedKey);
-          if (mdKey !== expectedKey) {  return; }
-          if (pane.__streamTabSeq !== reqId) {  return; }
-          
-          pane.__streamInfo = ans; buildStreamInto(pane, ans, match);
-        }).catch(()=>{});
+        fetchServerStream(match)
+          .then(ans => {
+            // Проверяем, что мы всё ещё на этом матче
+            if (!ans) {
+              const sk = pane.querySelector('.stream-skeleton');
+              if (sk) {
+                sk.textContent = 'Трансляция недоступна';
+              }
+              return;
+            }
+            const mdKey = mdPaneFrom(pane)?.getAttribute('data-match-key') || expectedKey;
+            if (mdKey !== expectedKey) {
+              return;
+            }
+            if (pane.__streamTabSeq !== reqId) {
+              return;
+            }
+
+            pane.__streamInfo = ans;
+            buildStreamInto(pane, ans, match);
+          })
+          .catch(() => {});
       }
     } else {
       // Уже инициализировано — запустим поллинг комментариев, если есть
-      try { typeof pane.__startCommentsPoll === 'function' && pane.__startCommentsPoll(); } catch(_) {}
+      try {
+        typeof pane.__startCommentsPoll === 'function' && pane.__startCommentsPoll();
+      } catch (_) {}
     }
   }
 
-  function mdPaneFrom(pane){
-    try { return pane?.closest('#ufo-match-details'); } catch(_) { return null; }
+  function mdPaneFrom(pane) {
+    try {
+      return pane?.closest('#ufo-match-details');
+    } catch (_) {
+      return null;
+    }
   }
 
   window.__STREAMS__ = { findStream, registry };
   // Сброс состояния при выходе с экрана матча (переход по нижним вкладкам/кнопка Назад)
-  function resetOnLeave(mdPane){
+  function resetOnLeave(mdPane) {
     try {
       const pane = document.getElementById('md-pane-stream');
-      if (!pane) { return; }
-  
+      if (!pane) {
+        return;
+      }
+
       // Остановить возможный поллинг комментариев
-      try { typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll(); } catch(_) {}
+      try {
+        typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll();
+      } catch (_) {}
       // Поставить видео на паузу / полностью сбросить src iframe
-      try { const ifr = pane.querySelector('iframe'); if (ifr) { try { ifr.src = ''; } catch(_) { /* noop */ } } } catch(_) {}
-  // Инвалидируем любые ожидающие ответы
-  try { mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1; } catch(_) {}
-  try { pane.__streamTabSeq = (pane.__streamTabSeq || 0) + 1; } catch(_) {}
+      try {
+        const ifr = pane.querySelector('iframe');
+        if (ifr) {
+          try {
+            ifr.src = '';
+          } catch (_) {
+            /* noop */
+          }
+        }
+      } catch (_) {}
+      // Инвалидируем любые ожидающие ответы
+      try {
+        mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1;
+      } catch (_) {}
+      try {
+        pane.__streamTabSeq = (pane.__streamTabSeq || 0) + 1;
+      } catch (_) {}
       pane.__inited = false;
       pane.__streamInfo = null;
-      pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
+      pane.innerHTML =
+        '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
 
       // Убираем ключ и отсоединяем панель от старого модала, чтобы при следующем открытии
       // ensurePane корректно поместит её в новый mdPane
       try {
         pane.removeAttribute('data-match-key');
-        if (pane.parentNode) { pane.parentNode.removeChild(pane); }
-        
-      } catch(_) {}
-    } catch(_) {}
+        if (pane.parentNode) {
+          pane.parentNode.removeChild(pane);
+        }
+      } catch (_) {}
+    } catch (_) {}
   }
 
   window.Streams = { setupMatchStream, onStreamTabActivated, resetOnLeave };
 
   // ---------------- Комментарии к трансляции -----------------
   // Минимальная реализация поверх существующих эндпоинтов.
-  function createCommentsUI(pane, match){
+  function createCommentsUI(pane, match) {
     const wrap = document.createElement('div');
     wrap.className = 'stream-comments';
     wrap.style.marginTop = '12px';
@@ -447,101 +519,151 @@
     form.style.gap = '6px';
     form.style.marginTop = '6px';
     const input = document.createElement('input');
-    input.type='text';
-    input.placeholder='Ваш комментарий';
+    input.type = 'text';
+    input.placeholder = 'Ваш комментарий';
     input.maxLength = 280;
-    input.style.flex='1';
-    input.style.fontSize='13px';
-    input.autocomplete='off';
+    input.style.flex = '1';
+    input.style.fontSize = '13px';
+    input.autocomplete = 'off';
     const btn = document.createElement('button');
-    btn.type='button';
-    btn.textContent='Отпр.';
-    btn.className='details-btn';
-    btn.style.fontSize='12px';
+    btn.type = 'button';
+    btn.textContent = 'Отпр.';
+    btn.className = 'details-btn';
+    btn.style.fontSize = '12px';
     const hint = document.createElement('div');
-    hint.className='sc-hint';
-    hint.style.fontSize='11px';
-    hint.style.marginTop='4px';
-    hint.style.minHeight='14px';
+    hint.className = 'sc-hint';
+    hint.style.fontSize = '11px';
+    hint.style.marginTop = '4px';
+    hint.style.minHeight = '14px';
     form.append(input, btn);
     wrap.append(list, form, hint);
     pane.appendChild(wrap);
     return { list, input, btn, hint, wrap };
   }
 
-  function renderComments(listEl, items){
-    if(!Array.isArray(items) || !items.length){
+  function renderComments(listEl, items) {
+    if (!Array.isArray(items) || !items.length) {
       listEl.innerHTML = '<div style="opacity:.6;">Пока нет комментариев</div>';
       return;
     }
     const frag = document.createDocumentFragment();
-    items.forEach(it=>{
+    items.forEach(it => {
       const row = document.createElement('div');
-      row.className='sc-item';
-      row.style.padding='3px 0';
+      row.className = 'sc-item';
+      row.style.padding = '3px 0';
       const name = document.createElement('span');
-      name.style.fontWeight='600';
-      name.style.marginRight='4px';
-      name.textContent = (it.name||'User')+':';
+      name.style.fontWeight = '600';
+      name.style.marginRight = '4px';
+      name.textContent = (it.name || 'User') + ':';
       const content = document.createElement('span');
-      content.textContent = it.content||'';
+      content.textContent = it.content || '';
       row.append(name, content);
       frag.appendChild(row);
     });
-    listEl.innerHTML=''; listEl.appendChild(frag);
+    listEl.innerHTML = '';
+    listEl.appendChild(frag);
     // автопрокрутка вниз, если почти внизу
     try {
-      const nearBottom = (listEl.scrollTop + listEl.clientHeight + 30) >= listEl.scrollHeight;
-      if (nearBottom) { listEl.scrollTop = listEl.scrollHeight; }
-    } catch(_) {}
+      const nearBottom = listEl.scrollTop + listEl.clientHeight + 30 >= listEl.scrollHeight;
+      if (nearBottom) {
+        listEl.scrollTop = listEl.scrollHeight;
+      }
+    } catch (_) {}
   }
 
-  window.initStreamComments = function(pane, match){
+  window.initStreamComments = function (pane, match) {
     try {
-      if (!match || !pane) { return; }
-      if (pane.__commentsInited) { return; }
+      if (!match || !pane) {
+        return;
+      }
+      if (pane.__commentsInited) {
+        return;
+      }
       const ui = createCommentsUI(pane, match);
       pane.__commentsInited = true;
-      const state = { etag:null, dateStr:(match?.datetime||match?.date||'').toString().slice(0,10) };
-      function buildQuery(){
-        const base = `/api/match/comments/list?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`;
-        return state.dateStr? base+`&date=${encodeURIComponent(state.dateStr)}`: base;
+      const state = {
+        etag: null,
+        dateStr: (match?.datetime || match?.date || '').toString().slice(0, 10),
+      };
+      function buildQuery() {
+        const base = `/api/match/comments/list?home=${encodeURIComponent(match.home || '')}&away=${encodeURIComponent(match.away || '')}`;
+        return state.dateStr ? base + `&date=${encodeURIComponent(state.dateStr)}` : base;
       }
-      async function loadOnce(){
+      async function loadOnce() {
         const url = buildQuery();
-        const hdrs = { 'Cache-Control':'no-cache' };
-        if (state.etag) { hdrs['If-None-Match']=state.etag; }
+        const hdrs = { 'Cache-Control': 'no-cache' };
+        if (state.etag) {
+          hdrs['If-None-Match'] = state.etag;
+        }
         try {
           const r = await fetch(url, { headers: hdrs });
-          if (r.status === 304) { return; } // не изменилось
-          const et = r.headers.get('ETag'); if (et) { state.etag = et; }
-          const d = await r.json().catch(()=>({}));
-          if (Array.isArray(d.items)) { renderComments(ui.list, d.items); }
-        } catch(_) {}
+          if (r.status === 304) {
+            return;
+          } // не изменилось
+          const et = r.headers.get('ETag');
+          if (et) {
+            state.etag = et;
+          }
+          const d = await r.json().catch(() => ({}));
+          if (Array.isArray(d.items)) {
+            renderComments(ui.list, d.items);
+          }
+        } catch (_) {}
       }
-      pane.__startCommentsPoll = function(){ if (pane.__commentsTimer) { return; } loadOnce(); pane.__commentsTimer = setInterval(loadOnce, 10000); };
-      pane.__stopCommentsPoll = function(){ try { clearInterval(pane.__commentsTimer); } catch(_){} pane.__commentsTimer=null; };
+      pane.__startCommentsPoll = function () {
+        if (pane.__commentsTimer) {
+          return;
+        }
+        loadOnce();
+        pane.__commentsTimer = setInterval(loadOnce, 10000);
+      };
+      pane.__stopCommentsPoll = function () {
+        try {
+          clearInterval(pane.__commentsTimer);
+        } catch (_) {}
+        pane.__commentsTimer = null;
+      };
       // Автостарт сразу после создания
       pane.__startCommentsPoll();
-      ui.btn.onclick = async ()=>{
-        const val = (ui.input.value||'').trim();
-        if (!val){ ui.hint.textContent='Пусто'; ui.hint.style.color='#f66'; return; }
-        ui.btn.disabled=true; const old=ui.btn.textContent; ui.btn.textContent='...'; ui.hint.textContent='';
+      ui.btn.onclick = async () => {
+        const val = (ui.input.value || '').trim();
+        if (!val) {
+          ui.hint.textContent = 'Пусто';
+          ui.hint.style.color = '#f66';
+          return;
+        }
+        ui.btn.disabled = true;
+        const old = ui.btn.textContent;
+        ui.btn.textContent = '...';
+        ui.hint.textContent = '';
         try {
           const fd = new FormData();
           fd.append('initData', window.Telegram?.WebApp?.initData || '');
-            fd.append('home', match.home||''); fd.append('away', match.away||'');
-            if (state.dateStr) { fd.append('date', state.dateStr); }
-            fd.append('content', val);
-          const r = await fetch('/api/match/comments/add', { method:'POST', body: fd });
-          const d = await r.json().catch(()=>({}));
-          if(!r.ok || d.error){ throw new Error(d.error||'err'); }
-          ui.input.value=''; ui.hint.textContent='Отправлено'; ui.hint.style.color='#4caf50';
+          fd.append('home', match.home || '');
+          fd.append('away', match.away || '');
+          if (state.dateStr) {
+            fd.append('date', state.dateStr);
+          }
+          fd.append('content', val);
+          const r = await fetch('/api/match/comments/add', { method: 'POST', body: fd });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok || d.error) {
+            throw new Error(d.error || 'err');
+          }
+          ui.input.value = '';
+          ui.hint.textContent = 'Отправлено';
+          ui.hint.style.color = '#4caf50';
           // моментально обновим
-          state.etag=null; loadOnce();
-        } catch(e){ ui.hint.textContent = e?.message || 'Ошибка'; ui.hint.style.color='#f66'; }
-        finally { ui.btn.disabled=false; ui.btn.textContent=old; }
+          state.etag = null;
+          loadOnce();
+        } catch (e) {
+          ui.hint.textContent = e?.message || 'Ошибка';
+          ui.hint.style.color = '#f66';
+        } finally {
+          ui.btn.disabled = false;
+          ui.btn.textContent = old;
+        }
       };
-    } catch(_) {}
+    } catch (_) {}
   };
 })();

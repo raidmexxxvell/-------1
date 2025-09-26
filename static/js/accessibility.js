@@ -1,6 +1,8 @@
 // A11y утилиты для улучшения доступности
 (() => {
-  if (typeof window === 'undefined') {return;}
+  if (typeof window === 'undefined') {
+    return;
+  }
 
   class AccessibilityManager {
     constructor() {
@@ -18,7 +20,9 @@
     // Настройка доступности навигации
     setupNavigationA11y() {
       const nav = document.getElementById('bottom-nav');
-      if (!nav) {return;}
+      if (!nav) {
+        return;
+      }
 
       // Добавляем role и aria-атрибуты для основной навигации
       nav.setAttribute('role', 'navigation');
@@ -30,14 +34,14 @@
         item.setAttribute('role', 'button');
         item.setAttribute('tabindex', '0');
         item.setAttribute('aria-pressed', item.classList.contains('active') ? 'true' : 'false');
-        
+
         const label = item.querySelector('.nav-label');
         if (label) {
           item.setAttribute('aria-label', label.textContent.trim());
         }
 
         // Keyboard navigation
-        item.addEventListener('keydown', (e) => {
+        item.addEventListener('keydown', e => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             item.click();
@@ -63,19 +67,22 @@
 
     setupSubtabsA11y() {
       const subtabContainers = document.querySelectorAll('.subtabs');
-      
+
       subtabContainers.forEach(container => {
         container.setAttribute('role', 'tablist');
-        
+
         const subtabs = container.querySelectorAll('.subtab-item');
         subtabs.forEach((subtab, index) => {
           subtab.setAttribute('role', 'tab');
           subtab.setAttribute('tabindex', subtab.classList.contains('active') ? '0' : '-1');
-          subtab.setAttribute('aria-selected', subtab.classList.contains('active') ? 'true' : 'false');
+          subtab.setAttribute(
+            'aria-selected',
+            subtab.classList.contains('active') ? 'true' : 'false'
+          );
           subtab.setAttribute('id', `subtab-${container.id}-${index}`);
 
           // Keyboard navigation for subtabs
-          subtab.addEventListener('keydown', (e) => {
+          subtab.addEventListener('keydown', e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
               subtab.click();
@@ -104,14 +111,14 @@
     // Настройка модальных окон
     setupModalA11y() {
       const modals = document.querySelectorAll('.modal');
-      
+
       modals.forEach(modal => {
         modal.setAttribute('aria-hidden', 'true');
         modal.setAttribute('role', 'dialog');
         modal.setAttribute('aria-modal', 'true');
 
         // Focus trap для модальных окон
-        modal.addEventListener('keydown', (e) => {
+        modal.addEventListener('keydown', e => {
           if (e.key === 'Escape') {
             this.closeModal(modal);
           } else if (e.key === 'Tab') {
@@ -131,7 +138,7 @@
 
     // Глобальная клавиатурная навигация
     setupKeyboardNavigation() {
-      document.addEventListener('keydown', (e) => {
+      document.addEventListener('keydown', e => {
         // Skip navigation (Alt + S)
         if (e.altKey && e.key === 's') {
           e.preventDefault();
@@ -188,10 +195,10 @@
     openModal(modal) {
       modal.setAttribute('aria-hidden', 'false');
       modal.style.display = 'flex';
-      
+
       // Сохраняем текущий фокус
       this.focusTrapStack.push(document.activeElement);
-      
+
       // Фокусируем первый focusable элемент в модалке
       const firstFocusable = this.getFocusableElements(modal)[0];
       if (firstFocusable) {
@@ -202,7 +209,7 @@
     closeModal(modal) {
       modal.setAttribute('aria-hidden', 'true');
       modal.style.display = 'none';
-      
+
       // Возвращаем фокус
       const previousFocus = this.focusTrapStack.pop();
       if (previousFocus) {
@@ -236,23 +243,25 @@
         'select:not([disabled])',
         'textarea:not([disabled])',
         'a[href]',
-        '[tabindex]:not([tabindex="-1"])'
+        '[tabindex]:not([tabindex="-1"])',
       ];
-      
-      return Array.from(container.querySelectorAll(focusableSelectors.join(', ')))
-        .filter(el => {
-          return !el.hidden && 
-                 el.offsetWidth > 0 && 
-                 el.offsetHeight > 0 &&
-                 getComputedStyle(el).visibility !== 'hidden';
-        });
+
+      return Array.from(container.querySelectorAll(focusableSelectors.join(', '))).filter(el => {
+        return (
+          !el.hidden &&
+          el.offsetWidth > 0 &&
+          el.offsetHeight > 0 &&
+          getComputedStyle(el).visibility !== 'hidden'
+        );
+      });
     }
 
     // Skip navigation
     skipToMainContent() {
-      const mainContent = document.getElementById('app-content') || 
-                         document.querySelector('main') ||
-                         document.querySelector('[role="main"]');
+      const mainContent =
+        document.getElementById('app-content') ||
+        document.querySelector('main') ||
+        document.querySelector('[role="main"]');
       if (mainContent) {
         mainContent.focus();
         mainContent.scrollIntoView();
@@ -276,9 +285,9 @@
       announcer.setAttribute('aria-atomic', 'true');
       announcer.classList.add('sr-only');
       announcer.textContent = message;
-      
+
       document.body.appendChild(announcer);
-      
+
       setTimeout(() => {
         document.body.removeChild(announcer);
       }, 1000);
@@ -303,5 +312,4 @@
   } else {
     window.A11yManager = new AccessibilityManager();
   }
-
 })();

@@ -44,12 +44,12 @@ declare global {
 
   // Ждём готовности ProfileStore
   const waitForStore = () => {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>(resolve => {
       if (window.ProfileStore) {
         resolve();
         return;
       }
-      
+
       const check = () => {
         if (window.ProfileStore) {
           resolve();
@@ -64,7 +64,7 @@ declare global {
   // Интеграция с существующим ProfileAchievements
   const integrateWithLegacy = async () => {
     await waitForStore();
-    
+
     if (!window.ProfileAchievements || !window.ProfileStore) {
       return;
     }
@@ -77,7 +77,7 @@ declare global {
     const originalRender = legacy.renderAchievements.bind(legacy);
 
     // Подписываемся на изменения в сторе
-    store.subscribe((state) => {
+    store.subscribe(state => {
       // При обновлении достижений в сторе обновляем UI
       if (state.achievements && state.achievements.length > 0) {
         originalRender(state.achievements);
@@ -90,8 +90,8 @@ declare global {
         // Проверяем, есть ли свежие данные в сторе
         const state = store.get();
         const now = Date.now();
-        const isFresh = state.achievementsLastUpdated && 
-                       (now - state.achievementsLastUpdated) < 30000; // 30 секунд
+        const isFresh =
+          state.achievementsLastUpdated && now - state.achievementsLastUpdated < 30000; // 30 секунд
 
         if (isFresh && state.achievements.length > 0) {
           // Используем данные из стора
@@ -100,12 +100,12 @@ declare global {
 
         // Загружаем данные через оригинальный метод
         const achievements = await originalFetch();
-        
+
         // Сохраняем в стор
         if (store.updateAchievements) {
           store.updateAchievements(achievements);
         }
-        
+
         return achievements;
       } catch (error) {
         console.error('Profile achievements adapter error:', error);
@@ -121,7 +121,7 @@ declare global {
         store.update(state => {
           state.achievementsLastUpdated = null;
         });
-        
+
         // Загружаем заново
         return legacy.fetchAchievements();
       } catch (error) {

@@ -1,16 +1,18 @@
 // static/js/dom-utils.js
 // Унифицированные утилиты для работы с DOM элементами
-(function(){
-  if (window.DOMUtils) { return; } // idempotent
+(function () {
+  if (window.DOMUtils) {
+    return;
+  } // idempotent
 
   // Создание элемента с className и опциональными атрибутами
   function createElement(tag, className = '', attributes = {}) {
     const element = document.createElement(tag);
-    
+
     if (className) {
       element.className = className;
     }
-    
+
     // Устанавливаем атрибуты
     Object.entries(attributes).forEach(([key, value]) => {
       if (value !== null && value !== undefined) {
@@ -27,7 +29,7 @@
         }
       }
     });
-    
+
     return element;
   }
 
@@ -45,24 +47,24 @@
   function createButton(text, className = '', onClick = null, attributes = {}) {
     const button = createElement('button', className, {
       textContent: text,
-      ...attributes
+      ...attributes,
     });
-    
+
     if (onClick && typeof onClick === 'function') {
       button.addEventListener('click', onClick);
     }
-    
+
     return button;
   }
 
   // Пакетное добавление элементов в родителя (для производительности)
   function batchAppend(parent, elements, batchSize = 20) {
     if (!parent || !elements || !elements.length) return;
-    
+
     let i = 0;
     function step() {
       if (i >= elements.length) return;
-      
+
       const fragment = document.createDocumentFragment();
       for (let k = 0; k < batchSize && i < elements.length; k++, i++) {
         if (elements[i]) {
@@ -70,7 +72,7 @@
         }
       }
       parent.appendChild(fragment);
-      
+
       // Используем requestAnimationFrame для плавности
       if (i < elements.length) {
         requestAnimationFrame(step);
@@ -90,7 +92,7 @@
   // Установка состояния загрузки для элемента
   function setLoadingState(element, isLoading = true, loadingText = 'Загрузка...') {
     if (!element) return;
-    
+
     if (isLoading) {
       element.dataset.originalText = element.textContent;
       element.textContent = loadingText;
@@ -109,21 +111,21 @@
     img.style.width = size;
     img.style.height = size;
     img.style.objectFit = 'contain';
-    
+
     let currentIndex = 0;
     const srcs = [primarySrc, ...fallbackSrcs];
-    
+
     const tryNextSrc = () => {
       if (currentIndex >= srcs.length) return;
-      
+
       img.onerror = () => {
         currentIndex++;
         tryNextSrc();
       };
-      
+
       img.src = srcs[currentIndex];
     };
-    
+
     tryNextSrc();
     return img;
   }
@@ -131,13 +133,13 @@
   // Создание элемента с детьми
   function createWithChildren(tag, className = '', children = [], attributes = {}) {
     const element = createElement(tag, className, attributes);
-    
+
     children.forEach(child => {
       if (child) {
         element.appendChild(child);
       }
     });
-    
+
     return element;
   }
 
@@ -146,7 +148,7 @@
     const table = createElement('table', className);
     const thead = createElement('thead');
     const tbody = createElement('tbody');
-    
+
     if (headers.length > 0) {
       const headerRow = createElement('tr');
       headers.forEach(headerText => {
@@ -155,17 +157,17 @@
       });
       thead.appendChild(headerRow);
     }
-    
+
     table.appendChild(thead);
     table.appendChild(tbody);
-    
+
     return { table, thead, tbody };
   }
 
   // Создание строки таблицы
   function createTableRow(cells = [], className = '') {
     const row = createElement('tr', className);
-    
+
     cells.forEach(cellContent => {
       const td = createElement('td');
       if (typeof cellContent === 'string') {
@@ -177,17 +179,17 @@
       }
       row.appendChild(td);
     });
-    
+
     return row;
   }
 
   // Показать/скрыть элемент с анимацией
   function toggleElement(element, show = null) {
     if (!element) return;
-    
+
     const isVisible = element.style.display !== 'none';
     const shouldShow = show !== null ? show : !isVisible;
-    
+
     if (shouldShow) {
       element.style.display = element.dataset.originalDisplay || 'block';
       element.style.opacity = '0';
@@ -218,7 +220,7 @@
     createWithChildren,
     createTable,
     createTableRow,
-    toggleElement
+    toggleElement,
   };
 
   // Удобные глобальные шорткаты для обратной совместимости
@@ -229,5 +231,5 @@
     if (!window.batchAppend) {
       window.batchAppend = batchAppend;
     }
-  } catch(_) {}
+  } catch (_) {}
 })();

@@ -21,7 +21,9 @@ declare global {
     try {
       const user = window.UserStore?.get();
       return user?.role === 'admin' || user?.role === 'owner';
-    } catch(_) { return false; }
+    } catch (_) {
+      return false;
+    }
   }
 
   let enabled = false;
@@ -31,7 +33,7 @@ declare global {
     if (loggedStores.has(storeName)) return;
     loggedStores.add(storeName);
 
-    store.subscribe((state) => {
+    store.subscribe(state => {
       if (!enabled || !isOwnerMode()) return;
       console.group(`🏪 Store [${storeName}] updated`);
       console.log('New state:', state);
@@ -66,7 +68,7 @@ declare global {
       console.warn('🚫 Store debugger available only for admin/owner role');
       return;
     }
-    
+
     if (!window.Store) {
       console.warn('🚫 Store not initialized');
       return;

@@ -21,7 +21,7 @@ interface ShopValidationRules {
     minQty: 1,
     maxCartItems: 50,
     maxOrderTotal: 999999,
-    allowedProductCodes: ['boots', 'ball', 'tshirt', 'cap']
+    allowedProductCodes: ['boots', 'ball', 'tshirt', 'cap'],
   };
 
   // Основные валидаторы
@@ -62,8 +62,10 @@ interface ShopValidationRules {
 
       // Проверка кода товара (если указан)
       if (item.code && typeof item.code === 'string') {
-        if (validationRules.allowedProductCodes.length > 0 && 
-            !validationRules.allowedProductCodes.includes(item.code)) {
+        if (
+          validationRules.allowedProductCodes.length > 0 &&
+          !validationRules.allowedProductCodes.includes(item.code)
+        ) {
           errors.push('Недопустимый код товара');
         }
       }
@@ -117,7 +119,9 @@ interface ShopValidationRules {
 
       // Проверка общей суммы заказа
       if (totalAmount > validationRules.maxOrderTotal) {
-        errors.push(`Сумма заказа превышает максимально допустимую: ${validationRules.maxOrderTotal.toLocaleString()}`);
+        errors.push(
+          `Сумма заказа превышает максимально допустимую: ${validationRules.maxOrderTotal.toLocaleString()}`
+        );
       }
 
       return { valid: errors.length === 0, errors };
@@ -136,13 +140,15 @@ interface ShopValidationRules {
       const totalAmount = cart.reduce((sum, item) => {
         const price = ShopValidators.sanitizePrice(item.price);
         const qty = ShopValidators.sanitizeQty(item.qty);
-        return sum + (price * qty);
+        return sum + price * qty;
       }, 0);
 
       // Проверка баланса (если указан)
       if (typeof userCredits === 'number' && userCredits >= 0) {
         if (totalAmount > userCredits) {
-          errors.push(`Недостаточно кредитов. Нужно: ${totalAmount.toLocaleString()}, доступно: ${userCredits.toLocaleString()}`);
+          errors.push(
+            `Недостаточно кредитов. Нужно: ${totalAmount.toLocaleString()}, доступно: ${userCredits.toLocaleString()}`
+          );
         }
       }
 
@@ -172,14 +178,14 @@ interface ShopValidationRules {
     formatValidationErrors: (errors: string[]): string => {
       if (errors.length === 0) return '';
       if (errors.length === 1) return errors[0];
-      
+
       return `Обнаружены ошибки:\n• ${errors.join('\n• ')}`;
     },
 
     // Получение текущих правил валидации
     getValidationRules: (): ShopValidationRules => {
       return { ...validationRules };
-    }
+    },
   };
 
   // Экспортируем в глобальную область
@@ -189,23 +195,28 @@ interface ShopValidationRules {
   if ((window as any).ShopHelpers) {
     // Заменяем базовый validateCartItem на расширенный
     (window as any).ShopHelpers.validateCartItem = ShopValidators.validateCartItem;
-    
+
     // Добавляем новые методы
     (window as any).ShopHelpers.validateCart = ShopValidators.validateCart;
     (window as any).ShopHelpers.validateOrder = ShopValidators.validateOrder;
     (window as any).ShopHelpers.sanitizeQty = ShopValidators.sanitizeQty;
     (window as any).ShopHelpers.sanitizePrice = ShopValidators.sanitizePrice;
-    
+
     // Обновляем addToCart с валидацией
     const originalAddToCart = (window as any).ShopHelpers.addToCart;
-    (window as any).ShopHelpers.addToCart = (item: { id: string; name: string; price: number; code?: string }) => {
+    (window as any).ShopHelpers.addToCart = (item: {
+      id: string;
+      name: string;
+      price: number;
+      code?: string;
+    }) => {
       // Создаем временный объект для валидации
       const tempItem: ShopCartItem = {
         id: item.id,
         name: item.name,
         price: ShopValidators.sanitizePrice(item.price),
         qty: 1,
-        code: item.code
+        code: item.code,
       };
 
       const validation = ShopValidators.validateCartItem(tempItem);
@@ -224,12 +235,14 @@ interface ShopValidationRules {
       if ((window as any).ShopStore) {
         const currentCart = (window as any).ShopStore.get().cart;
         const testCart = [...currentCart];
-        
-        const existingIndex = testCart.findIndex((cartItem: ShopCartItem) => cartItem.id === item.id);
+
+        const existingIndex = testCart.findIndex(
+          (cartItem: ShopCartItem) => cartItem.id === item.id
+        );
         if (existingIndex >= 0) {
-          testCart[existingIndex] = { 
-            ...testCart[existingIndex], 
-            qty: Math.min(validationRules.maxQty, testCart[existingIndex].qty + 1) 
+          testCart[existingIndex] = {
+            ...testCart[existingIndex],
+            qty: Math.min(validationRules.maxQty, testCart[existingIndex].qty + 1),
           };
         } else {
           testCart.push(tempItem);
@@ -237,7 +250,10 @@ interface ShopValidationRules {
 
         const cartValidation = ShopValidators.validateCart(testCart);
         if (!cartValidation.valid) {
-          console.warn('ShopHelpers.addToCart: валидация корзины не прошла:', cartValidation.errors);
+          console.warn(
+            'ShopHelpers.addToCart: валидация корзины не прошла:',
+            cartValidation.errors
+          );
           try {
             const errorMsg = ShopValidators.formatValidationErrors(cartValidation.errors);
             (window as any).Telegram?.WebApp?.showAlert?.(errorMsg);
@@ -254,14 +270,18 @@ interface ShopValidationRules {
 
     // Обновляем placeOrder с валидацией
     const originalPlaceOrder = (window as any).ShopHelpers.placeOrder;
-    (window as any).ShopHelpers.placeOrder = async (): Promise<{ success: boolean; orderId?: string; error?: string }> => {
+    (window as any).ShopHelpers.placeOrder = async (): Promise<{
+      success: boolean;
+      orderId?: string;
+      error?: string;
+    }> => {
       if (!(window as any).ShopStore) {
         return { success: false, error: 'Стор не найден' };
       }
 
       const state = (window as any).ShopStore.get();
       const orderValidation = ShopValidators.validateOrder(state.cart);
-      
+
       if (!orderValidation.valid) {
         const errorMsg = ShopValidators.formatValidationErrors(orderValidation.errors);
         return { success: false, error: errorMsg };

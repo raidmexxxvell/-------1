@@ -5,16 +5,16 @@
 
 // Система красивых уведомлений вместо tg.showAlert
 class NotificationSystem {
-    constructor() {
-        this.container = this.createContainer();
-        this.queue = [];
-        this.isShowing = false;
-    }
+  constructor() {
+    this.container = this.createContainer();
+    this.queue = [];
+    this.isShowing = false;
+  }
 
-    createContainer() {
-        const container = document.createElement('div');
-        container.id = 'notification-container';
-        container.style.cssText = `
+  createContainer() {
+    const container = document.createElement('div');
+    container.id = 'notification-container';
+    container.style.cssText = `
             position: fixed;
             top: 20px;
             left: 50%;
@@ -24,144 +24,144 @@ class NotificationSystem {
             width: 90%;
             max-width: 400px;
         `;
-        document.body.appendChild(container);
-        return container;
+    document.body.appendChild(container);
+    return container;
+  }
+
+  show(message, type = 'info', duration = 3000) {
+    this.queue.push({ message, type, duration });
+    if (!this.isShowing) {
+      this.processQueue();
+    }
+  }
+
+  async processQueue() {
+    if (this.queue.length === 0) {
+      this.isShowing = false;
+      return;
     }
 
-    show(message, type = 'info', duration = 3000) {
-        this.queue.push({ message, type, duration });
-        if (!this.isShowing) {
-            this.processQueue();
-        }
+    this.isShowing = true;
+    const { message, type, duration } = this.queue.shift();
+
+    const notification = this.createNotification(message, type);
+    this.container.appendChild(notification);
+
+    // Анимация появления
+    await this.animateIn(notification);
+
+    // Ждем время показа
+    await new Promise(resolve => setTimeout(resolve, duration));
+
+    // Анимация исчезновения
+    await this.animateOut(notification);
+
+    // Удаляем элемент
+    if (notification.parentNode) {
+      notification.parentNode.removeChild(notification);
     }
 
-    async processQueue() {
-        if (this.queue.length === 0) {
-            this.isShowing = false;
-            return;
-        }
+    // Обрабатываем следующее уведомление
+    this.processQueue();
+  }
 
-        this.isShowing = true;
-        const { message, type, duration } = this.queue.shift();
+  createNotification(message, type) {
+    const notification = document.createElement('div');
+    notification.className = `app-notification notification-${type}`;
 
-        const notification = this.createNotification(message, type);
-        this.container.appendChild(notification);
+    const icon = this.getIcon(type);
 
-        // Анимация появления
-        await this.animateIn(notification);
-        
-        // Ждем время показа
-        await new Promise(resolve => setTimeout(resolve, duration));
-        
-        // Анимация исчезновения
-        await this.animateOut(notification);
-        
-        // Удаляем элемент
-        if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
-        }
-
-        // Обрабатываем следующее уведомление
-        this.processQueue();
-    }
-
-    createNotification(message, type) {
-        const notification = document.createElement('div');
-        notification.className = `app-notification notification-${type}`;
-        
-        const icon = this.getIcon(type);
-        
-        notification.innerHTML = `
+    notification.innerHTML = `
             <div class="notification-content">
                 <div class="notification-icon">${icon}</div>
                 <div class="notification-text">${message}</div>
             </div>
         `;
 
-        return notification;
-    }
+    return notification;
+  }
 
-    getIcon(type) {
-        const icons = {
-            success: '✅',
-            error: '❌',
-            warning: '⚠️',
-            info: 'ℹ️',
-            reward: '🎁'
-        };
-        return icons[type] || icons.info;
-    }
+  getIcon(type) {
+    const icons = {
+      success: '✅',
+      error: '❌',
+      warning: '⚠️',
+      info: 'ℹ️',
+      reward: '🎁',
+    };
+    return icons[type] || icons.info;
+  }
 
-    async animateIn(element) {
-        element.style.cssText += `
+  async animateIn(element) {
+    element.style.cssText += `
             opacity: 0;
             transform: translateY(-20px) scale(0.9);
             transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
         `;
 
-        // Запускаем анимацию в следующем кадре
-        await new Promise(resolve => {
-            requestAnimationFrame(() => {
-                element.style.opacity = '1';
-                element.style.transform = 'translateY(0) scale(1)';
-                setTimeout(resolve, 300);
-            });
-        });
-    }
+    // Запускаем анимацию в следующем кадре
+    await new Promise(resolve => {
+      requestAnimationFrame(() => {
+        element.style.opacity = '1';
+        element.style.transform = 'translateY(0) scale(1)';
+        setTimeout(resolve, 300);
+      });
+    });
+  }
 
-    async animateOut(element) {
-        return new Promise(resolve => {
-            element.style.transition = 'all 0.2s ease-in';
-            element.style.opacity = '0';
-            element.style.transform = 'translateY(-10px) scale(0.95)';
-            setTimeout(resolve, 200);
-        });
-    }
+  async animateOut(element) {
+    return new Promise(resolve => {
+      element.style.transition = 'all 0.2s ease-in';
+      element.style.opacity = '0';
+      element.style.transform = 'translateY(-10px) scale(0.95)';
+      setTimeout(resolve, 200);
+    });
+  }
 }
 
 // Система анимированных счетчиков
 class CounterAnimation {
-    static animate(element, startValue, endValue, duration = 1000, formatter = null) {
-        return new Promise(resolve => {
-            const start = parseFloat(startValue) || 0;
-            const end = parseFloat(endValue) || 0;
-            const startTime = performance.now();
-            
-            const animate = (currentTime) => {
-                const elapsed = currentTime - startTime;
-                const progress = Math.min(elapsed / duration, 1);
-                
-                // Easing function (ease-out)
-                const easeOut = 1 - Math.pow(1 - progress, 3);
-                
-                const currentValue = start + (end - start) * easeOut;
-                const displayValue = formatter ? formatter(currentValue) : Math.round(currentValue);
-                
-                element.textContent = displayValue;
-                
-                if (progress < 1) {
-                    requestAnimationFrame(animate);
-                } else {
-                    element.textContent = formatter ? formatter(end) : end;
-                    resolve();
-                }
-            };
-            
-            requestAnimationFrame(animate);
-        });
-    }
+  static animate(element, startValue, endValue, duration = 1000, formatter = null) {
+    return new Promise(resolve => {
+      const start = parseFloat(startValue) || 0;
+      const end = parseFloat(endValue) || 0;
+      const startTime = performance.now();
+
+      const animate = currentTime => {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // Easing function (ease-out)
+        const easeOut = 1 - Math.pow(1 - progress, 3);
+
+        const currentValue = start + (end - start) * easeOut;
+        const displayValue = formatter ? formatter(currentValue) : Math.round(currentValue);
+
+        element.textContent = displayValue;
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          element.textContent = formatter ? formatter(end) : end;
+          resolve();
+        }
+      };
+
+      requestAnimationFrame(animate);
+    });
+  }
 }
 
 // Система анимации наград
 class RewardAnimation {
-    // options?: { title?: string, subtitle?: string, imageUrl?: string }
-    static async show(container, xpGain, creditsGain, options) {
-        const overlay = document.createElement('div');
-        overlay.className = 'reward-overlay';
-        const title = (options && options.title) || '🎁 Ежедневная награда!';
-        const subtitle = (options && options.subtitle) || '';
-        const imageUrl = (options && options.imageUrl) || '';
-        overlay.innerHTML = `
+  // options?: { title?: string, subtitle?: string, imageUrl?: string }
+  static async show(container, xpGain, creditsGain, options) {
+    const overlay = document.createElement('div');
+    overlay.className = 'reward-overlay';
+    const title = (options && options.title) || '🎁 Ежедневная награда!';
+    const subtitle = (options && options.subtitle) || '';
+    const imageUrl = (options && options.imageUrl) || '';
+    overlay.innerHTML = `
             <div class="reward-modal">
                 <div class="reward-title">${title}</div>
                 ${subtitle ? `<div class="reward-subtitle" style="margin-top:2px; font-size:12px; opacity:.9;">${subtitle}</div>` : ''}
@@ -182,32 +182,32 @@ class RewardAnimation {
             </div>
         `;
 
-        container.appendChild(overlay);
+    container.appendChild(overlay);
 
-        // Анимация появления модалки
-        await this.animateModalIn(overlay);
-        
-        // Анимация значений
-        await this.animateValues(overlay);
-        
-        // Эффект празднования
-        await this.showCelebration(overlay);
-        
-        // Ждем 2 секунды
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Анимация исчезновения
-        await this.animateModalOut(overlay);
-        
-        if (overlay.parentNode) {
-            overlay.parentNode.removeChild(overlay);
-        }
+    // Анимация появления модалки
+    await this.animateModalIn(overlay);
+
+    // Анимация значений
+    await this.animateValues(overlay);
+
+    // Эффект празднования
+    await this.showCelebration(overlay);
+
+    // Ждем 2 секунды
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Анимация исчезновения
+    await this.animateModalOut(overlay);
+
+    if (overlay.parentNode) {
+      overlay.parentNode.removeChild(overlay);
     }
+  }
 
-    static async animateModalIn(overlay) {
-        const modal = overlay.querySelector('.reward-modal');
-        
-        overlay.style.cssText = `
+  static async animateModalIn(overlay) {
+    const modal = overlay.querySelector('.reward-modal');
+
+    overlay.style.cssText = `
             position: fixed;
             top: 0;
             left: 0;
@@ -223,7 +223,7 @@ class RewardAnimation {
             transition: all 0.3s ease;
         `;
 
-        modal.style.cssText = `
+    modal.style.cssText = `
             background: linear-gradient(135deg, var(--primary), var(--accent));
             border-radius: 20px;
             padding: 30px;
@@ -234,49 +234,49 @@ class RewardAnimation {
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
         `;
 
-        await new Promise(resolve => {
-            requestAnimationFrame(() => {
-                overlay.style.opacity = '1';
-                modal.style.transform = 'scale(1) rotateY(0deg)';
-                setTimeout(resolve, 400);
-            });
-        });
-    }
+    await new Promise(resolve => {
+      requestAnimationFrame(() => {
+        overlay.style.opacity = '1';
+        modal.style.transform = 'scale(1) rotateY(0deg)';
+        setTimeout(resolve, 400);
+      });
+    });
+  }
 
-    static async animateValues(overlay) {
-        const values = overlay.querySelectorAll('.reward-value');
-        
-        for (const value of values) {
-            const originalText = value.textContent;
-            const number = parseInt(originalText.replace('+', ''));
-            
-            value.style.cssText = `
+  static async animateValues(overlay) {
+    const values = overlay.querySelectorAll('.reward-value');
+
+    for (const value of values) {
+      const originalText = value.textContent;
+      const number = parseInt(originalText.replace('+', ''));
+
+      value.style.cssText = `
                 font-size: 24px;
                 font-weight: bold;
                 color: #FFD700;
                 transition: all 0.3s ease;
             `;
 
-            // Анимация пульсации
-            value.style.transform = 'scale(1.2)';
-            value.style.textShadow = '0 0 10px #FFD700';
-            
-            await new Promise(resolve => setTimeout(resolve, 300));
-            
-            value.style.transform = 'scale(1)';
-            value.style.textShadow = 'none';
-            
-            await new Promise(resolve => setTimeout(resolve, 200));
-        }
-    }
+      // Анимация пульсации
+      value.style.transform = 'scale(1.2)';
+      value.style.textShadow = '0 0 10px #FFD700';
 
-    static async showCelebration(overlay) {
-        const celebration = overlay.querySelector('.reward-celebration');
-        
-        // Создаем частицы конфетти
-        for (let i = 0; i < 20; i++) {
-            const particle = document.createElement('div');
-            particle.style.cssText = `
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      value.style.transform = 'scale(1)';
+      value.style.textShadow = 'none';
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+
+  static async showCelebration(overlay) {
+    const celebration = overlay.querySelector('.reward-celebration');
+
+    // Создаем частицы конфетти
+    for (let i = 0; i < 20; i++) {
+      const particle = document.createElement('div');
+      particle.style.cssText = `
                 position: absolute;
                 width: 8px;
                 height: 8px;
@@ -287,113 +287,116 @@ class RewardAnimation {
                 pointer-events: none;
                 z-index: 1;
             `;
-            
-            celebration.appendChild(particle);
-            
-            // Анимация частицы
-            const angle = (i / 20) * Math.PI * 2;
-            const distance = 100 + Math.random() * 50;
-            const duration = 800 + Math.random() * 400;
-            
-            particle.animate([
-                {
-                    transform: 'translate(0, 0) scale(0)',
-                    opacity: 1
-                },
-                {
-                    transform: `translate(${Math.cos(angle) * distance}px, ${Math.sin(angle) * distance}px) scale(1)`,
-                    opacity: 0
-                }
-            ], {
-                duration,
-                easing: 'ease-out'
-            });
+
+      celebration.appendChild(particle);
+
+      // Анимация частицы
+      const angle = (i / 20) * Math.PI * 2;
+      const distance = 100 + Math.random() * 50;
+      const duration = 800 + Math.random() * 400;
+
+      particle.animate(
+        [
+          {
+            transform: 'translate(0, 0) scale(0)',
+            opacity: 1,
+          },
+          {
+            transform: `translate(${Math.cos(angle) * distance}px, ${Math.sin(angle) * distance}px) scale(1)`,
+            opacity: 0,
+          },
+        ],
+        {
+          duration,
+          easing: 'ease-out',
         }
-        
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      );
     }
 
-    static async animateModalOut(overlay) {
-        const modal = overlay.querySelector('.reward-modal');
-        
-        modal.style.transition = 'all 0.3s ease';
-        modal.style.transform = 'scale(0.8) rotateY(-90deg)';
-        overlay.style.opacity = '0';
-        
-        await new Promise(resolve => setTimeout(resolve, 300));
-    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  static async animateModalOut(overlay) {
+    const modal = overlay.querySelector('.reward-modal');
+
+    modal.style.transition = 'all 0.3s ease';
+    modal.style.transform = 'scale(0.8) rotateY(-90deg)';
+    overlay.style.opacity = '0';
+
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
 }
 
 // Система общих анимаций интерфейса
 class UIAnimations {
-    static fadeIn(element, duration = 300) {
-        return new Promise(resolve => {
-            element.style.opacity = '0';
-            element.style.transition = `opacity ${duration}ms ease`;
-            
-            requestAnimationFrame(() => {
-                element.style.opacity = '1';
-                setTimeout(resolve, duration);
-            });
-        });
-    }
+  static fadeIn(element, duration = 300) {
+    return new Promise(resolve => {
+      element.style.opacity = '0';
+      element.style.transition = `opacity ${duration}ms ease`;
 
-    static slideIn(element, direction = 'up', duration = 300) {
-        const transforms = {
-            up: 'translateY(20px)',
-            down: 'translateY(-20px)',
-            left: 'translateX(20px)',
-            right: 'translateX(-20px)'
-        };
+      requestAnimationFrame(() => {
+        element.style.opacity = '1';
+        setTimeout(resolve, duration);
+      });
+    });
+  }
 
-        return new Promise(resolve => {
-            element.style.opacity = '0';
-            element.style.transform = transforms[direction];
-            element.style.transition = `all ${duration}ms cubic-bezier(0.34, 1.56, 0.64, 1)`;
-            
-            requestAnimationFrame(() => {
-                element.style.opacity = '1';
-                element.style.transform = 'translateY(0) translateX(0)';
-                setTimeout(resolve, duration);
-            });
-        });
-    }
+  static slideIn(element, direction = 'up', duration = 300) {
+    const transforms = {
+      up: 'translateY(20px)',
+      down: 'translateY(-20px)',
+      left: 'translateX(20px)',
+      right: 'translateX(-20px)',
+    };
 
-    static pulse(element, scale = 1.05, duration = 200) {
-        return new Promise(resolve => {
-            const originalTransform = element.style.transform;
-            element.style.transition = `transform ${duration}ms ease`;
-            element.style.transform = `scale(${scale})`;
-            
-            setTimeout(() => {
-                element.style.transform = originalTransform;
-                setTimeout(resolve, duration);
-            }, duration);
-        });
-    }
+    return new Promise(resolve => {
+      element.style.opacity = '0';
+      element.style.transform = transforms[direction];
+      element.style.transition = `all ${duration}ms cubic-bezier(0.34, 1.56, 0.64, 1)`;
 
-    static shake(element, intensity = 5, duration = 300) {
-        return new Promise(resolve => {
-            const originalTransform = element.style.transform;
-            const startTime = performance.now();
-            
-            const animate = (currentTime) => {
-                const elapsed = currentTime - startTime;
-                const progress = Math.min(elapsed / duration, 1);
-                
-                if (progress < 1) {
-                    const shake = Math.sin(progress * Math.PI * 8) * intensity * (1 - progress);
-                    element.style.transform = `translateX(${shake}px)`;
-                    requestAnimationFrame(animate);
-                } else {
-                    element.style.transform = originalTransform;
-                    resolve();
-                }
-            };
-            
-            requestAnimationFrame(animate);
-        });
-    }
+      requestAnimationFrame(() => {
+        element.style.opacity = '1';
+        element.style.transform = 'translateY(0) translateX(0)';
+        setTimeout(resolve, duration);
+      });
+    });
+  }
+
+  static pulse(element, scale = 1.05, duration = 200) {
+    return new Promise(resolve => {
+      const originalTransform = element.style.transform;
+      element.style.transition = `transform ${duration}ms ease`;
+      element.style.transform = `scale(${scale})`;
+
+      setTimeout(() => {
+        element.style.transform = originalTransform;
+        setTimeout(resolve, duration);
+      }, duration);
+    });
+  }
+
+  static shake(element, intensity = 5, duration = 300) {
+    return new Promise(resolve => {
+      const originalTransform = element.style.transform;
+      const startTime = performance.now();
+
+      const animate = currentTime => {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        if (progress < 1) {
+          const shake = Math.sin(progress * Math.PI * 8) * intensity * (1 - progress);
+          element.style.transform = `translateX(${shake}px)`;
+          requestAnimationFrame(animate);
+        } else {
+          element.style.transform = originalTransform;
+          resolve();
+        }
+      };
+
+      requestAnimationFrame(animate);
+    });
+  }
 }
 
 // Глобальная инициализация
@@ -404,45 +407,47 @@ window.UIAnimations = UIAnimations;
 
 // Используем унифицированные утилиты (team-utils.js)
 if (!window.createTeamWithLogo && window.TeamUtils) {
-    window.createTeamWithLogo = window.TeamUtils.createTeamWithLogo;
+  window.createTeamWithLogo = window.TeamUtils.createTeamWithLogo;
 }
 
 if (!window.setTeamLogo && window.TeamUtils) {
-    window.setTeamLogo = window.TeamUtils.setTeamLogo;
+  window.setTeamLogo = window.TeamUtils.setTeamLogo;
 }
 
 // Функция для добавления логотипов к существующим названиям команд
-window.enhanceTeamNames = function(selector = '.team-name, .match-teams, .team-text') {
-    document.querySelectorAll(selector).forEach(element => {
-        const teamName = element.textContent.trim();
-        if (!teamName || element.querySelector('.team-logo')) {return;} // уже обработано
-        
-        // Создаем контейнер с логотипом
-        const teamContainer = window.createTeamWithLogo(teamName, {
-            logoSize: '18px',
-            className: 'enhanced-team'
-        });
-        
-        // Заменяем содержимое элемента
-        element.innerHTML = '';
-        element.appendChild(teamContainer);
+window.enhanceTeamNames = function (selector = '.team-name, .match-teams, .team-text') {
+  document.querySelectorAll(selector).forEach(element => {
+    const teamName = element.textContent.trim();
+    if (!teamName || element.querySelector('.team-logo')) {
+      return;
+    } // уже обработано
+
+    // Создаем контейнер с логотипом
+    const teamContainer = window.createTeamWithLogo(teamName, {
+      logoSize: '18px',
+      className: 'enhanced-team',
     });
+
+    // Заменяем содержимое элемента
+    element.innerHTML = '';
+    element.appendChild(teamContainer);
+  });
 };
 
 // Красивая замена для tg.showAlert
-window.showAlert = function(message, type = 'info') {
-    try {
-        // Пытаемся использовать Telegram alert если доступен
-        if (window.Telegram?.WebApp?.showAlert && type === 'info') {
-            window.Telegram.WebApp.showAlert(message);
-        } else {
-            // Используем нашу систему уведомлений
-            window.NotificationSystem.show(message, type);
-        }
-    } catch (e) {
-        // Fallback на обычный alert
-        alert(message);
+window.showAlert = function (message, type = 'info') {
+  try {
+    // Пытаемся использовать Telegram alert если доступен
+    if (window.Telegram?.WebApp?.showAlert && type === 'info') {
+      window.Telegram.WebApp.showAlert(message);
+    } else {
+      // Используем нашу систему уведомлений
+      window.NotificationSystem.show(message, type);
     }
+  } catch (e) {
+    // Fallback на обычный alert
+    alert(message);
+  }
 };
 
 // CSS стили для анимаций
@@ -701,49 +706,53 @@ document.head.appendChild(styleSheet);
 
 // Match start notification system
 window.MatchNotifications = {
-    shownMatches: new Set(),
-    
-    showMatchStartNotification(match) {
-        const matchKey = `${match.home}_${match.away}_${match.date}`;
-        if (this.shownMatches.has(matchKey)) {return;}
-        
-        this.shownMatches.add(matchKey);
-        
-        const notification = document.createElement('div');
-        notification.className = 'match-start-notification';
-        notification.innerHTML = `
+  shownMatches: new Set(),
+
+  showMatchStartNotification(match) {
+    const matchKey = `${match.home}_${match.away}_${match.date}`;
+    if (this.shownMatches.has(matchKey)) {
+      return;
+    }
+
+    this.shownMatches.add(matchKey);
+
+    const notification = document.createElement('div');
+    notification.className = 'match-start-notification';
+    notification.innerHTML = `
             <div class="notification-content">
                 <div class="notification-title">Матч начался!</div>
                 <div class="match-teams">
                     <div class="team-item">
-                        ${window.createTeamWithLogo ? window.createTeamWithLogo(match.home, {logoSize: '20px'}).outerHTML : match.home}
+                        ${window.createTeamWithLogo ? window.createTeamWithLogo(match.home, { logoSize: '20px' }).outerHTML : match.home}
                     </div>
                     <div class="vs">VS</div>
                     <div class="team-item">
-                        ${window.createTeamWithLogo ? window.createTeamWithLogo(match.away, {logoSize: '20px'}).outerHTML : match.away}
+                        ${window.createTeamWithLogo ? window.createTeamWithLogo(match.away, { logoSize: '20px' }).outerHTML : match.away}
                     </div>
                 </div>
             </div>
         `;
-        
-        notification.addEventListener('click', () => {
-            // Переход к деталям матча
-            if (window.showMatchDetails) {
-                window.showMatchDetails(match);
-            }
-            notification.remove();
-        });
-        
-        document.body.appendChild(notification);
-        
-        // Автоудаление через 8 секунд
-        setTimeout(() => {
-            try { notification.remove(); } catch(_) {}
-        }, 8000);
-    },
-    
-    checkLiveMatches() {
-        // Проверка запущенных матчей - вызывается при получении данных расписания
-        // Реализация будет добавлена в основной код загрузки матчей
-    }
+
+    notification.addEventListener('click', () => {
+      // Переход к деталям матча
+      if (window.showMatchDetails) {
+        window.showMatchDetails(match);
+      }
+      notification.remove();
+    });
+
+    document.body.appendChild(notification);
+
+    // Автоудаление через 8 секунд
+    setTimeout(() => {
+      try {
+        notification.remove();
+      } catch (_) {}
+    }, 8000);
+  },
+
+  checkLiveMatches() {
+    // Проверка запущенных матчей - вызывается при получении данных расписания
+    // Реализация будет добавлена в основной код загрузки матчей
+  },
 };

@@ -38,35 +38,35 @@ declare global {
       lastUpdated: number | null;
       etag?: string | null;
     };
-    
+
     // Богатство (топ по кредитам)
     rich: {
       items: LeaderboardRichItem[];
       lastUpdated: number | null;
       etag?: string | null;
     };
-    
+
     // Сервер (топ игроков)
     server: {
       items: LeaderboardServerItem[];
       lastUpdated: number | null;
       etag?: string | null;
     };
-    
+
     // Призы
     prizes: {
       items: LeaderboardPrizeItem[];
       lastUpdated: number | null;
       etag?: string | null;
     };
-    
+
     // Общие настройки
     activeTab: 'predictors' | 'rich' | 'server' | 'prizes';
     isPolling: boolean;
     lastGlobalUpdate: number | null;
   }
 
-  interface Window { 
+  interface Window {
     LeaderboardStore?: StoreApi<LeaderboardState> & {
       updatePredictors: (data: { items: LeaderboardPredictorItem[]; etag?: string }) => void;
       updateRich: (data: { items: LeaderboardRichItem[]; etag?: string }) => void;
@@ -74,8 +74,11 @@ declare global {
       updatePrizes: (data: { items: LeaderboardPrizeItem[]; etag?: string }) => void;
       setActiveTab: (tab: 'predictors' | 'rich' | 'server' | 'prizes') => void;
       setPollingState: (isPolling: boolean) => void;
-      isDataFresh: (category: 'predictors' | 'rich' | 'server' | 'prizes', ttlMs?: number) => boolean;
-    }
+      isDataFresh: (
+        category: 'predictors' | 'rich' | 'server' | 'prizes',
+        ttlMs?: number
+      ) => boolean;
+    };
   }
 }
 
@@ -112,7 +115,7 @@ declare global {
   // Добавляем удобные методы для работы с лидербордом
   const leaderboardApi = {
     ...leaderboard,
-    
+
     // Обновление прогнозистов
     updatePredictors(data: { items: LeaderboardPredictorItem[]; etag?: string }) {
       leaderboard.update(state => {
@@ -171,12 +174,12 @@ declare global {
     isDataFresh(category: 'predictors' | 'rich' | 'server' | 'prizes', ttlMs = 60000): boolean {
       const state = leaderboard.get();
       const categoryData = state[category];
-      
+
       if (!categoryData.lastUpdated) {
         return false;
       }
-      
-      return (Date.now() - categoryData.lastUpdated) < ttlMs;
+
+      return Date.now() - categoryData.lastUpdated < ttlMs;
     },
   };
 

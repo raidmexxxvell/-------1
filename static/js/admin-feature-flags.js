@@ -1,18 +1,18 @@
 // static/js/admin-feature-flags.js
 // Система feature flags для опасных административных операций
 
-(function() {
+(function () {
   'use strict';
 
   // Ключи feature flags в localStorage для опасных операций
   const DANGEROUS_OPERATIONS = {
     'feature:admin:season_reset': 'Полный сброс сезона',
     'feature:admin:order_delete': 'Удаление заказов',
-    'feature:admin:news_delete': 'Удаление новостей', 
+    'feature:admin:news_delete': 'Удаление новостей',
     'feature:admin:team_delete': 'Удаление команд',
     'feature:admin:event_remove': 'Удаление событий матчей',
     'feature:admin:user_data_repair': 'Починка пользовательских данных',
-    'feature:admin:force_refresh': 'Принудительное обновление кэша'
+    'feature:admin:force_refresh': 'Принудительное обновление кэша',
   };
 
   // Проверка разрешения для опасной операции
@@ -20,7 +20,7 @@
     try {
       const flag = localStorage.getItem(operation);
       return flag === '1' || flag === 'true';
-    } catch(_) {
+    } catch (_) {
       return false;
     }
   }
@@ -29,17 +29,17 @@
   function enableDangerousOperation(operation, description) {
     const confirmed = confirm(
       `⚠️ ОПАСНАЯ ОПЕРАЦИЯ: ${description}\n\n` +
-      `Это действие может повлиять на данные пользователей.\n` +
-      `Убедитесь, что вы понимаете последствия.\n\n` +
-      `Включить операцию "${operation}"?`
+        `Это действие может повлиять на данные пользователей.\n` +
+        `Убедитесь, что вы понимаете последствия.\n\n` +
+        `Включить операцию "${operation}"?`
     );
-    
+
     if (confirmed) {
       try {
         localStorage.setItem(operation, '1');
         console.log(`[ADMIN] Включена опасная операция: ${operation}`);
         return true;
-      } catch(_) {
+      } catch (_) {
         return false;
       }
     }
@@ -51,35 +51,40 @@
     try {
       localStorage.removeItem(operation);
       console.log(`[ADMIN] Отключена опасная операция: ${operation}`);
-    } catch(_) {}
+    } catch (_) {}
   }
 
   // Показать статус всех feature flags
   function showFeatureFlagsStatus() {
-    const status = Object.entries(DANGEROUS_OPERATIONS).map(([flag, desc]) => {
-      const enabled = isDangerousOperationAllowed(flag);
-      return `${enabled ? '✅' : '❌'} ${desc} (${flag})`;
-    }).join('\n');
-    
+    const status = Object.entries(DANGEROUS_OPERATIONS)
+      .map(([flag, desc]) => {
+        const enabled = isDangerousOperationAllowed(flag);
+        return `${enabled ? '✅' : '❌'} ${desc} (${flag})`;
+      })
+      .join('\n');
+
     alert(`📋 Статус feature flags:\n\n${status}`);
   }
 
   // Обёртка для опасных операций с проверкой feature flag
   function withDangerousOperationCheck(operation, description, callback) {
-    return function(...args) {
+    return function (...args) {
       if (!isDangerousOperationAllowed(operation)) {
         const enable = enableDangerousOperation(operation, description);
         if (!enable) {
           console.warn(`[ADMIN] Операция "${operation}" заблокирована feature flag`);
           try {
-            window.showAlert?.(`Операция заблокирована.\nДля выполнения включите feature flag: ${operation}`, 'warning');
-          } catch(_) {
+            window.showAlert?.(
+              `Операция заблокирована.\nДля выполнения включите feature flag: ${operation}`,
+              'warning'
+            );
+          } catch (_) {
             alert(`Операция заблокирована.\nДля выполнения включите feature flag: ${operation}`);
           }
           return;
         }
       }
-      
+
       console.log(`[ADMIN] Выполнение опасной операции: ${operation}`);
       return callback.apply(this, args);
     };
@@ -88,7 +93,9 @@
   // Кнопка управления feature flags в админ-панели
   function createFeatureFlagsControls() {
     const adminSections = document.querySelectorAll('.admin-section');
-    if (adminSections.length === 0) {return;}
+    if (adminSections.length === 0) {
+      return;
+    }
 
     const flagsSection = document.createElement('div');
     flagsSection.className = 'admin-section';
@@ -112,13 +119,13 @@
 
     // Обработчики событий
     document.getElementById('show-flags-status')?.addEventListener('click', showFeatureFlagsStatus);
-    
+
     document.getElementById('enable-all-flags')?.addEventListener('click', () => {
       const confirmed = confirm(
         '⚠️ КРАЙНЕ ОПАСНО!\n\n' +
-        'Вы собираетесь включить ВСЕ опасные операции.\n' +
-        'Это полностью отключает защиту от случайных действий.\n\n' +
-        'Продолжить?'
+          'Вы собираетесь включить ВСЕ опасные операции.\n' +
+          'Это полностью отключает защиту от случайных действий.\n\n' +
+          'Продолжить?'
       );
       if (confirmed) {
         Object.keys(DANGEROUS_OPERATIONS).forEach(op => {
@@ -126,7 +133,7 @@
         });
         try {
           window.showAlert?.('Все feature flags включены!', 'warning');
-        } catch(_) {
+        } catch (_) {
           alert('Все feature flags включены!');
         }
       }
@@ -138,7 +145,7 @@
       });
       try {
         window.showAlert?.('Все feature flags отключены', 'success');
-      } catch(_) {
+      } catch (_) {
         alert('Все feature flags отключены');
       }
     });
@@ -153,7 +160,7 @@
       fullResetBtn.onclick = withDangerousOperationCheck(
         'feature:admin:season_reset',
         'Полный сброс сезона (удаление всех временных данных)',
-        originalClick || function() {}
+        originalClick || function () {}
       );
     }
 
@@ -163,7 +170,7 @@
       btn.onclick = withDangerousOperationCheck(
         'feature:admin:order_delete',
         'Удаление заказа (необратимое действие)',
-        originalClick || function() {}
+        originalClick || function () {}
       );
     });
 
@@ -180,11 +187,13 @@
 
   // Глобальный перехват fetch запросов для опасных операций
   function interceptDangerousFetches() {
-    if (window.__ADMIN_FETCH_INTERCEPTED__) {return;}
+    if (window.__ADMIN_FETCH_INTERCEPTED__) {
+      return;
+    }
     window.__ADMIN_FETCH_INTERCEPTED__ = true;
 
     const originalFetch = window.fetch;
-    window.fetch = function(url, options) {
+    window.fetch = function (url, options) {
       // Проверяем опасные API endpoints
       if (typeof url === 'string') {
         // Удаление событий матчей
@@ -196,11 +205,13 @@
             );
             if (!enable) {
               console.warn(`[ADMIN] Заблокирован запрос: ${url}`);
-              return Promise.reject(new Error('Операция заблокирована feature flag: feature:admin:event_remove'));
+              return Promise.reject(
+                new Error('Операция заблокирована feature flag: feature:admin:event_remove')
+              );
             }
           }
         }
-        
+
         // Удаление новостей
         if (url.match(/\/api\/admin\/news\/\d+/) && options?.method === 'DELETE') {
           if (!isDangerousOperationAllowed('feature:admin:news_delete')) {
@@ -210,11 +221,13 @@
             );
             if (!enable) {
               console.warn(`[ADMIN] Заблокирован запрос: ${url}`);
-              return Promise.reject(new Error('Операция заблокирована feature flag: feature:admin:news_delete'));
+              return Promise.reject(
+                new Error('Операция заблокирована feature flag: feature:admin:news_delete')
+              );
             }
           }
         }
-        
+
         // Операции сброса сезона
         if (url.includes('/api/admin/season-rollover') || url.includes('/api/admin/full-reset')) {
           if (!isDangerousOperationAllowed('feature:admin:season_reset')) {
@@ -224,7 +237,9 @@
             );
             if (!enable) {
               console.warn(`[ADMIN] Заблокирован запрос: ${url}`);
-              return Promise.reject(new Error('Операция заблокирована feature flag: feature:admin:season_reset'));
+              return Promise.reject(
+                new Error('Операция заблокирована feature flag: feature:admin:season_reset')
+              );
             }
           }
         }
@@ -238,7 +253,9 @@
             );
             if (!enable) {
               console.warn(`[ADMIN] Заблокирован запрос: ${url}`);
-              return Promise.reject(new Error('Операция заблокирована feature flag: feature:admin:user_data_repair'));
+              return Promise.reject(
+                new Error('Операция заблокирована feature flag: feature:admin:user_data_repair')
+              );
             }
           }
         }
@@ -252,7 +269,9 @@
             );
             if (!enable) {
               console.warn(`[ADMIN] Заблокирован запрос: ${url}`);
-              return Promise.reject(new Error('Операция заблокирована feature flag: feature:admin:force_refresh'));
+              return Promise.reject(
+                new Error('Операция заблокирована feature flag: feature:admin:force_refresh')
+              );
             }
           }
         }
@@ -269,7 +288,9 @@
   function initAdminFeatureFlags() {
     // Проверяем, что мы в админ-панели
     const adminTab = document.getElementById('tab-admin');
-    if (!adminTab) {return;}
+    if (!adminTab) {
+      return;
+    }
 
     createFeatureFlagsControls();
     protectExistingOperations();
@@ -285,7 +306,7 @@
     disableDangerousOperation,
     withDangerousOperationCheck,
     showFeatureFlagsStatus,
-    DANGEROUS_OPERATIONS
+    DANGEROUS_OPERATIONS,
   };
 
   // Автоинициализация
@@ -294,5 +315,4 @@
   } else {
     initAdminFeatureFlags();
   }
-
 })();

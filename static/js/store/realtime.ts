@@ -1,8 +1,14 @@
 import type { StoreApi } from './core';
 
 declare global {
-  interface RealtimeState { connected: boolean; topics: string[]; reconnects: number }
-  interface Window { RealtimeStore?: StoreApi<RealtimeState> }
+  interface RealtimeState {
+    connected: boolean;
+    topics: string[];
+    reconnects: number;
+  }
+  interface Window {
+    RealtimeStore?: StoreApi<RealtimeState>;
+  }
 }
 
 (() => {

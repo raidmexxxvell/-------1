@@ -22,14 +22,14 @@ declare global {
   }
 }
 
-(function(){
+(function () {
   if (!window.Store || typeof window === 'undefined') return;
 
   // Feature flag проверка
   const isEnabled = () => {
     try {
       return localStorage.getItem('feature:predictions_ui_store') === '1';
-    } catch(_) {
+    } catch (_) {
       return false;
     }
   };
@@ -45,15 +45,16 @@ declare global {
 
   function renderMyBetsFromStore(state: PredictionsState): void {
     if (!isEnabled()) return;
-    
+
     const myBetsEl = getMyBetsElement();
     if (!myBetsEl) return;
 
     // Проверяем, изменились ли данные
-    const currentHash = state.myBets ? 
-      JSON.stringify(state.myBets.bets).length + state.myBets.lastUpdated : 0;
+    const currentHash = state.myBets
+      ? JSON.stringify(state.myBets.bets).length + state.myBets.lastUpdated
+      : 0;
     if (currentHash === lastMyBetsRender) return;
-    
+
     lastMyBetsRender = currentHash;
 
     if (!state.myBets || !state.myBets.bets.length) {
@@ -63,46 +64,46 @@ declare global {
 
     const list = document.createElement('div');
     list.className = 'bets-list';
-    
+
     state.myBets.bets.forEach(bet => {
       const card = document.createElement('div');
       card.className = 'bet-card';
-      
+
       const top = document.createElement('div');
       top.className = 'bet-top';
-      
+
       const title = document.createElement('div');
       title.className = 'bet-title';
       title.textContent = `${bet.home} vs ${bet.away}`;
-      
+
       const when = document.createElement('div');
       when.className = 'bet-when';
       when.textContent = bet.datetime ? formatDateTime(bet.datetime) : '';
-      
+
       top.append(title, when);
 
       // Локализованный вывод исхода
       const selDisp = bet.selection_display || bet.selection;
       const marketDisp = bet.market_display || 'Исход';
-      
+
       const mid = document.createElement('div');
       mid.className = 'bet-mid';
       mid.textContent = `${marketDisp}: ${selDisp} | Кф: ${bet.odds || '-'} | Ставка: ${bet.stake}`;
-      
+
       const status = document.createElement('div');
       status.className = `bet-status ${bet.status}`;
-      
+
       // Локализация статусов
       let statusText: string = bet.status;
       if (bet.status === 'open') statusText = 'Открыта';
       else if (bet.status === 'won') statusText = 'Выиграна';
       else if (bet.status === 'lost') statusText = 'Проиграна';
-      
+
       // Добавляем сумму выигрыша для выигранных ставок
       if (bet.status === 'won' && bet.winnings) {
         statusText += ` (+${bet.winnings} кр.)`;
       }
-      
+
       status.textContent = statusText;
       card.append(top, mid, status);
       list.appendChild(card);
@@ -115,14 +116,14 @@ declare global {
 
   function renderPredictionsItemsFromStore(state: PredictionsState): void {
     if (!isEnabled()) return;
-    
+
     const toursEl = getPredTours();
     if (!toursEl) return;
 
     // Проверяем изменения в items
     const currentHash = JSON.stringify(state.items).length;
     if (currentHash === lastPredictionsRender) return;
-    
+
     lastPredictionsRender = currentHash;
 
     // Здесь можно добавить логику рендеринга списка прогнозов
@@ -142,7 +143,7 @@ declare global {
   // Подписка на изменения PredictionsStore
   if (window.PredictionsStore && typeof window.PredictionsStore.subscribe === 'function') {
     window.PredictionsStore.subscribe(handlePredictionsStoreUpdate);
-    
+
     // Первоначальный рендеринг
     const initialState = window.PredictionsStore.get();
     if (initialState) {
@@ -155,14 +156,18 @@ declare global {
     if (window.MatchUtils && typeof window.MatchUtils.formatDateTime === 'function') {
       return window.MatchUtils.formatDateTime(datetime);
     }
-    
+
     try {
       const date = new Date(datetime);
-      return date.toLocaleDateString('ru-RU') + ' ' + date.toLocaleTimeString('ru-RU', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-    } catch(_) {
+      return (
+        date.toLocaleDateString('ru-RU') +
+        ' ' +
+        date.toLocaleTimeString('ru-RU', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      );
+    } catch (_) {
       return datetime || '';
     }
   }
@@ -172,8 +177,7 @@ declare global {
     (window as any).PredictionsUIBindings = {
       renderMyBetsFromStore,
       renderPredictionsItemsFromStore,
-      isEnabled
+      isEnabled,
     };
-  } catch(_) {}
-
+  } catch (_) {}
 })();

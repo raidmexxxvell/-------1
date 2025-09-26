@@ -1,73 +1,121 @@
 // profile-live.js
 // LiveWatcher: отслеживание старта live матчей и уведомления
-(function(){
-  if (window.ProfileLive) {return;}
-  const isLive = (m) => (window.MatchUtils ? window.MatchUtils.isLiveNow(m) : false);
-  const getKey = (m) => `${m.home||''}__${m.away||''}__${m.datetime||m.date||''}`;
-  const getPair = (m) => `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
+(function () {
+  if (window.ProfileLive) {
+    return;
+  }
+  const isLive = m => (window.MatchUtils ? window.MatchUtils.isLiveNow(m) : false);
+  const getKey = m => `${m.home || ''}__${m.away || ''}__${m.datetime || m.date || ''}`;
+  const getPair = m => `${(m.home || '').toLowerCase()}__${(m.away || '').toLowerCase()}`;
   let lastLiveKeys = new Set();
   let initialized = false;
-  async function fetchLiveFlags(){
+  async function fetchLiveFlags() {
     try {
       const r = await fetch('/api/match/status/live?_=' + Date.now());
       const d = await r.json();
       const pairs = new Set();
-      (d.items||[]).forEach(it => { pairs.add(`${(it.home||'').toLowerCase()}__${(it.away||'').toLowerCase()}`); });
-      if (!window.__LIVE_STATUS) {window.__LIVE_STATUS = { pairs: new Set(), ts: 0 };}
-      window.__LIVE_STATUS.pairs = pairs; window.__LIVE_STATUS.ts = Date.now();
+      (d.items || []).forEach(it => {
+        pairs.add(`${(it.home || '').toLowerCase()}__${(it.away || '').toLowerCase()}`);
+      });
+      if (!window.__LIVE_STATUS) {
+        window.__LIVE_STATUS = { pairs: new Set(), ts: 0 };
+      }
+      window.__LIVE_STATUS.pairs = pairs;
+      window.__LIVE_STATUS.ts = Date.now();
       return pairs;
-    } catch(_) {
-      return (window.__LIVE_STATUS && window.__LIVE_STATUS.pairs) ? window.__LIVE_STATUS.pairs : new Set();
+    } catch (_) {
+      return window.__LIVE_STATUS && window.__LIVE_STATUS.pairs
+        ? window.__LIVE_STATUS.pairs
+        : new Set();
     }
   }
-  function notify(text, onClick){
-    if (window.NotificationSystem) {window.NotificationSystem.show(text,'info',5000);}
-    else if (window.showAlert) {window.showAlert(text,'info');}
-    else {try { alert(text); } catch(_) {}}
-    if (onClick) {try { onClick(); } catch(_) {}}
+  function notify(text, onClick) {
+    if (window.NotificationSystem) {
+      window.NotificationSystem.show(text, 'info', 5000);
+    } else if (window.showAlert) {
+      window.showAlert(text, 'info');
+    } else {
+      try {
+        alert(text);
+      } catch (_) {}
+    }
+    if (onClick) {
+      try {
+        onClick();
+      } catch (_) {}
+    }
   }
-  async function scan(){
+  async function scan() {
     try {
       const cached = JSON.parse(localStorage.getItem('schedule:tours') || 'null');
       const tours = cached?.data?.tours || [];
       const currentLive = new Set();
       const pairFlags = await fetchLiveFlags();
       const nowStarted = [];
-      tours.forEach(t => (t.matches||[]).forEach(m => {
-        const live = isLive(m) || pairFlags.has(getPair(m));
-        const key = getKey(m);
-        if (live) {currentLive.add(key);}
-        if (live && !lastLiveKeys.has(key) && initialized) {nowStarted.push(m);}
-      }));
+      tours.forEach(t =>
+        (t.matches || []).forEach(m => {
+          const live = isLive(m) || pairFlags.has(getPair(m));
+          const key = getKey(m);
+          if (live) {
+            currentLive.add(key);
+          }
+          if (live && !lastLiveKeys.has(key) && initialized) {
+            nowStarted.push(m);
+          }
+        })
+      );
       nowStarted.forEach(m => {
-        const title = `${m.home||'Команда 1'} — ${m.away||'Команда 2'}: матч начался`;
+        const title = `${m.home || 'Команда 1'} — ${m.away || 'Команда 2'}: матч начался`;
         const onClick = () => {
           try {
-            const params = new URLSearchParams({ home: m.home||'', away: m.away||'' });
-            const cacheKey = `md:${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
+            const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
+            const cacheKey = `md:${(m.home || '').toLowerCase()}__${(m.away || '').toLowerCase()}`;
             const storeRaw = localStorage.getItem(cacheKey);
             const store = storeRaw ? JSON.parse(storeRaw) : null;
-            const go = (st) => { try { window.openMatchScreen?.({ home: m.home, away: m.away, date: m.date, time: m.time }, st?.data || st); } catch(_) {} };
-            if (store?.etag){
-              fetch(`/api/match-details?${params.toString()}`, { headers: { 'If-None-Match': store.etag } })
-                .then(r => r.status===304 ? store : r.json().then(d=>({ etag: r.headers.get('ETag'), data: d })))
-                .then(st => go(st)).catch(()=>go(null));
+            const go = st => {
+              try {
+                window.openMatchScreen?.(
+                  { home: m.home, away: m.away, date: m.date, time: m.time },
+                  st?.data || st
+                );
+              } catch (_) {}
+            };
+            if (store?.etag) {
+              fetch(`/api/match-details?${params.toString()}`, {
+                headers: { 'If-None-Match': store.etag },
+              })
+                .then(r =>
+                  r.status === 304
+                    ? store
+                    : r.json().then(d => ({ etag: r.headers.get('ETag'), data: d }))
+                )
+                .then(st => go(st))
+                .catch(() => go(null));
             } else {
               fetch(`/api/match-details?${params.toString()}`)
-                .then(r => r.json().then(d=>({ etag: r.headers.get('ETag'), data: d })))
-                .then(st => { try { localStorage.setItem(cacheKey, JSON.stringify(st)); } catch(_) {} go(st); })
-                .catch(()=>go(null));
+                .then(r => r.json().then(d => ({ etag: r.headers.get('ETag'), data: d })))
+                .then(st => {
+                  try {
+                    localStorage.setItem(cacheKey, JSON.stringify(st));
+                  } catch (_) {}
+                  go(st);
+                })
+                .catch(() => go(null));
             }
-          } catch(_) {}
+          } catch (_) {}
         };
         notify(title, onClick);
       });
       lastLiveKeys = currentLive;
-      if (!initialized) {initialized = true;}
-    } catch(_) {}
+      if (!initialized) {
+        initialized = true;
+      }
+    } catch (_) {}
   }
   setInterval(scan, 30000);
   // Убрана тестовая кнопка уведомления LIVE (оставляем возможность повторно включить через консоль при необходимости)
-  document.addEventListener('DOMContentLoaded', () => { /* no test button */ });
+  document.addEventListener('DOMContentLoaded', () => {
+    /* no test button */
+  });
   window.ProfileLive = { scan };
 })();

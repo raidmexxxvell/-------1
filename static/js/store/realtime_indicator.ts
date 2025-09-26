@@ -2,7 +2,11 @@ import type { StoreApi } from './core';
 
 type RTState = { connected: boolean; topics: string[]; reconnects: number };
 
-declare global { interface Window { RealtimeStore?: StoreApi<RTState>; } }
+declare global {
+  interface Window {
+    RealtimeStore?: StoreApi<RTState>;
+  }
+}
 
 (() => {
   // Guard: only in module-ready environments and when store exists
@@ -47,7 +51,7 @@ declare global { interface Window { RealtimeStore?: StoreApi<RTState>; } }
     try {
       const s = window.RealtimeStore.get();
       apply(!!s.connected);
-      window.RealtimeStore.subscribe((ns) => apply(!!ns.connected));
+      window.RealtimeStore.subscribe(ns => apply(!!ns.connected));
     } catch {}
   }
 
@@ -64,5 +68,7 @@ declare global { interface Window { RealtimeStore?: StoreApi<RTState>; } }
     storeEl.setAttribute('aria-label', ok ? 'Store available' : 'Store unavailable');
   };
   applyStore();
-  try { setInterval(applyStore, 4000); } catch {}
+  try {
+    setInterval(applyStore, 4000);
+  } catch {}
 })();

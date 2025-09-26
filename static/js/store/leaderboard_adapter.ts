@@ -42,12 +42,12 @@ declare global {
 
   // Ждём готовности LeaderboardStore
   const waitForStore = () => {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>(resolve => {
       if (window.LeaderboardStore) {
         resolve();
         return;
       }
-      
+
       const check = () => {
         if (window.LeaderboardStore) {
           resolve();
@@ -72,7 +72,7 @@ declare global {
   // Интеграция с существующим кодом лидерборда
   const integrateWithLegacy = async () => {
     await waitForStore();
-    
+
     if (!window.LeaderboardStore) {
       return;
     }
@@ -80,10 +80,10 @@ declare global {
     const store = window.LeaderboardStore as ExtendedLeaderboardStore;
 
     // Подписываемся на изменения в сторе для автообновления UI
-    store.subscribe((state) => {
+    store.subscribe(state => {
       // Обновляем UI только для активной вкладки
       const activeTab = state.activeTab;
-      
+
       if (activeTab === 'predictors' && state.predictors.items.length > 0) {
         renderPredictorsTable(state.predictors.items, state.predictors.lastUpdated);
       } else if (activeTab === 'rich' && state.rich.items.length > 0) {
@@ -96,12 +96,15 @@ declare global {
     });
 
     // Функции рендеринга UI
-    const renderPredictorsTable = (items: LeaderboardPredictorItem[], lastUpdated: number | null) => {
+    const renderPredictorsTable = (
+      items: LeaderboardPredictorItem[],
+      lastUpdated: number | null
+    ) => {
       const table = document.querySelector('#lb-predictors tbody') as HTMLTableSectionElement;
       const updated = document.getElementById('lb-predictors-updated');
-      
+
       if (!table) return;
-      
+
       table.innerHTML = '';
       items.forEach((item, idx) => {
         const tr = document.createElement('tr');
@@ -111,7 +114,7 @@ declare global {
         tr.innerHTML = `<td>${idx + 1}</td><td>${escapeHtml(item.display_name)}</td><td>${item.bets_total}</td><td>${item.bets_won}</td><td>${item.winrate}%</td>`;
         table.appendChild(tr);
       });
-      
+
       if (updated && lastUpdated) {
         try {
           updated.textContent = `Обновлено: ${new Date(lastUpdated).toLocaleString()}`;
@@ -122,9 +125,9 @@ declare global {
     const renderRichTable = (items: LeaderboardRichItem[], lastUpdated: number | null) => {
       const table = document.querySelector('#lb-rich tbody') as HTMLTableSectionElement;
       const updated = document.getElementById('lb-rich-updated');
-      
+
       if (!table) return;
-      
+
       table.innerHTML = '';
       items.forEach((item, idx) => {
         const tr = document.createElement('tr');
@@ -134,7 +137,7 @@ declare global {
         tr.innerHTML = `<td>${idx + 1}</td><td>${escapeHtml(item.display_name)}</td><td>${item.credits}</td>`;
         table.appendChild(tr);
       });
-      
+
       if (updated && lastUpdated) {
         try {
           updated.textContent = `Обновлено: ${new Date(lastUpdated).toLocaleString()}`;
@@ -145,9 +148,9 @@ declare global {
     const renderServerTable = (items: LeaderboardServerItem[], lastUpdated: number | null) => {
       const table = document.querySelector('#lb-server tbody') as HTMLTableSectionElement;
       const updated = document.getElementById('lb-server-updated');
-      
+
       if (!table) return;
-      
+
       table.innerHTML = '';
       items.forEach((item, idx) => {
         const tr = document.createElement('tr');
@@ -157,7 +160,7 @@ declare global {
         tr.innerHTML = `<td>${idx + 1}</td><td>${escapeHtml(item.display_name)}</td><td>${item.total_score}</td><td>${item.matches_played}</td>`;
         table.appendChild(tr);
       });
-      
+
       if (updated && lastUpdated) {
         try {
           updated.textContent = `Обновлено: ${new Date(lastUpdated).toLocaleString()}`;
@@ -168,16 +171,16 @@ declare global {
     const renderPrizesTable = (items: LeaderboardPrizeItem[], lastUpdated: number | null) => {
       const table = document.querySelector('#lb-prizes tbody') as HTMLTableSectionElement;
       const updated = document.getElementById('lb-prizes-updated');
-      
+
       if (!table) return;
-      
+
       table.innerHTML = '';
-      items.forEach((item) => {
+      items.forEach(item => {
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${escapeHtml(item.period)}</td><td>${escapeHtml(item.winner)}</td><td>${item.prize_amount}</td><td>${escapeHtml(item.category)}</td>`;
         table.appendChild(tr);
       });
-      
+
       if (updated && lastUpdated) {
         try {
           updated.textContent = `Обновлено: ${new Date(lastUpdated).toLocaleString()}`;
@@ -193,25 +196,41 @@ declare global {
       updateMethod: 'updatePredictors' | 'updateRich' | 'updateServer' | 'updatePrizes'
     ) => {
       return async (opts?: { forceRevalidate?: boolean; skipIfNotUpdated?: boolean }) => {
-        const forceRevalidate = !!(opts?.forceRevalidate);
-        const skipIfNotUpdated = !!(opts?.skipIfNotUpdated);
+        const forceRevalidate = !!opts?.forceRevalidate;
+        const skipIfNotUpdated = !!opts?.skipIfNotUpdated;
 
         try {
           // Проверяем, есть ли свежие данные в сторе
           if (!forceRevalidate && store.isDataFresh(category, 60000)) {
             const state = store.get();
             const categoryData = state[category];
-            
+
             if (skipIfNotUpdated) {
               return; // Данные свежие, ничего не делаем
             }
-            
+
             // Обновляем UI с данными из стора
-            if (category === 'predictors') renderPredictorsTable(categoryData.items as LeaderboardPredictorItem[], categoryData.lastUpdated);
-            else if (category === 'rich') renderRichTable(categoryData.items as LeaderboardRichItem[], categoryData.lastUpdated);
-            else if (category === 'server') renderServerTable(categoryData.items as LeaderboardServerItem[], categoryData.lastUpdated);
-            else if (category === 'prizes') renderPrizesTable(categoryData.items as LeaderboardPrizeItem[], categoryData.lastUpdated);
-            
+            if (category === 'predictors')
+              renderPredictorsTable(
+                categoryData.items as LeaderboardPredictorItem[],
+                categoryData.lastUpdated
+              );
+            else if (category === 'rich')
+              renderRichTable(
+                categoryData.items as LeaderboardRichItem[],
+                categoryData.lastUpdated
+              );
+            else if (category === 'server')
+              renderServerTable(
+                categoryData.items as LeaderboardServerItem[],
+                categoryData.lastUpdated
+              );
+            else if (category === 'prizes')
+              renderPrizesTable(
+                categoryData.items as LeaderboardPrizeItem[],
+                categoryData.lastUpdated
+              );
+
             return;
           }
 
@@ -221,7 +240,7 @@ declare global {
               cacheKey,
               swrMs: 60000,
               extract: (j: any) => j,
-              forceRevalidate
+              forceRevalidate,
             });
 
             if (skipIfNotUpdated && !result.updated) {
@@ -233,12 +252,10 @@ declare global {
 
             // Сохраняем в стор
             (store as any)[updateMethod]({ items, etag });
-
           } else {
             // Fallback на прямой fetch
             console.warn('[LeaderboardStore] fetchEtag not available, using fallback');
           }
-
         } catch (error) {
           console.error(`[LeaderboardStore] ${category} load error:`, error);
         }
@@ -246,10 +263,30 @@ declare global {
     };
 
     // Создаём функции загрузки
-    window.loadLBPredictors = createLoaderFunction('predictors', '/api/leaderboard/top-predictors', 'lb:predictors', 'updatePredictors');
-    window.loadLBRich = createLoaderFunction('rich', '/api/leaderboard/top-rich', 'lb:rich', 'updateRich');
-    window.loadLBServer = createLoaderFunction('server', '/api/leaderboard/server-leaders', 'lb:server', 'updateServer');
-    window.loadLBPrizes = createLoaderFunction('prizes', '/api/leaderboard/prizes', 'lb:prizes', 'updatePrizes');
+    window.loadLBPredictors = createLoaderFunction(
+      'predictors',
+      '/api/leaderboard/top-predictors',
+      'lb:predictors',
+      'updatePredictors'
+    );
+    window.loadLBRich = createLoaderFunction(
+      'rich',
+      '/api/leaderboard/top-rich',
+      'lb:rich',
+      'updateRich'
+    );
+    window.loadLBServer = createLoaderFunction(
+      'server',
+      '/api/leaderboard/server-leaders',
+      'lb:server',
+      'updateServer'
+    );
+    window.loadLBPrizes = createLoaderFunction(
+      'prizes',
+      '/api/leaderboard/prizes',
+      'lb:prizes',
+      'updatePrizes'
+    );
 
     // Отслеживаем переключение вкладок
     const tabs = document.querySelectorAll('#leader-subtabs .subtab-item');

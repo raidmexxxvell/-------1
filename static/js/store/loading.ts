@@ -77,7 +77,7 @@ class LoadingManager {
     this.notifyListeners();
 
     // Скрываем overlay если нет активных загрузок с overlay
-    const hasOverlayLoading = Object.keys(this.loadingStates).some(k => 
+    const hasOverlayLoading = Object.keys(this.loadingStates).some(k =>
       document.querySelector(`[data-loading="${k}"][data-overlay="true"]`)
     );
 
@@ -145,8 +145,8 @@ class LoadingManager {
    * Обертка для асинхронных операций с автоматическим управлением загрузкой
    */
   async withLoading<T>(
-    key: string, 
-    operation: () => Promise<T>, 
+    key: string,
+    operation: () => Promise<T>,
     options: LoadingOptions = {}
   ): Promise<T> {
     try {
@@ -164,7 +164,7 @@ class LoadingManager {
   clearAll(): void {
     this.loadingStates = {};
     this.notifyListeners();
-    
+
     if (this.overlayElement) {
       this.overlayElement.classList.add('hidden');
       this.overlayElement.setAttribute('aria-hidden', 'true');

@@ -68,23 +68,25 @@ declare global {
     achievements: Achievement[];
     badges: string[];
     achievementsLastUpdated: number | null;
-    
+
     // Данные пользователя
     user: UserProfile;
     userLastUpdated: number | null;
-    
+
     // Настройки пользователя (будут персиститься)
     settings: UserSettings;
     settingsLastUpdated: number | null;
-    
+
     // Данные команд (кэш с TTL)
     teams: TeamData;
-    
+
     // Общие метки времени
     lastUpdated: number | null;
   }
 
-  interface Window { ProfileStore?: StoreApi<ProfileState> }
+  interface Window {
+    ProfileStore?: StoreApi<ProfileState>;
+  }
 }
 
 (() => {
@@ -92,25 +94,25 @@ declare global {
     achievements: [],
     badges: [],
     achievementsLastUpdated: null,
-    
+
     user: {},
     userLastUpdated: null,
-    
+
     settings: {
       notifications: {
         achievements: true,
         matches: true,
         checkin: true,
-      }
+      },
     },
     settingsLastUpdated: null,
-    
+
     teams: {
       byTeam: {},
       teams: [],
       ts: 0,
     },
-    
+
     lastUpdated: null,
   };
 
@@ -124,7 +126,7 @@ declare global {
   // Добавляем удобные методы для работы с профилем
   const profileApi = {
     ...profile,
-    
+
     // Обновление достижений
     updateAchievements(achievements: Achievement[]) {
       profile.update(state => {
@@ -173,7 +175,7 @@ declare global {
     // Проверка актуальности данных команд (5 минут)
     isTeamsDataFresh(): boolean {
       const state = profile.get();
-      return (Date.now() - state.teams.ts) < 5 * 60 * 1000;
+      return Date.now() - state.teams.ts < 5 * 60 * 1000;
     },
 
     // Получение названия команды с количеством болельщиков
@@ -189,7 +191,7 @@ declare global {
       const lastCheckin = state.user.lastCheckin || 0;
       const now = Date.now();
       const oneDayMs = 24 * 60 * 60 * 1000;
-      return (now - lastCheckin) >= oneDayMs;
+      return now - lastCheckin >= oneDayMs;
     },
 
     // Обновление чекина

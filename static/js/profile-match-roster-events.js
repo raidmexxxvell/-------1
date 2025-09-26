@@ -1,229 +1,622 @@
 // Roster & events rendering module extracted from advanced match screen
-(function(){
-  function render(match, details, mdPane, els){
+(function () {
+  function render(match, details, mdPane, els) {
     // Сохраняем ссылку на текущий матч для синхронизации
     window.__currentMatchDetails = { home: match.home, away: match.away };
-    
-    const homePane = els.homePane; const awayPane = els.awayPane; if(!homePane||!awayPane) {return;}
+
+    const homePane = els.homePane;
+    const awayPane = els.awayPane;
+    if (!homePane || !awayPane) {
+      return;
+    }
     // internal helper recreates the original roster table + refresh button logic
-    const renderRosterTable=(pane,players,side,existingEvents)=>{ pane.innerHTML=''; const table=document.createElement('table'); table.className='roster-table'; table.style.width='100%'; table.style.borderCollapse='collapse'; const mkTh=(c)=>{ const th=document.createElement('th'); th.style.border='1px solid rgba(255,255,255,0.15)'; th.style.padding='6px'; th.style.textAlign='left'; th.append(c); return th; }; const mkTd=()=>{ const td=document.createElement('td'); td.style.border='1px solid rgba(255,255,255,0.15)'; td.style.padding='6px'; td.style.textAlign='center'; return td; }; const thead=document.createElement('thead'); const trh=document.createElement('tr'); const nameTh=document.createElement('th'); nameTh.textContent='Фамилия Имя'; nameTh.style.border='1px solid rgba(255,255,255,0.15)'; nameTh.style.padding='6px'; nameTh.style.textAlign='left'; const getAssetVer=()=>{ try { return Number(localStorage.getItem('appVersion:lastSeen')||'0')||0; } catch(_) { return 0; } }; const vUrl=(u)=>{ try { const v=getAssetVer(); return v? (u+(u.includes('?')?'&':'?')+'v='+v):u; } catch(_) { return u; } }; const iconImg=(src)=>{ const img=document.createElement('img'); img.style.width='18px'; img.style.height='18px'; img.style.objectFit='contain'; const candidates=[vUrl(src), vUrl('/static/img/icons/placeholder.png'), vUrl('/static/img/placeholderlogo.png')]; let i=0; const next=()=>{ if(i>=candidates.length){return;} img.onerror=()=>{ i++; next(); }; img.src=candidates[i]; }; next(); return img; }; const thYellow=mkTh(iconImg('/static/img/icons/yellow.png')); const thRed=mkTh(iconImg('/static/img/icons/red.png')); const thAssist=mkTh(iconImg('/static/img/icons/assist.png')); const thGoal=mkTh(iconImg('/static/img/icons/goal.png')); trh.append(nameTh, thYellow, thRed, thAssist, thGoal); thead.appendChild(trh); const tbody=document.createElement('tbody'); const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):''; const isAdmin=!!(adminId && currentId && String(adminId)===currentId); const tg=window.Telegram?.WebApp||null; // индекс: playerKey -> {goal: n, assist: n, yellow: n, red: n}
-  const evIdx=(()=>{ const idx=new Map(); try { const list=existingEvents && existingEvents[side]? existingEvents[side]:[]; list.forEach(e=>{ const key=(e.player||'').trim().toLowerCase(); if(!idx.has(key)) {idx.set(key,{goal:0,assist:0,yellow:0,red:0});} const bucket=idx.get(key); if(bucket[e.type] != null) {bucket[e.type]++;} }); } catch(_) {} return idx; })(); // центрируем иконки в заголовках
-  try { thYellow.style.textAlign='center'; thRed.style.textAlign='center'; thAssist.style.textAlign='center'; thGoal.style.textAlign='center'; } catch(_) {}
-    const getCount=(key,type)=>{ const b=evIdx.get(key); return b? (b[type]||0):0; };
-    const highlightRow=(tr,key)=>{ try { const b=evIdx.get(key); const hasAny=!!(b && (b.goal||b.assist||b.yellow||b.red)); tr.style.transition='background-color 120ms ease'; tr.style.backgroundColor = hasAny? 'rgba(255,255,255,0.06)':''; } catch(_) {} };
-    const createCell=(player,type,trRef)=>{ const td=mkTd(); const key=(player||'').trim().toLowerCase(); const count=getCount(key,type); const isMulti = (type==='goal'||type==='assist');
-      if(!isAdmin){ // публичный режим
-        if(count>0){ const wrap=document.createElement('div'); wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.justifyContent='center'; wrap.style.gap='4px'; const img=document.createElement('img'); img.style.width='18px'; img.style.height='18px'; img.style.objectFit='contain'; const srcHint=(type==='yellow')?'/static/img/icons/yellow.png':(type==='red')?'/static/img/icons/red.png':(type==='assist')?'/static/img/icons/assist.png':'/static/img/icons/goal.png'; const candidates=[vUrl(srcHint), vUrl('/static/img/icons/placeholder.png'), vUrl('/static/img/placeholderlogo.png')]; let i=0; const next=()=>{ if(i>=candidates.length){return;} img.onerror=()=>{ i++; next(); }; img.src=candidates[i]; }; next(); wrap.appendChild(img); if(isMulti && count>1){ const badge=document.createElement('span'); badge.textContent='x'+count; badge.style.fontSize='11px'; badge.style.opacity='0.8'; wrap.appendChild(badge); } td.appendChild(wrap); } else { td.textContent=''; } return td; }
-      // режим админа
-      if(isMulti){ // селект 0-9 для гол/ассист
-        const box=document.createElement('div'); box.style.display='flex'; box.style.gap='6px'; box.style.alignItems='center'; box.style.justifyContent='center';         const sel=document.createElement('select'); for(let i=0;i<=9;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=String(i); sel.appendChild(o); } sel.value=String(count);
-        // Добавляем data-атрибуты для синхронизации
-        sel.setAttribute('data-player', player || '');
-        sel.setAttribute('data-event-type', type);
-        sel.setAttribute('data-team', side);
-        sel.setAttribute('data-match-home', match.home || '');
-        sel.setAttribute('data-match-away', match.away || '');
-        const icon=document.createElement('img'); icon.style.width='18px'; icon.style.height='18px'; icon.style.objectFit='contain'; icon.style.opacity=count>0?'1':'0.25'; const srcHint=(type==='assist')?'/static/img/icons/assist.png':'/static/img/icons/goal.png'; const candidates=[vUrl(srcHint), vUrl('/static/img/icons/placeholder.png'), vUrl('/static/img/placeholderlogo.png')]; let ic=0; const nextI=()=>{ if(ic>=candidates.length){return;} icon.onerror=()=>{ ic++; nextI(); }; icon.src=candidates[ic]; }; nextI();
-        const applyDelta=async(delta)=>{ 
-            if(delta===0) {return;} 
-            const abs=Math.abs(delta); 
-            for(let k=0;k<abs;k++){ 
-                // Проверка feature flag для удаления событий
-                if (delta < 0 && window.AdminFeatureFlags && !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:event_remove')) {
-                    const enable = window.AdminFeatureFlags.enableDangerousOperation(
-                        'feature:admin:event_remove',
-                        'Удаление событий матча (необратимое действие)'
-                    );
-                    if (!enable) {
-                        try {
-                            window.showAlert?.('Операция заблокирована feature flag', 'warning');
-                        } catch(_) {
-                            alert('Операция заблокирована feature flag: feature:admin:event_remove');
-                        }
-                        return;
-                    }
-                }
-                
-                const fd=new FormData(); 
-                fd.append('initData', tg?.initData||''); 
-                fd.append('home',match.home||''); 
-                fd.append('away',match.away||''); 
-                fd.append('team',side); 
-                fd.append('player',player||''); 
-                fd.append('type',type); 
-                const url= delta>0? '/api/match/events/add':'/api/match/events/remove'; 
-                try { 
-                    const r=await fetch(url,{method:'POST', body:fd}); 
-                    const d=await r.json(); 
-                    if(d?.error){ 
-                        window.showAlert?.(d.error,'error'); 
-                        break; 
-                    } 
-                } catch(e){ 
-                    console.error('events delta',e); 
-                    window.showAlert?.('Ошибка сохранения','error'); 
-                    break; 
-                } 
-            }
-        };
-        // lightweight debounce against double submits for the same (match, side, player, type)
-        window.__adminEventPending = window.__adminEventPending || new Set();
-        sel.addEventListener('change', async () => {
-          const desired = parseInt(sel.value, 10) || 0;
-          const current = getCount(key, type);
-          if (desired === current) { return; }
-          const pendKey = `${(match.home||'').toLowerCase()}__${(match.away||'').toLowerCase()}__${side}:${(player||'').toLowerCase()}:${type}`;
-          if (window.__adminEventPending.has(pendKey)) { return; }
-          window.__adminEventPending.add(pendKey);
-          sel.disabled = true;
-          try {
-            await applyDelta(desired - current);
-            
-            // КРИТИЧНО: Обновляем локальный индекс ТОЛЬКО после успешного сохранения на сервере
-            if(!evIdx.has(key)) {evIdx.set(key,{goal:0,assist:0,yellow:0,red:0});}
-            evIdx.get(key)[type]= desired;
-            icon.style.opacity= desired>0? '1':'0.25';
-            highlightRow(trRef,key);
-            
-            // Уведомляем другие компоненты об изменении (как в статистике)
-            try {
-              const eventUpdate = new CustomEvent('playerEventUpdated', {
-                detail: {
-                  home: match.home,
-                  away: match.away,
-                  team: side,
-                  player: player,
-                  eventType: type,
-                  count: desired,
-                  timestamp: Date.now(),
-                  source: 'admin'
-                }
-              });
-              document.dispatchEvent(eventUpdate);
-            } catch(_) {}
-            
-            try { const host=document.getElementById('ufo-match-details'); if(host) {host.setAttribute('data-admin-last-change-ts', String(Date.now()));} } catch(_){}
-          } catch(e) {
-            console.error('events change', e);
-            sel.value = String(current);
-            window.showAlert?.('Ошибка сохранения','error');
-          } finally {
-            window.__adminEventPending.delete(pendKey);
-            sel.disabled = false;
-          }
-        });
-        box.append(sel,icon); td.appendChild(box); return td;
-      } else { // yellow/red прежняя бинарная логика
-  const box=document.createElement('div'); box.style.display='flex'; box.style.gap='6px'; box.style.alignItems='center'; box.style.justifyContent='center'; const sel=document.createElement('select'); const optNo=document.createElement('option'); optNo.value='0'; optNo.textContent='—'; const optYes=document.createElement('option'); optYes.value='1'; optYes.textContent='ДА'; sel.append(optNo,optYes); sel.value= count>0? '1':'0'; 
-  // Добавляем data-атрибуты для синхронизации
-  sel.setAttribute('data-player', player || '');
-  sel.setAttribute('data-event-type', type);
-  sel.setAttribute('data-team', side);
-  sel.setAttribute('data-match-home', match.home || '');
-  sel.setAttribute('data-match-away', match.away || '');
-  const icon=document.createElement('img'); icon.style.width='18px'; icon.style.height='18px'; icon.style.objectFit='contain'; icon.style.opacity=count>0?'1':'0.25'; const srcHint=(type==='yellow')?'/static/img/icons/yellow.png':'/static/img/icons/red.png'; const candidates=[vUrl(srcHint), vUrl('/static/img/icons/placeholder.png'), vUrl('/static/img/placeholderlogo.png')]; let ic=0; const nextI=()=>{ if(ic>=candidates.length){return;} icon.onerror=()=>{ ic++; nextI(); }; icon.src=candidates[ic]; }; nextI();
-  // pending gate + enhanced sync
-  window.__adminEventPending = window.__adminEventPending || new Set();
-  sel.addEventListener('change',async()=>{ 
-    const want = sel.value==='1'; 
-    const has = getCount(key,type)>0; 
-    if(want===has) {return;} 
-    
-    const pendKey = `${(match.home||'').toLowerCase()}__${(match.away||'').toLowerCase()}__${side}:${(player||'').toLowerCase()}:${type}`; 
-    if(window.__adminEventPending.has(pendKey)) { 
-      console.warn('[RosterEvents] Операция уже выполняется:', pendKey);
-      return; 
-    } 
-    
-    window.__adminEventPending.add(pendKey); 
-    sel.disabled=true; 
-    
-    try { 
-      // Используем новую систему синхронизации если доступна
-      if (window.__MatchEventsRegistry && typeof window.__MatchEventsRegistry.performEventOperation === 'function') {
-        console.log('[RosterEvents] Используем улучшенную систему синхронизации');
-        const operation = want ? 'add' : 'remove';
-        const result = await window.__MatchEventsRegistry.performEventOperation(
-          match.home, match.away, side, player, type, operation
-        );
-        
-        if (result.error) {
-          window.showAlert?.(result.error,'error'); 
-          sel.value= has? '1':'0'; 
-          return;
+    const renderRosterTable = (pane, players, side, existingEvents) => {
+      pane.innerHTML = '';
+      const table = document.createElement('table');
+      table.className = 'roster-table';
+      table.style.width = '100%';
+      table.style.borderCollapse = 'collapse';
+      const mkTh = c => {
+        const th = document.createElement('th');
+        th.style.border = '1px solid rgba(255,255,255,0.15)';
+        th.style.padding = '6px';
+        th.style.textAlign = 'left';
+        th.append(c);
+        return th;
+      };
+      const mkTd = () => {
+        const td = document.createElement('td');
+        td.style.border = '1px solid rgba(255,255,255,0.15)';
+        td.style.padding = '6px';
+        td.style.textAlign = 'center';
+        return td;
+      };
+      const thead = document.createElement('thead');
+      const trh = document.createElement('tr');
+      const nameTh = document.createElement('th');
+      nameTh.textContent = 'Фамилия Имя';
+      nameTh.style.border = '1px solid rgba(255,255,255,0.15)';
+      nameTh.style.padding = '6px';
+      nameTh.style.textAlign = 'left';
+      const getAssetVer = () => {
+        try {
+          return Number(localStorage.getItem('appVersion:lastSeen') || '0') || 0;
+        } catch (_) {
+          return 0;
         }
-        // Мгновенно отражаем результат в UI (оптимистичное обновление), WS потом подтвердит
-        if(!evIdx.has(key)) {evIdx.set(key,{goal:0,assist:0,yellow:0,red:0});}
-        evIdx.get(key)[type]= want?1:0; 
-        icon.style.opacity= want? '1':'0.25'; 
-        highlightRow(trRef,key);
-        
+      };
+      const vUrl = u => {
+        try {
+          const v = getAssetVer();
+          return v ? u + (u.includes('?') ? '&' : '?') + 'v=' + v : u;
+        } catch (_) {
+          return u;
+        }
+      };
+      const iconImg = src => {
+        const img = document.createElement('img');
+        img.style.width = '18px';
+        img.style.height = '18px';
+        img.style.objectFit = 'contain';
+        const candidates = [
+          vUrl(src),
+          vUrl('/static/img/icons/placeholder.png'),
+          vUrl('/static/img/placeholderlogo.png'),
+        ];
+        let i = 0;
+        const next = () => {
+          if (i >= candidates.length) {
+            return;
+          }
+          img.onerror = () => {
+            i++;
+            next();
+          };
+          img.src = candidates[i];
+        };
+        next();
+        return img;
+      };
+      const thYellow = mkTh(iconImg('/static/img/icons/yellow.png'));
+      const thRed = mkTh(iconImg('/static/img/icons/red.png'));
+      const thAssist = mkTh(iconImg('/static/img/icons/assist.png'));
+      const thGoal = mkTh(iconImg('/static/img/icons/goal.png'));
+      trh.append(nameTh, thYellow, thRed, thAssist, thGoal);
+      thead.appendChild(trh);
+      const tbody = document.createElement('tbody');
+      const adminId = document.body.getAttribute('data-admin');
+      const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id
+        ? String(window.Telegram.WebApp.initDataUnsafe.user.id)
+        : '';
+      const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+      const tg = window.Telegram?.WebApp || null; // индекс: playerKey -> {goal: n, assist: n, yellow: n, red: n}
+      const evIdx = (() => {
+        const idx = new Map();
+        try {
+          const list = existingEvents && existingEvents[side] ? existingEvents[side] : [];
+          list.forEach(e => {
+            const key = (e.player || '').trim().toLowerCase();
+            if (!idx.has(key)) {
+              idx.set(key, { goal: 0, assist: 0, yellow: 0, red: 0 });
+            }
+            const bucket = idx.get(key);
+            if (bucket[e.type] != null) {
+              bucket[e.type]++;
+            }
+          });
+        } catch (_) {}
+        return idx;
+      })(); // центрируем иконки в заголовках
+      try {
+        thYellow.style.textAlign = 'center';
+        thRed.style.textAlign = 'center';
+        thAssist.style.textAlign = 'center';
+        thGoal.style.textAlign = 'center';
+      } catch (_) {}
+      const getCount = (key, type) => {
+        const b = evIdx.get(key);
+        return b ? b[type] || 0 : 0;
+      };
+      const highlightRow = (tr, key) => {
+        try {
+          const b = evIdx.get(key);
+          const hasAny = !!(b && (b.goal || b.assist || b.yellow || b.red));
+          tr.style.transition = 'background-color 120ms ease';
+          tr.style.backgroundColor = hasAny ? 'rgba(255,255,255,0.06)' : '';
+        } catch (_) {}
+      };
+      const createCell = (player, type, trRef) => {
+        const td = mkTd();
+        const key = (player || '').trim().toLowerCase();
+        const count = getCount(key, type);
+        const isMulti = type === 'goal' || type === 'assist';
+        if (!isAdmin) {
+          // публичный режим
+          if (count > 0) {
+            const wrap = document.createElement('div');
+            wrap.style.display = 'flex';
+            wrap.style.alignItems = 'center';
+            wrap.style.justifyContent = 'center';
+            wrap.style.gap = '4px';
+            const img = document.createElement('img');
+            img.style.width = '18px';
+            img.style.height = '18px';
+            img.style.objectFit = 'contain';
+            const srcHint =
+              type === 'yellow'
+                ? '/static/img/icons/yellow.png'
+                : type === 'red'
+                  ? '/static/img/icons/red.png'
+                  : type === 'assist'
+                    ? '/static/img/icons/assist.png'
+                    : '/static/img/icons/goal.png';
+            const candidates = [
+              vUrl(srcHint),
+              vUrl('/static/img/icons/placeholder.png'),
+              vUrl('/static/img/placeholderlogo.png'),
+            ];
+            let i = 0;
+            const next = () => {
+              if (i >= candidates.length) {
+                return;
+              }
+              img.onerror = () => {
+                i++;
+                next();
+              };
+              img.src = candidates[i];
+            };
+            next();
+            wrap.appendChild(img);
+            if (isMulti && count > 1) {
+              const badge = document.createElement('span');
+              badge.textContent = 'x' + count;
+              badge.style.fontSize = '11px';
+              badge.style.opacity = '0.8';
+              wrap.appendChild(badge);
+            }
+            td.appendChild(wrap);
+          } else {
+            td.textContent = '';
+          }
+          return td;
+        }
+        // режим админа
+        if (isMulti) {
+          // селект 0-9 для гол/ассист
+          const box = document.createElement('div');
+          box.style.display = 'flex';
+          box.style.gap = '6px';
+          box.style.alignItems = 'center';
+          box.style.justifyContent = 'center';
+          const sel = document.createElement('select');
+          for (let i = 0; i <= 9; i++) {
+            const o = document.createElement('option');
+            o.value = String(i);
+            o.textContent = String(i);
+            sel.appendChild(o);
+          }
+          sel.value = String(count);
+          // Добавляем data-атрибуты для синхронизации
+          sel.setAttribute('data-player', player || '');
+          sel.setAttribute('data-event-type', type);
+          sel.setAttribute('data-team', side);
+          sel.setAttribute('data-match-home', match.home || '');
+          sel.setAttribute('data-match-away', match.away || '');
+          const icon = document.createElement('img');
+          icon.style.width = '18px';
+          icon.style.height = '18px';
+          icon.style.objectFit = 'contain';
+          icon.style.opacity = count > 0 ? '1' : '0.25';
+          const srcHint =
+            type === 'assist' ? '/static/img/icons/assist.png' : '/static/img/icons/goal.png';
+          const candidates = [
+            vUrl(srcHint),
+            vUrl('/static/img/icons/placeholder.png'),
+            vUrl('/static/img/placeholderlogo.png'),
+          ];
+          let ic = 0;
+          const nextI = () => {
+            if (ic >= candidates.length) {
+              return;
+            }
+            icon.onerror = () => {
+              ic++;
+              nextI();
+            };
+            icon.src = candidates[ic];
+          };
+          nextI();
+          const applyDelta = async delta => {
+            if (delta === 0) {
+              return;
+            }
+            const abs = Math.abs(delta);
+            for (let k = 0; k < abs; k++) {
+              // Проверка feature flag для удаления событий
+              if (
+                delta < 0 &&
+                window.AdminFeatureFlags &&
+                !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:event_remove')
+              ) {
+                const enable = window.AdminFeatureFlags.enableDangerousOperation(
+                  'feature:admin:event_remove',
+                  'Удаление событий матча (необратимое действие)'
+                );
+                if (!enable) {
+                  try {
+                    window.showAlert?.('Операция заблокирована feature flag', 'warning');
+                  } catch (_) {
+                    alert('Операция заблокирована feature flag: feature:admin:event_remove');
+                  }
+                  return;
+                }
+              }
+
+              const fd = new FormData();
+              fd.append('initData', tg?.initData || '');
+              fd.append('home', match.home || '');
+              fd.append('away', match.away || '');
+              fd.append('team', side);
+              fd.append('player', player || '');
+              fd.append('type', type);
+              const url = delta > 0 ? '/api/match/events/add' : '/api/match/events/remove';
+              try {
+                const r = await fetch(url, { method: 'POST', body: fd });
+                const d = await r.json();
+                if (d?.error) {
+                  window.showAlert?.(d.error, 'error');
+                  break;
+                }
+              } catch (e) {
+                console.error('events delta', e);
+                window.showAlert?.('Ошибка сохранения', 'error');
+                break;
+              }
+            }
+          };
+          // lightweight debounce against double submits for the same (match, side, player, type)
+          window.__adminEventPending = window.__adminEventPending || new Set();
+          sel.addEventListener('change', async () => {
+            const desired = parseInt(sel.value, 10) || 0;
+            const current = getCount(key, type);
+            if (desired === current) {
+              return;
+            }
+            const pendKey = `${(match.home || '').toLowerCase()}__${(match.away || '').toLowerCase()}__${side}:${(player || '').toLowerCase()}:${type}`;
+            if (window.__adminEventPending.has(pendKey)) {
+              return;
+            }
+            window.__adminEventPending.add(pendKey);
+            sel.disabled = true;
+            try {
+              await applyDelta(desired - current);
+
+              // КРИТИЧНО: Обновляем локальный индекс ТОЛЬКО после успешного сохранения на сервере
+              if (!evIdx.has(key)) {
+                evIdx.set(key, { goal: 0, assist: 0, yellow: 0, red: 0 });
+              }
+              evIdx.get(key)[type] = desired;
+              icon.style.opacity = desired > 0 ? '1' : '0.25';
+              highlightRow(trRef, key);
+
+              // Уведомляем другие компоненты об изменении (как в статистике)
+              try {
+                const eventUpdate = new CustomEvent('playerEventUpdated', {
+                  detail: {
+                    home: match.home,
+                    away: match.away,
+                    team: side,
+                    player: player,
+                    eventType: type,
+                    count: desired,
+                    timestamp: Date.now(),
+                    source: 'admin',
+                  },
+                });
+                document.dispatchEvent(eventUpdate);
+              } catch (_) {}
+
+              try {
+                const host = document.getElementById('ufo-match-details');
+                if (host) {
+                  host.setAttribute('data-admin-last-change-ts', String(Date.now()));
+                }
+              } catch (_) {}
+            } catch (e) {
+              console.error('events change', e);
+              sel.value = String(current);
+              window.showAlert?.('Ошибка сохранения', 'error');
+            } finally {
+              window.__adminEventPending.delete(pendKey);
+              sel.disabled = false;
+            }
+          });
+          box.append(sel, icon);
+          td.appendChild(box);
+          return td;
+        } else {
+          // yellow/red прежняя бинарная логика
+          const box = document.createElement('div');
+          box.style.display = 'flex';
+          box.style.gap = '6px';
+          box.style.alignItems = 'center';
+          box.style.justifyContent = 'center';
+          const sel = document.createElement('select');
+          const optNo = document.createElement('option');
+          optNo.value = '0';
+          optNo.textContent = '—';
+          const optYes = document.createElement('option');
+          optYes.value = '1';
+          optYes.textContent = 'ДА';
+          sel.append(optNo, optYes);
+          sel.value = count > 0 ? '1' : '0';
+          // Добавляем data-атрибуты для синхронизации
+          sel.setAttribute('data-player', player || '');
+          sel.setAttribute('data-event-type', type);
+          sel.setAttribute('data-team', side);
+          sel.setAttribute('data-match-home', match.home || '');
+          sel.setAttribute('data-match-away', match.away || '');
+          const icon = document.createElement('img');
+          icon.style.width = '18px';
+          icon.style.height = '18px';
+          icon.style.objectFit = 'contain';
+          icon.style.opacity = count > 0 ? '1' : '0.25';
+          const srcHint =
+            type === 'yellow' ? '/static/img/icons/yellow.png' : '/static/img/icons/red.png';
+          const candidates = [
+            vUrl(srcHint),
+            vUrl('/static/img/icons/placeholder.png'),
+            vUrl('/static/img/placeholderlogo.png'),
+          ];
+          let ic = 0;
+          const nextI = () => {
+            if (ic >= candidates.length) {
+              return;
+            }
+            icon.onerror = () => {
+              ic++;
+              nextI();
+            };
+            icon.src = candidates[ic];
+          };
+          nextI();
+          // pending gate + enhanced sync
+          window.__adminEventPending = window.__adminEventPending || new Set();
+          sel.addEventListener('change', async () => {
+            const want = sel.value === '1';
+            const has = getCount(key, type) > 0;
+            if (want === has) {
+              return;
+            }
+
+            const pendKey = `${(match.home || '').toLowerCase()}__${(match.away || '').toLowerCase()}__${side}:${(player || '').toLowerCase()}:${type}`;
+            if (window.__adminEventPending.has(pendKey)) {
+              console.warn('[RosterEvents] Операция уже выполняется:', pendKey);
+              return;
+            }
+
+            window.__adminEventPending.add(pendKey);
+            sel.disabled = true;
+
+            try {
+              // Используем новую систему синхронизации если доступна
+              if (
+                window.__MatchEventsRegistry &&
+                typeof window.__MatchEventsRegistry.performEventOperation === 'function'
+              ) {
+                console.log('[RosterEvents] Используем улучшенную систему синхронизации');
+                const operation = want ? 'add' : 'remove';
+                const result = await window.__MatchEventsRegistry.performEventOperation(
+                  match.home,
+                  match.away,
+                  side,
+                  player,
+                  type,
+                  operation
+                );
+
+                if (result.error) {
+                  window.showAlert?.(result.error, 'error');
+                  sel.value = has ? '1' : '0';
+                  return;
+                }
+                // Мгновенно отражаем результат в UI (оптимистичное обновление), WS потом подтвердит
+                if (!evIdx.has(key)) {
+                  evIdx.set(key, { goal: 0, assist: 0, yellow: 0, red: 0 });
+                }
+                evIdx.get(key)[type] = want ? 1 : 0;
+                icon.style.opacity = want ? '1' : '0.25';
+                highlightRow(trRef, key);
+              } else {
+                // Fallback к старому методу
+                console.log('[RosterEvents] Используем стандартный метод');
+                const fd = new FormData();
+                fd.append('initData', tg?.initData || '');
+                fd.append('home', match.home || '');
+                fd.append('away', match.away || '');
+                fd.append('team', side);
+                fd.append('player', player || '');
+                fd.append('type', type);
+
+                const url = want ? '/api/match/events/add' : '/api/match/events/remove';
+                const r = await fetch(url, { method: 'POST', body: fd });
+                const d = await r.json();
+
+                if (d?.error) {
+                  window.showAlert?.(d.error, 'error');
+                  sel.value = has ? '1' : '0';
+                  return;
+                }
+
+                if (!evIdx.has(key)) {
+                  evIdx.set(key, { goal: 0, assist: 0, yellow: 0, red: 0 });
+                }
+                evIdx.get(key)[type] = want ? 1 : 0;
+                icon.style.opacity = want ? '1' : '0.25';
+                highlightRow(trRef, key);
+              }
+
+              try {
+                const host = document.getElementById('ufo-match-details');
+                if (host) {
+                  host.setAttribute('data-admin-last-change-ts', String(Date.now()));
+                }
+              } catch (_) {}
+            } catch (e) {
+              console.error('events yellow/red', e);
+              window.showAlert?.('Ошибка сохранения', 'error');
+              sel.value = has ? '1' : '0';
+            } finally {
+              window.__adminEventPending.delete(pendKey);
+              sel.disabled = false;
+            }
+          });
+          box.append(sel, icon);
+          td.appendChild(box);
+          return td;
+        }
+      };
+      table.appendChild(thead);
+      if (!players || players.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 5;
+        td.style.padding = '10px';
+        td.style.textAlign = 'center';
+        td.style.border = '1px solid rgba(255,255,255,0.15)';
+        td.textContent = 'Нет данных';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
       } else {
-        // Fallback к старому методу
-        console.log('[RosterEvents] Используем стандартный метод');
-        const fd=new FormData(); 
-        fd.append('initData', tg?.initData||''); 
-        fd.append('home',match.home||''); 
-        fd.append('away',match.away||''); 
-        fd.append('team',side); 
-        fd.append('player',player||''); 
-        fd.append('type',type); 
-        
-        const url= want? '/api/match/events/add':'/api/match/events/remove'; 
-        const r=await fetch(url,{method:'POST', body:fd}); 
-        const d=await r.json(); 
-        
-        if(d?.error){ 
-          window.showAlert?.(d.error,'error'); 
-          sel.value= has? '1':'0'; 
-          return; 
-        } 
-        
-        if(!evIdx.has(key)) {evIdx.set(key,{goal:0,assist:0,yellow:0,red:0});} 
-        evIdx.get(key)[type]= want?1:0; 
-        icon.style.opacity= want? '1':'0.25'; 
-        highlightRow(trRef,key);
+        players.forEach(pName => {
+          const tr = document.createElement('tr');
+          const tdName = document.createElement('td');
+          tdName.style.border = '1px solid rgba(255,255,255,0.15)';
+          tdName.style.padding = '6px';
+          tdName.style.textAlign = 'left';
+          tdName.textContent = pName;
+          const tdY = createCell(pName, 'yellow', tr);
+          const tdR = createCell(pName, 'red', tr);
+          const tdA = createCell(pName, 'assist', tr);
+          const tdG = createCell(pName, 'goal', tr);
+          tr.append(tdName, tdY, tdR, tdA, tdG);
+          const key = (pName || '').trim().toLowerCase();
+          highlightRow(tr, key);
+          tbody.appendChild(tr);
+        });
       }
-      
-      try { 
-        const host=document.getElementById('ufo-match-details'); 
-        if(host) {host.setAttribute('data-admin-last-change-ts', String(Date.now()));} 
-      } catch(_){} 
-      
-    } catch(e){ 
-      console.error('events yellow/red',e); 
-      window.showAlert?.('Ошибка сохранения','error'); 
-      sel.value= has? '1':'0'; 
-    } finally { 
-      window.__adminEventPending.delete(pendKey); 
-      sel.disabled=false; 
-    } 
-  }); box.append(sel,icon); td.appendChild(box); return td; }
-    };
-    table.appendChild(thead); if(!players||players.length===0){ const tr=document.createElement('tr'); const td=document.createElement('td'); td.colSpan=5; td.style.padding='10px'; td.style.textAlign='center'; td.style.border='1px solid rgba(255,255,255,0.15)'; td.textContent='Нет данных'; tr.appendChild(td); tbody.appendChild(tr); } else { players.forEach(pName=>{ const tr=document.createElement('tr'); const tdName=document.createElement('td'); tdName.style.border='1px solid rgba(255,255,255,0.15)'; tdName.style.padding='6px'; tdName.style.textAlign='left'; tdName.textContent=pName; const tdY=createCell(pName,'yellow',tr); const tdR=createCell(pName,'red',tr); const tdA=createCell(pName,'assist',tr); const tdG=createCell(pName,'goal',tr); tr.append(tdName,tdY,tdR,tdA,tdG); const key=(pName||'').trim().toLowerCase(); highlightRow(tr,key); tbody.appendChild(tr); }); }
-  table.appendChild(tbody); pane.appendChild(table); if(side==='home'){ const btnWrap=document.createElement('div'); btnWrap.style.display='flex'; btnWrap.style.justifyContent='center'; btnWrap.style.marginTop='8px'; const btn=document.createElement('button'); btn.className='details-btn'; btn.textContent='Обновить составы'; btn.style.fontSize='12px'; btn.style.padding='6px 10px'; btn.style.borderRadius='8px'; const mkKey=()=>{ try { const dRaw=(match?.datetime||match?.date||'').toString(); const d=dRaw?dRaw.slice(0,10):''; return `roster:refresh:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${d}`; } catch(_) { return 'roster:refresh'; } }; const rKey=mkKey(); const COOLDOWN=10*60*1000; const updateState=()=>{ try { const last=Number(localStorage.getItem(rKey)||'0')||0; const left=Math.max(0,(last+COOLDOWN)-Date.now()); if(left>0){ btn.disabled=true; const mins=Math.ceil(left/60000); btn.textContent=`Доступно через ${mins} мин`; } else { btn.disabled=false; btn.textContent='Обновить составы'; } } catch(_){} }; updateState(); btn.addEventListener('click',async()=>{ try { const last=Number(localStorage.getItem(rKey)||'0')||0; if(Date.now()-last<COOLDOWN){ updateState(); return; } } catch(_){} btn.disabled=true; const orig=btn.textContent; btn.textContent='Обновляю...'; try { const params=new URLSearchParams({ home:match.home||'', away:match.away||'' }); const r=await fetch(`/api/match/lineups?${params.toString()}`,{ headers:{'Cache-Control':'no-store'} }); const fresh=await r.json(); const homeList=Array.isArray(fresh?.rosters?.home)?fresh.rosters.home:[]; const awayList=Array.isArray(fresh?.rosters?.away)?fresh.rosters.away:[]; const ev = details?.events || {home:[],away:[]}; renderRosterTable(homePane,homeList,'home',ev); renderRosterTable(awayPane,awayList,'away',ev); try { localStorage.setItem(rKey,String(Date.now())); } catch(_){} } catch(e){} btn.textContent=orig; updateState(); }); btnWrap.appendChild(btn); pane.appendChild(btnWrap); }
+      table.appendChild(tbody);
+      pane.appendChild(table);
+      if (side === 'home') {
+        const btnWrap = document.createElement('div');
+        btnWrap.style.display = 'flex';
+        btnWrap.style.justifyContent = 'center';
+        btnWrap.style.marginTop = '8px';
+        const btn = document.createElement('button');
+        btn.className = 'details-btn';
+        btn.textContent = 'Обновить составы';
+        btn.style.fontSize = '12px';
+        btn.style.padding = '6px 10px';
+        btn.style.borderRadius = '8px';
+        const mkKey = () => {
+          try {
+            const dRaw = (match?.datetime || match?.date || '').toString();
+            const d = dRaw ? dRaw.slice(0, 10) : '';
+            return `roster:refresh:${(match.home || '').toLowerCase().trim()}__${(match.away || '').toLowerCase().trim()}__${d}`;
+          } catch (_) {
+            return 'roster:refresh';
+          }
+        };
+        const rKey = mkKey();
+        const COOLDOWN = 10 * 60 * 1000;
+        const updateState = () => {
+          try {
+            const last = Number(localStorage.getItem(rKey) || '0') || 0;
+            const left = Math.max(0, last + COOLDOWN - Date.now());
+            if (left > 0) {
+              btn.disabled = true;
+              const mins = Math.ceil(left / 60000);
+              btn.textContent = `Доступно через ${mins} мин`;
+            } else {
+              btn.disabled = false;
+              btn.textContent = 'Обновить составы';
+            }
+          } catch (_) {}
+        };
+        updateState();
+        btn.addEventListener('click', async () => {
+          try {
+            const last = Number(localStorage.getItem(rKey) || '0') || 0;
+            if (Date.now() - last < COOLDOWN) {
+              updateState();
+              return;
+            }
+          } catch (_) {}
+          btn.disabled = true;
+          const orig = btn.textContent;
+          btn.textContent = 'Обновляю...';
+          try {
+            const params = new URLSearchParams({ home: match.home || '', away: match.away || '' });
+            const r = await fetch(`/api/match/lineups?${params.toString()}`, {
+              headers: { 'Cache-Control': 'no-store' },
+            });
+            const fresh = await r.json();
+            const homeList = Array.isArray(fresh?.rosters?.home) ? fresh.rosters.home : [];
+            const awayList = Array.isArray(fresh?.rosters?.away) ? fresh.rosters.away : [];
+            const ev = details?.events || { home: [], away: [] };
+            renderRosterTable(homePane, homeList, 'home', ev);
+            renderRosterTable(awayPane, awayList, 'away', ev);
+            try {
+              localStorage.setItem(rKey, String(Date.now()));
+            } catch (_) {}
+          } catch (e) {}
+          btn.textContent = orig;
+          updateState();
+        });
+        btnWrap.appendChild(btn);
+        pane.appendChild(btnWrap);
+      }
     };
     try {
       // Сохраняем последние события и ростеры, чтобы при частичных обновлениях (без этих полей)
       // не терять данные и не показывать "Нет данных"
       try {
-        if (!mdPane.__lastEvents) {mdPane.__lastEvents = { home: [], away: [] };}
-        if (details && details.events) {mdPane.__lastEvents = details.events;}
-      } catch(_){}
+        if (!mdPane.__lastEvents) {
+          mdPane.__lastEvents = { home: [], away: [] };
+        }
+        if (details && details.events) {
+          mdPane.__lastEvents = details.events;
+        }
+      } catch (_) {}
       try {
-        if (!mdPane.__lastRosters) {mdPane.__lastRosters = { home: [], away: [] };}
-        if (details && details.rosters) {mdPane.__lastRosters = {
-          home: Array.isArray(details.rosters.home) ? details.rosters.home : (mdPane.__lastRosters.home || []),
-          away: Array.isArray(details.rosters.away) ? details.rosters.away : (mdPane.__lastRosters.away || [])
-        };}
-      } catch(_){}
+        if (!mdPane.__lastRosters) {
+          mdPane.__lastRosters = { home: [], away: [] };
+        }
+        if (details && details.rosters) {
+          mdPane.__lastRosters = {
+            home: Array.isArray(details.rosters.home)
+              ? details.rosters.home
+              : mdPane.__lastRosters.home || [],
+            away: Array.isArray(details.rosters.away)
+              ? details.rosters.away
+              : mdPane.__lastRosters.away || [],
+          };
+        }
+      } catch (_) {}
       // Если есть расширенный формат lineups
-      if(details?.lineups){
-        const toFlat = (objSide) => {
-          const arr=[]; try { (objSide?.starting_eleven||[]).forEach(p=>arr.push(p)); (objSide?.substitutes||[]).forEach(p=>arr.push(p)); } catch(_){} return arr; };
+      if (details?.lineups) {
+        const toFlat = objSide => {
+          const arr = [];
+          try {
+            (objSide?.starting_eleven || []).forEach(p => arr.push(p));
+            (objSide?.substitutes || []).forEach(p => arr.push(p));
+          } catch (_) {}
+          return arr;
+        };
         const homeExt = details.lineups.home || { starting_eleven: [], substitutes: [] };
         const awayExt = details.lineups.away || { starting_eleven: [], substitutes: [] };
-        const ev=details?.events || mdPane.__lastEvents || {home:[],away:[]};
+        const ev = details?.events || mdPane.__lastEvents || { home: [], away: [] };
         // адаптируем renderRosterTable чтобы принять массив объектов {player, jersey_number, is_captain}
         const origRender = renderRosterTable;
         const patchRender = (pane, playerObjs, side, existingEvents) => {
@@ -231,116 +624,151 @@
           const list = playerObjs.map(o => {
             // убираем номер (требование: без нумерации в приложении)
             let name = o.player || '';
-            if(o.is_captain) {name = name + ' (C)';}
+            if (o.is_captain) {
+              name = name + ' (C)';
+            }
             return name.trim();
           });
           origRender(pane, list, side, existingEvents);
         };
         // home
-        patchRender(homePane, toFlat(homeExt),'home', ev);
-        patchRender(awayPane, toFlat(awayExt),'away', ev);
+        patchRender(homePane, toFlat(homeExt), 'home', ev);
+        patchRender(awayPane, toFlat(awayExt), 'away', ev);
       } else {
-        const homeList=(Array.isArray(details?.rosters?.home)?details.rosters.home: (mdPane.__lastRosters?.home||[]));
-        const awayList=(Array.isArray(details?.rosters?.away)?details.rosters.away: (mdPane.__lastRosters?.away||[]));
-        const ev=details?.events || mdPane.__lastEvents || {home:[],away:[]}; renderRosterTable(homePane, homeList,'home',ev); renderRosterTable(awayPane, awayList,'away',ev);
+        const homeList = Array.isArray(details?.rosters?.home)
+          ? details.rosters.home
+          : mdPane.__lastRosters?.home || [];
+        const awayList = Array.isArray(details?.rosters?.away)
+          ? details.rosters.away
+          : mdPane.__lastRosters?.away || [];
+        const ev = details?.events || mdPane.__lastEvents || { home: [], away: [] };
+        renderRosterTable(homePane, homeList, 'home', ev);
+        renderRosterTable(awayPane, awayList, 'away', ev);
       }
-    } catch(_) { 
+    } catch (_) {
       // В случае ошибки пытаемся показать последний валидный кэш ростеров
       try {
         const lastR = mdPane.__lastRosters || { home: [], away: [] };
-        renderRosterTable(homePane, Array.isArray(lastR.home)? lastR.home: [], 'home', (mdPane.__lastEvents||{home:[],away:[]})); 
-        renderRosterTable(awayPane, Array.isArray(lastR.away)? lastR.away: [], 'away', (mdPane.__lastEvents||{home:[],away:[]})); 
-      } catch(__){
-        renderRosterTable(homePane,[], 'home', (mdPane.__lastEvents||{home:[],away:[]})); 
-        renderRosterTable(awayPane,[], 'away', (mdPane.__lastEvents||{home:[],away:[]}));
+        renderRosterTable(
+          homePane,
+          Array.isArray(lastR.home) ? lastR.home : [],
+          'home',
+          mdPane.__lastEvents || { home: [], away: [] }
+        );
+        renderRosterTable(
+          awayPane,
+          Array.isArray(lastR.away) ? lastR.away : [],
+          'away',
+          mdPane.__lastEvents || { home: [], away: [] }
+        );
+      } catch (__) {
+        renderRosterTable(homePane, [], 'home', mdPane.__lastEvents || { home: [], away: [] });
+        renderRosterTable(awayPane, [], 'away', mdPane.__lastEvents || { home: [], away: [] });
       }
     }
   }
   window.MatchRostersEvents = { render };
-  
+
   // Глобальная функция debounce для предотвращения множественных обновлений
   window.__eventUpdateDebounce = window.__eventUpdateDebounce || new Map();
-  
+
   function debounceEventUpdate(key, callback, delay = 100) {
     const existingTimeout = window.__eventUpdateDebounce.get(key);
     if (existingTimeout) {
       clearTimeout(existingTimeout);
     }
-    
+
     const timeout = setTimeout(() => {
       window.__eventUpdateDebounce.delete(key);
       callback();
     }, delay);
-    
+
     window.__eventUpdateDebounce.set(key, timeout);
   }
-  
+
   // Подписка на обновления реестра событий для автоматической синхронизации UI
-  document.addEventListener('eventsRegistryUpdate', (event) => {
+  document.addEventListener('eventsRegistryUpdate', event => {
     try {
       const { home, away, events, reason } = event.detail;
-      
+
       // Проверяем, относится ли обновление к текущему открытому матчу
       const currentMatch = window.__currentMatchDetails;
       if (currentMatch && currentMatch.home === home && currentMatch.away === away) {
-        console.log('[MatchRostersEvents] Получено обновление реестра событий, обновляем UI синхронно');
-        
+        console.log(
+          '[MatchRostersEvents] Получено обновление реестра событий, обновляем UI синхронно'
+        );
+
         // НОВОЕ: Проверяем защитный период после админ-действий (как в статистике)
         try {
           const host = document.getElementById('ufo-match-details');
-          const lastAdminChange = Number(host?.getAttribute('data-admin-last-change-ts') || '0') || 0;
+          const lastAdminChange =
+            Number(host?.getAttribute('data-admin-last-change-ts') || '0') || 0;
           const timeSinceAdmin = Date.now() - lastAdminChange;
-          
+
           // Если недавно было админ-действие, применяем только мгновенную синхронизацию
           if (timeSinceAdmin < 8000) {
             console.log('[MatchRostersEvents] Недавнее админ-действие - только синхронизация UI');
-            
+
             // Быстрая синхронизация видимых элементов
             if (events) {
-              document.querySelectorAll(`select[data-match-home="${home}"][data-match-away="${away}"]`).forEach(select => {
-                try {
-                  const playerKey = (select.getAttribute('data-player') || '').toLowerCase().trim();
-                  const eventType = select.getAttribute('data-event-type');
-                  const team = select.getAttribute('data-team');
-                  
-                  if (playerKey && eventType && team) {
-                    const sideEvents = events[team] || [];
-                    let count = 0;
-                    
-                    sideEvents.forEach(event => {
-                      if ((event.player || '').toLowerCase().trim() === playerKey && event.type === eventType) {
-                        count++;
-                      }
-                    });
-                    
-                    // Проверяем изменился ли счетчик (сигнатура)
-                    const currentValue = parseInt(select.value, 10) || 0;
-                    if (currentValue !== count) {
-                      console.log('[MatchRostersEvents] Синхронизируем селект:', playerKey, eventType, currentValue, '→', count);
-                      
-                      select.value = String(count);
-                      const icon = select.parentNode?.querySelector('img');
-                      if (icon) {
-                        icon.style.opacity = count > 0 ? '1' : '0.25';
-                      }
-                      
-                      // Обновляем подсветку строки
-                      const row = select.closest('tr');
-                      if (row) {
-                        const hasAny = count > 0;
-                        row.style.backgroundColor = hasAny ? 'rgba(255,255,255,0.06)' : '';
+              document
+                .querySelectorAll(`select[data-match-home="${home}"][data-match-away="${away}"]`)
+                .forEach(select => {
+                  try {
+                    const playerKey = (select.getAttribute('data-player') || '')
+                      .toLowerCase()
+                      .trim();
+                    const eventType = select.getAttribute('data-event-type');
+                    const team = select.getAttribute('data-team');
+
+                    if (playerKey && eventType && team) {
+                      const sideEvents = events[team] || [];
+                      let count = 0;
+
+                      sideEvents.forEach(event => {
+                        if (
+                          (event.player || '').toLowerCase().trim() === playerKey &&
+                          event.type === eventType
+                        ) {
+                          count++;
+                        }
+                      });
+
+                      // Проверяем изменился ли счетчик (сигнатура)
+                      const currentValue = parseInt(select.value, 10) || 0;
+                      if (currentValue !== count) {
+                        console.log(
+                          '[MatchRostersEvents] Синхронизируем селект:',
+                          playerKey,
+                          eventType,
+                          currentValue,
+                          '→',
+                          count
+                        );
+
+                        select.value = String(count);
+                        const icon = select.parentNode?.querySelector('img');
+                        if (icon) {
+                          icon.style.opacity = count > 0 ? '1' : '0.25';
+                        }
+
+                        // Обновляем подсветку строки
+                        const row = select.closest('tr');
+                        if (row) {
+                          const hasAny = count > 0;
+                          row.style.backgroundColor = hasAny ? 'rgba(255,255,255,0.06)' : '';
+                        }
                       }
                     }
+                  } catch (err) {
+                    console.warn('[MatchRostersEvents] Ошибка синхронизации селекта:', err);
                   }
-                } catch(err) {
-                  console.warn('[MatchRostersEvents] Ошибка синхронизации селекта:', err);
-                }
-              });
+                });
             }
             return; // Не делаем refetch при недавних админ-действиях
           }
-        } catch(_) {}
-        
+        } catch (_) {}
+
         // НОВОЕ: Мгновенно обновляем видимые элементы используя полученные события
         if (events) {
           try {
@@ -348,127 +776,164 @@
             if (matchDetailsPane && matchDetailsPane.style.display !== 'none') {
               // Сохраняем новые события в пане для последующего использования
               matchDetailsPane.__lastEvents = events;
-              
+
               // Обновляем индексы событий для всех видимых селектов (как в статистике)
-              document.querySelectorAll(`select[data-match-home="${home}"][data-match-away="${away}"]`).forEach(select => {
-                try {
-                  const playerKey = (select.getAttribute('data-player') || '').toLowerCase().trim();
-                  const eventType = select.getAttribute('data-event-type');
-                  const team = select.getAttribute('data-team');
-                  
-                  if (playerKey && eventType && team) {
-                    const sideEvents = events[team] || [];
-                    let count = 0;
-                    
-                    sideEvents.forEach(event => {
-                      if ((event.player || '').toLowerCase().trim() === playerKey && event.type === eventType) {
-                        count++;
-                      }
-                    });
-                    
-                    // Обновляем селект и иконку ТОЛЬКО если значение изменилось
-                    const currentValue = parseInt(select.value, 10) || 0;
-                    if (currentValue !== count) {
-                      select.value = String(count);
-                      const icon = select.parentNode?.querySelector('img');
-                      if (icon) {
-                        icon.style.opacity = count > 0 ? '1' : '0.25';
-                      }
-                      
-                      // Обновляем подсветку строки
-                      const row = select.closest('tr');
-                      if (row) {
-                        const hasAny = count > 0;
-                        row.style.backgroundColor = hasAny ? 'rgba(255,255,255,0.06)' : '';
+              document
+                .querySelectorAll(`select[data-match-home="${home}"][data-match-away="${away}"]`)
+                .forEach(select => {
+                  try {
+                    const playerKey = (select.getAttribute('data-player') || '')
+                      .toLowerCase()
+                      .trim();
+                    const eventType = select.getAttribute('data-event-type');
+                    const team = select.getAttribute('data-team');
+
+                    if (playerKey && eventType && team) {
+                      const sideEvents = events[team] || [];
+                      let count = 0;
+
+                      sideEvents.forEach(event => {
+                        if (
+                          (event.player || '').toLowerCase().trim() === playerKey &&
+                          event.type === eventType
+                        ) {
+                          count++;
+                        }
+                      });
+
+                      // Обновляем селект и иконку ТОЛЬКО если значение изменилось
+                      const currentValue = parseInt(select.value, 10) || 0;
+                      if (currentValue !== count) {
+                        select.value = String(count);
+                        const icon = select.parentNode?.querySelector('img');
+                        if (icon) {
+                          icon.style.opacity = count > 0 ? '1' : '0.25';
+                        }
+
+                        // Обновляем подсветку строки
+                        const row = select.closest('tr');
+                        if (row) {
+                          const hasAny = count > 0;
+                          row.style.backgroundColor = hasAny ? 'rgba(255,255,255,0.06)' : '';
+                        }
                       }
                     }
-                  }
-                } catch(_) {}
-              });
+                  } catch (_) {}
+                });
             }
-          } catch(err) {
+          } catch (err) {
             console.error('[MatchRostersEvents] Ошибка синхронного обновления UI:', err);
           }
         }
-        
+
         // Дополнительно: принудительное обновление через API (для полной синхронизации)
-        debounceEventUpdate(`match-details-${home}-${away}`, () => {
-          if (typeof window.fetchMatchDetails === 'function') {
-            window.fetchMatchDetails({ home, away, forceFresh: true })
-              .then(store => {
-                try {
-                  if (store && (store.data || store.raw)) {
-                    const details = store.data || store.raw;
-                    // Перерисовываем ростер с обновленными событиями
-                    if (typeof window.MatchRostersEvents.render === 'function') {
-                      window.MatchRostersEvents.render({ home, away }, details, document.getElementById('ufo-match-details'), { homePane: document.getElementById('roster-home'), awayPane: document.getElementById('roster-away') });
+        debounceEventUpdate(
+          `match-details-${home}-${away}`,
+          () => {
+            if (typeof window.fetchMatchDetails === 'function') {
+              window
+                .fetchMatchDetails({ home, away, forceFresh: true })
+                .then(store => {
+                  try {
+                    if (store && (store.data || store.raw)) {
+                      const details = store.data || store.raw;
+                      // Перерисовываем ростер с обновленными событиями
+                      if (typeof window.MatchRostersEvents.render === 'function') {
+                        window.MatchRostersEvents.render(
+                          { home, away },
+                          details,
+                          document.getElementById('ufo-match-details'),
+                          {
+                            homePane: document.getElementById('roster-home'),
+                            awayPane: document.getElementById('roster-away'),
+                          }
+                        );
+                      }
                     }
+                  } catch (err) {
+                    console.error(
+                      '[MatchRostersEvents] Ошибка обновления после registry update:',
+                      err
+                    );
                   }
-                } catch(err) {
-                  console.error('[MatchRostersEvents] Ошибка обновления после registry update:', err);
-                }
-              })
-              .catch(err => {
-                console.error('[MatchRostersEvents] Ошибка fetch после registry update:', err);
-              });
-          }
-        }, 300); // Увеличили debounce до 300ms как в статистике
+                })
+                .catch(err => {
+                  console.error('[MatchRostersEvents] Ошибка fetch после registry update:', err);
+                });
+            }
+          },
+          300
+        ); // Увеличили debounce до 300ms как в статистике
       }
-    } catch(error) {
+    } catch (error) {
       console.error('[MatchRostersEvents] Ошибка обработки eventsRegistryUpdate:', error);
     }
   });
-  
+
   // Listener для обновлений событий игроков от админа (как в статистике)
-  document.addEventListener('playerEventUpdated', (event) => {
+  document.addEventListener('playerEventUpdated', event => {
     try {
       const { home, away, team, player, eventType, count, source } = event.detail;
-      
+
       // Проверяем текущий матч
       const currentMatch = window.__currentMatchDetails;
       if (!currentMatch || currentMatch.home !== home || currentMatch.away !== away) {
         return;
       }
-      
-      console.log('[MatchRostersEvents] Получено обновление события игрока:', player, eventType, count);
-      
+
+      console.log(
+        '[MatchRostersEvents] Получено обновление события игрока:',
+        player,
+        eventType,
+        count
+      );
+
       // Находим и обновляем соответствующие элементы у других пользователей
-      document.querySelectorAll(`select[data-match-home="${home}"][data-match-away="${away}"][data-team="${team}"][data-player="${player}"][data-event-type="${eventType}"]`).forEach(select => {
-        try {
-          const currentValue = parseInt(select.value, 10) || 0;
-          if (currentValue !== count) {
-            select.value = String(count);
-            
-            // Обновляем иконку
-            const icon = select.parentNode?.querySelector('img');
-            if (icon) {
-              icon.style.opacity = count > 0 ? '1' : '0.25';
+      document
+        .querySelectorAll(
+          `select[data-match-home="${home}"][data-match-away="${away}"][data-team="${team}"][data-player="${player}"][data-event-type="${eventType}"]`
+        )
+        .forEach(select => {
+          try {
+            const currentValue = parseInt(select.value, 10) || 0;
+            if (currentValue !== count) {
+              select.value = String(count);
+
+              // Обновляем иконку
+              const icon = select.parentNode?.querySelector('img');
+              if (icon) {
+                icon.style.opacity = count > 0 ? '1' : '0.25';
+              }
+
+              // Обновляем подсветку строки
+              const row = select.closest('tr');
+              if (row) {
+                // Пересчитываем все события для этого игрока
+                const playerKey = player.toLowerCase().trim();
+                const playerSelects = row.querySelectorAll('select');
+                let hasAnyEvents = false;
+
+                playerSelects.forEach(s => {
+                  const val = parseInt(s.value, 10) || 0;
+                  if (val > 0) hasAnyEvents = true;
+                });
+
+                row.style.backgroundColor = hasAnyEvents ? 'rgba(255,255,255,0.06)' : '';
+              }
+
+              console.log(
+                '[MatchRostersEvents] Синхронизирован элемент игрока:',
+                player,
+                eventType,
+                '→',
+                count
+              );
             }
-            
-            // Обновляем подсветку строки
-            const row = select.closest('tr');
-            if (row) {
-              // Пересчитываем все события для этого игрока
-              const playerKey = player.toLowerCase().trim();
-              const playerSelects = row.querySelectorAll('select');
-              let hasAnyEvents = false;
-              
-              playerSelects.forEach(s => {
-                const val = parseInt(s.value, 10) || 0;
-                if (val > 0) hasAnyEvents = true;
-              });
-              
-              row.style.backgroundColor = hasAnyEvents ? 'rgba(255,255,255,0.06)' : '';
-            }
-            
-            console.log('[MatchRostersEvents] Синхронизирован элемент игрока:', player, eventType, '→', count);
+          } catch (err) {
+            console.warn('[MatchRostersEvents] Ошибка синхронизации элемента:', err);
           }
-        } catch(err) {
-          console.warn('[MatchRostersEvents] Ошибка синхронизации элемента:', err);
-        }
-      });
-      
-    } catch(error) {
+        });
+    } catch (error) {
       console.error('[MatchRostersEvents] Ошибка обработки playerEventUpdated:', error);
     }
   });

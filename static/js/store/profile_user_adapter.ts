@@ -48,12 +48,12 @@ declare global {
 
   // Ждём готовности ProfileStore
   const waitForStore = () => {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>(resolve => {
       if (window.ProfileStore) {
         resolve();
         return;
       }
-      
+
       const check = () => {
         if (window.ProfileStore) {
           resolve();
@@ -68,7 +68,7 @@ declare global {
   // Интеграция с существующим ProfileUser
   const integrateWithLegacy = async () => {
     await waitForStore();
-    
+
     if (!window.ProfileUser || !window.ProfileStore) {
       return;
     }
@@ -82,7 +82,7 @@ declare global {
     const originalWithTeamCount = legacy.withTeamCount.bind(legacy);
 
     // Подписываемся на изменения в сторе
-    store.subscribe((state) => {
+    store.subscribe(state => {
       // При обновлении пользователя в сторе обновляем UI
       if (state.user && Object.keys(state.user).length > 0) {
         originalRenderUserProfile(state.user);
@@ -95,8 +95,7 @@ declare global {
         // Проверяем, есть ли свежие данные в сторе
         const state = store.get();
         const now = Date.now();
-        const isFresh = state.userLastUpdated && 
-                       (now - state.userLastUpdated) < 60000; // 1 минута
+        const isFresh = state.userLastUpdated && now - state.userLastUpdated < 60000; // 1 минута
 
         if (isFresh && state.user && Object.keys(state.user).length > 0) {
           // Используем данные из стора
@@ -106,7 +105,7 @@ declare global {
 
         // Загружаем данные через оригинальный метод
         const userData = await originalFetchUserData();
-        
+
         // Сохраняем в стор
         if (userData) {
           // Приводим данные к нужному формату
@@ -123,7 +122,9 @@ declare global {
             checkinDays: userData.consecutive_days || userData.checkin_days,
             currentStreak: userData.current_streak || userData.consecutive_days,
             favoriteTeam: userData.favorite_team || userData.favoriteTeam,
-            lastCheckin: userData.last_checkin_date ? new Date(userData.last_checkin_date).getTime() : undefined,
+            lastCheckin: userData.last_checkin_date
+              ? new Date(userData.last_checkin_date).getTime()
+              : undefined,
             canCheckin: store.canCheckin(), // используем логику из стора
           };
 
@@ -132,11 +133,11 @@ declare global {
           // Обновляем любимую команду в настройках
           if (userData.favorite_team || userData.favoriteTeam) {
             store.updateSettings({
-              favoriteTeam: userData.favorite_team || userData.favoriteTeam
+              favoriteTeam: userData.favorite_team || userData.favoriteTeam,
             });
           }
         }
-        
+
         return userData;
       } catch (error) {
         console.error('Profile user adapter error:', error);
@@ -169,11 +170,11 @@ declare global {
     const favoriteTeamSelect = document.getElementById('favorite-team') as HTMLSelectElement;
     if (favoriteTeamSelect) {
       const originalChangeHandler = favoriteTeamSelect.onchange;
-      
-      favoriteTeamSelect.addEventListener('change', async (e) => {
+
+      favoriteTeamSelect.addEventListener('change', async e => {
         const target = e.target as HTMLSelectElement;
         const selectedTeam = target.value;
-        
+
         // Обновляем стор
         if (selectedTeam) {
           store.setFavoriteTeam(selectedTeam);

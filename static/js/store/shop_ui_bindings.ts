@@ -23,8 +23,10 @@
   // Утилиты для работы с DOM
   const escapeHtml = (str: string): string => {
     try {
-      return String(str).replace(/[&<>"']/g, (c: string) => 
-        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c)
+      return String(str).replace(
+        /[&<>"']/g,
+        (c: string) =>
+          ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c
       );
     } catch (e) {
       return String(str || '');
@@ -50,7 +52,7 @@
 
     const state = shopStore.get();
     const cart = state.cart || [];
-    
+
     host.innerHTML = '';
 
     if (cart.length === 0) {
@@ -144,7 +146,7 @@
     checkoutBtn.addEventListener('click', async () => {
       checkoutBtn.disabled = true;
       checkoutBtn.textContent = 'Оформляем...';
-      
+
       try {
         const result = await shopHelpers.placeOrder();
         if (result.success) {
@@ -156,7 +158,9 @@
           // Перерендеринг происходит автоматически через подписку на стор
         } else {
           try {
-            (window as any).Telegram?.WebApp?.showAlert?.(result.error || 'Ошибка при оформлении заказа');
+            (window as any).Telegram?.WebApp?.showAlert?.(
+              result.error || 'Ошибка при оформлении заказа'
+            );
           } catch (e) {
             alert(result.error || 'Ошибка при оформлении заказа');
           }
@@ -197,7 +201,7 @@
 
       const response = await fetch('/api/shop/my-orders', {
         method: 'POST',
-        body: formData
+        body: formData,
       });
 
       const data = await response.json();
@@ -205,7 +209,7 @@
 
       // Объединяем заказы (приоритет серверным данным)
       const allOrders = [...serverOrders];
-      
+
       // Добавляем локальные заказы, которых нет на сервере
       localOrders.forEach((localOrder: ShopOrder) => {
         if (!serverOrders.find((so: any) => String(so.id) === String(localOrder.id))) {
@@ -214,13 +218,13 @@
             total: localOrder.total,
             created_at: new Date(localOrder.createdAt).toISOString(),
             status: localOrder.status,
-            items_preview: localOrder.items_preview
+            items_preview: localOrder.items_preview,
           });
         }
       });
 
       host.innerHTML = '';
-      
+
       if (allOrders.length === 0) {
         host.innerHTML = '<div style="padding:12px; color: var(--gray);">Заказов нет.</div>';
         return;
@@ -228,16 +232,17 @@
 
       const table = document.createElement('table');
       table.className = 'league-table';
-      
+
       const thead = document.createElement('thead');
-      thead.innerHTML = '<tr><th>№</th><th>Сумма</th><th>Создан</th><th>Статус</th><th>Товары</th></tr>';
-      
+      thead.innerHTML =
+        '<tr><th>№</th><th>Сумма</th><th>Создан</th><th>Статус</th><th>Товары</th></tr>';
+
       const tbody = document.createElement('tbody');
-      
+
       allOrders.forEach((order: any, index: number) => {
         const tr = document.createElement('tr');
         const sum = Number(order.total || 0);
-        
+
         let created = order.created_at || '';
         try {
           created = formatDate(new Date(created).getTime());
@@ -246,18 +251,20 @@
         }
 
         const statusMap: Record<string, string> = {
-          'new': 'новый',
-          'accepted': 'принят',
-          'done': 'завершен',
-          'cancelled': 'отменен'
+          new: 'новый',
+          accepted: 'принят',
+          done: 'завершен',
+          cancelled: 'отменен',
         };
-        const status = statusMap[(order.status || '').toLowerCase()] || (order.status || '');
+        const status = statusMap[(order.status || '').toLowerCase()] || order.status || '';
 
         let itemsStr = '';
         if (order.items_preview) {
           itemsStr = String(order.items_preview);
         } else if (Array.isArray(order.items)) {
-          itemsStr = order.items.map((it: any) => `${it.name || 'Товар'}×${it.qty || 1}`).join(', ');
+          itemsStr = order.items
+            .map((it: any) => `${it.name || 'Товар'}×${it.qty || 1}`)
+            .join(', ');
         }
 
         tr.innerHTML = `
@@ -267,13 +274,12 @@
           <td>${escapeHtml(status)}</td>
           <td>${escapeHtml(itemsStr)}</td>
         `;
-        
+
         tbody.appendChild(tr);
       });
 
       table.append(thead, tbody);
       host.appendChild(table);
-
     } catch (error) {
       console.error('Ошибка загрузки заказов:', error);
       host.innerHTML = '<div style="padding:12px; color: var(--gray);">Ошибка загрузки</div>';
@@ -308,7 +314,7 @@
     // При изменении корзины обновляем UI корзины
     const cartPane = document.querySelector('#shop-pane-cart');
     const activeTab = document.querySelector('#shop-subtabs .subtab-item.active');
-    
+
     if (cartPane && activeTab && activeTab.getAttribute('data-stab') === 'cart') {
       renderCart();
     }
@@ -320,11 +326,11 @@
   // Обработчик переключения вкладок (для рендеринга при активации)
   const initTabHandlers = () => {
     const tabs = document.querySelectorAll('#shop-subtabs .subtab-item');
-    
+
     tabs.forEach((tab: Element) => {
       tab.addEventListener('click', () => {
         const key = tab.getAttribute('data-stab');
-        
+
         if (key === 'cart') {
           // Рендерим корзину через небольшую задержку, чтобы панель успела показаться
           setTimeout(renderCart, 10);
@@ -342,7 +348,7 @@
     initTabHandlers();
     initStoreButtons();
     shopHelpers.updateCartBadge();
-    
+
     console.log('shop_ui_bindings: инициализировано под feature flag');
   };
 

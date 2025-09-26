@@ -7,11 +7,24 @@
 
 import type { StoreApi } from './core';
 
-type MatchEvent = { player?: string; type?: string; team?: string; side?: 'home'|'away'; kind?: string; t?: number } & Record<string,any>;
+type MatchEvent = {
+  player?: string;
+  type?: string;
+  team?: string;
+  side?: 'home' | 'away';
+  kind?: string;
+  t?: number;
+} & Record<string, any>;
 type MatchStats = { home?: Record<string, any>; away?: Record<string, any>; [k: string]: any };
 type MatchScore = { home: number; away: number } | null;
 type MatchInfo = { home: string; away: string; date?: string } | null;
-type MatchEntry = { info?: MatchInfo; score?: MatchScore; events?: MatchEvent[]; stats?: MatchStats|null; lastUpdated?: number|null };
+type MatchEntry = {
+  info?: MatchInfo;
+  score?: MatchScore;
+  events?: MatchEvent[];
+  stats?: MatchStats | null;
+  lastUpdated?: number | null;
+};
 type MatchesState = { map: Record<string, MatchEntry> };
 
 declare global {
@@ -25,17 +38,21 @@ declare global {
   }
 }
 
-(function(){
+(function () {
   if (typeof window === 'undefined') return;
   // Флаг теперь хотим всегда включать — но оставим мягкую проверку, чтобы можно было отключить вручную
-  try { if (localStorage.getItem('feature:match_ui_store') !== '1') return; } catch(_) { /* continue silently */ }
+  try {
+    if (localStorage.getItem('feature:match_ui_store') !== '1') return;
+  } catch (_) {
+    /* continue silently */
+  }
 
   const detailsPane = () => document.getElementById('ufo-match-details');
-  const visible = (el: HTMLElement|null) => !!el && el.style.display !== 'none';
+  const visible = (el: HTMLElement | null) => !!el && el.style.display !== 'none';
   const homeNameEl = () => document.getElementById('md-home-name');
   const awayNameEl = () => document.getElementById('md-away-name');
 
-  function currentNames(){
+  function currentNames() {
     // Сначала пробуем брать исходные имена команд из data-атрибутов (без количества в скобках)
     const hAttr = (homeNameEl() as HTMLElement | null)?.getAttribute('data-team-name') || '';
     const aAttr = (awayNameEl() as HTMLElement | null)?.getAttribute('data-team-name') || '';
@@ -46,14 +63,25 @@ declare global {
     return { h, a };
   }
 
-  function findMatchKey(state: MatchesState){
+  function findMatchKey(state: MatchesState) {
     const { h, a } = currentNames();
-    if(!h || !a) return null;
-    let bestKey: string|null = null; let bestTs = -1;
-    for(const [k,v] of Object.entries(state.map||{})){
-      const hi = v.info?.home || ''; const ai = v.info?.away || '';
-      if(hi && ai && hi.toLowerCase() === h.toLowerCase() && ai.toLowerCase() === a.toLowerCase()){
-        const ts = (v.lastUpdated||0); if(ts > bestTs){ bestTs = ts; bestKey = k; }
+    if (!h || !a) return null;
+    let bestKey: string | null = null;
+    let bestTs = -1;
+    for (const [k, v] of Object.entries(state.map || {})) {
+      const hi = v.info?.home || '';
+      const ai = v.info?.away || '';
+      if (
+        hi &&
+        ai &&
+        hi.toLowerCase() === h.toLowerCase() &&
+        ai.toLowerCase() === a.toLowerCase()
+      ) {
+        const ts = v.lastUpdated || 0;
+        if (ts > bestTs) {
+          bestTs = ts;
+          bestKey = k;
+        }
       }
     }
     return bestKey;
@@ -62,15 +90,15 @@ declare global {
   // --- Inline stats override ---
   // Legacy MatchStats.render(fetch...) → заменяем на версию, которая читает состояние стора напрямую.
   // Ждём пока подгрузится legacy модуль (он создаёт window.MatchStats).
-  function installStatsOverride(){
+  function installStatsOverride() {
     try {
       const orig = window.MatchStats && window.MatchStats.render;
-      if(!orig || (window.MatchStats && window.MatchStats.__storeDriven)) return;
-      
+      if (!orig || (window.MatchStats && window.MatchStats.__storeDriven)) return;
+
       // Сохраняем оригинальную функцию
       const originalRender = orig;
-      
-      window.MatchStats.render = function(host: HTMLElement, match: any){
+
+      window.MatchStats.render = function (host: HTMLElement, match: any) {
         // Администратор: не перехватываем, оставляем оригинальный рендер с контролами и анимацией
         try {
           const adminId = document.body.getAttribute('data-admin');
@@ -78,76 +106,76 @@ declare global {
           if (isAdmin) {
             return originalRender.call(this, host, match);
           }
-        } catch(_) {}
+        } catch (_) {}
 
         // Если вебсокеты недоступны, используем оригинальный рендер, чтобы работал легаси-поллинг ETag
         try {
           if (!window.__WEBSOCKETS_ENABLED__) {
             return originalRender.call(this, host, match);
           }
-        } catch(_) {}
-        
-        console.log('[Bridge] MatchStats.render called', { 
-          host, 
+        } catch (_) {}
+
+        console.log('[Bridge] MatchStats.render called', {
+          host,
           match,
           hostId: host?.id,
-          matchInfo: match ? { home: match.home, away: match.away, date: match.date } : null
+          matchInfo: match ? { home: match.home, away: match.away, date: match.date } : null,
         });
-        
+
         // Сначала пытаемся получить данные из стора
         let hasStoreData = false;
         try {
           hasStoreData = renderStatsFromStore(host, match);
           console.log('[Bridge] renderStatsFromStore result:', hasStoreData);
-        } catch(e) {
+        } catch (e) {
           console.warn('[Bridge] renderStatsFromStore failed:', e);
         }
-        
+
         // Если данных в сторе нет, вызываем оригинальную функцию
         if (!hasStoreData) {
           console.log('[Bridge] No store data, calling original render');
           try {
             originalRender.call(this, host, match);
-          } catch(e) {
+          } catch (e) {
             console.error('[Bridge] Original render failed:', e);
             host.innerHTML = '<div class="stats-wrap">Нет данных</div>';
           }
         }
       };
-      
+
       window.MatchStats.__storeDriven = true;
       console.log('[Bridge] Stats override installed successfully');
-    } catch(e) {
+    } catch (e) {
       console.error('[Bridge] Failed to install stats override:', e);
     }
   }
 
   function convertEventsToStats(events: any): any {
     if (!events) return null;
-    
+
     try {
       const homeEvents = events.home || [];
       const awayEvents = events.away || [];
-      
+
       // Подсчитываем статистику из событий
       const stats = {
         home: {
           goals: homeEvents.filter((e: any) => e.type === 'goal').length,
           yellow_cards: homeEvents.filter((e: any) => e.type === 'yellow').length,
           red_cards: homeEvents.filter((e: any) => e.type === 'red').length,
-          assists: homeEvents.filter((e: any) => e.type === 'assist').length
+          assists: homeEvents.filter((e: any) => e.type === 'assist').length,
         },
         away: {
           goals: awayEvents.filter((e: any) => e.type === 'goal').length,
           yellow_cards: awayEvents.filter((e: any) => e.type === 'yellow').length,
           red_cards: awayEvents.filter((e: any) => e.type === 'red').length,
-          assists: awayEvents.filter((e: any) => e.type === 'assist').length
-        }
+          assists: awayEvents.filter((e: any) => e.type === 'assist').length,
+        },
       };
-      
+
       console.log('[Bridge] Converted events to stats:', stats);
       return stats;
-    } catch(e) {
+    } catch (e) {
       console.warn('[Bridge] Failed to convert events to stats:', e);
       return null;
     }
@@ -161,31 +189,31 @@ declare global {
       currentNames: currentNames(),
       match,
       matchHome: match?.home,
-      matchAway: match?.away
+      matchAway: match?.away,
     });
-    
-    if(!host) return false;
-    
+
+    if (!host) return false;
+
     // Пытаемся получить статистику через разные источники данных
     let stats: any = null;
     let hasStoreData = false;
-    
+
     // ПРИОРИТЕТ 1: MatchesStoreAPI — единый источник истины
     if ((window as any).MatchesStoreAPI && match?.home && match?.away) {
       try {
         const matchKey = (window as any).MatchesStoreAPI.findMatchByTeams(match.home, match.away);
         console.log('[Bridge] Found match key:', matchKey);
-        
+
         if (matchKey) {
           stats = (window as any).MatchesStoreAPI.getMatchStats(matchKey);
           hasStoreData = !!(stats && (stats.home || stats.away || stats.shots_total));
           console.log('[Bridge] MatchesStoreAPI stats:', { stats, hasStoreData });
         }
-      } catch(e) {
+      } catch (e) {
         console.warn('[Bridge] MatchesStoreAPI error:', e);
       }
     }
-    
+
     // ПРИОРИТЕТ 2: __MatchEventsRegistry (fallback)
     if (!hasStoreData && (window as any).__MatchEventsRegistry && match?.home && match?.away) {
       try {
@@ -196,9 +224,11 @@ declare global {
           stats = convertEventsToStats(cachedEvents);
           hasStoreData = !!(stats && (stats.home || stats.away));
         }
-      } catch(e) { console.warn('[Bridge] MatchEventsRegistry error:', e); }
+      } catch (e) {
+        console.warn('[Bridge] MatchEventsRegistry error:', e);
+      }
     }
-    
+
     // ПРИОРИТЕТ 3: Legacy MatchesStore
     if (!hasStoreData && window.MatchesStore) {
       try {
@@ -213,26 +243,26 @@ declare global {
             console.log('[Bridge] Legacy store stats:', { stats, hasStoreData });
           }
         }
-      } catch(e) {
+      } catch (e) {
         console.warn('[Bridge] Legacy store error:', e);
       }
     }
-    
+
     if (!hasStoreData) {
       console.log('[Bridge] No store data found, showing loading');
-      host.innerHTML='<div class="stats-wrap">Загрузка статистики...</div>';
+      host.innerHTML = '<div class="stats-wrap">Загрузка статистики...</div>';
       return false;
     }
-    
+
     // Ожидаемые метрики
     const metrics = [
-      { key:'shots_total', label:'Всего ударов' },
-      { key:'shots_on', label:'Удары в створ' },
-      { key:'corners', label:'Угловые' },
-      { key:'yellows', label:'Жёлтые карточки' },
-      { key:'reds', label:'Удаления' }
+      { key: 'shots_total', label: 'Всего ударов' },
+      { key: 'shots_on', label: 'Удары в створ' },
+      { key: 'corners', label: 'Угловые' },
+      { key: 'yellows', label: 'Жёлтые карточки' },
+      { key: 'reds', label: 'Удаления' },
     ];
-    
+
     // Универсальная функция получения значений для метрики
     const getValPair = (metric: string): [number, number] => {
       try {
@@ -240,58 +270,78 @@ declare global {
         if (stats[metric] && Array.isArray(stats[metric]) && stats[metric].length >= 2) {
           return [Number(stats[metric][0]) || 0, Number(stats[metric][1]) || 0];
         }
-        
+
         // Формат 2: структура {home: {...}, away: {...}} (старый формат)
         if (stats.home && stats.away) {
           const h = Number(stats.home[metric] ?? 0) || 0;
           const a = Number(stats.away[metric] ?? 0) || 0;
           return [h, a];
         }
-        
+
         return [0, 0];
-      } catch { 
-        return [0, 0]; 
+      } catch {
+        return [0, 0];
       }
     };
-    
-    const wrap = document.createElement('div'); wrap.className='stats-grid';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'stats-grid';
     metrics.forEach(mt => {
-      const [lh,rh] = getValPair(mt.key);
-      const rowWrap=document.createElement('div'); rowWrap.className='metric';
-      const title=document.createElement('div'); title.className='metric-title'; title.textContent=mt.label; rowWrap.appendChild(title);
-      const bar=document.createElement('div'); bar.className='stat-row';
-      const leftSide=document.createElement('div'); leftSide.className='stat-side stat-left';
-      const leftVal=document.createElement('div'); leftVal.className='stat-val'; leftVal.textContent=String(lh); leftSide.appendChild(leftVal);
-      const mid=document.createElement('div'); mid.className='stat-bar';
-      const leftFill=document.createElement('div'); leftFill.className='stat-fill-left';
-      const rightFill=document.createElement('div'); rightFill.className='stat-fill-right';
-  const total = lh+rh; const lp = total>0? Math.round((lh/total)*100):50;
-  // Используем существующие стили: только выставляем ширины, без новых transition
-  leftFill.style.width=lp+'%'; rightFill.style.width=(100-lp)+'%';
-      
+      const [lh, rh] = getValPair(mt.key);
+      const rowWrap = document.createElement('div');
+      rowWrap.className = 'metric';
+      const title = document.createElement('div');
+      title.className = 'metric-title';
+      title.textContent = mt.label;
+      rowWrap.appendChild(title);
+      const bar = document.createElement('div');
+      bar.className = 'stat-row';
+      const leftSide = document.createElement('div');
+      leftSide.className = 'stat-side stat-left';
+      const leftVal = document.createElement('div');
+      leftVal.className = 'stat-val';
+      leftVal.textContent = String(lh);
+      leftSide.appendChild(leftVal);
+      const mid = document.createElement('div');
+      mid.className = 'stat-bar';
+      const leftFill = document.createElement('div');
+      leftFill.className = 'stat-fill-left';
+      const rightFill = document.createElement('div');
+      rightFill.className = 'stat-fill-right';
+      const total = lh + rh;
+      const lp = total > 0 ? Math.round((lh / total) * 100) : 50;
+      // Используем существующие стили: только выставляем ширины, без новых transition
+      leftFill.style.width = lp + '%';
+      rightFill.style.width = 100 - lp + '%';
+
       // Добавляем цвета команд если доступны
       try {
         if (typeof (window as any).getTeamColor === 'function') {
           leftFill.style.backgroundColor = (window as any).getTeamColor(match.home || '');
           rightFill.style.backgroundColor = (window as any).getTeamColor(match.away || '');
         }
-      } catch(_) {}
-      
-      mid.append(leftFill,rightFill);
-      const rightSide=document.createElement('div'); rightSide.className='stat-side stat-right';
-      const rightVal=document.createElement('div'); rightVal.className='stat-val'; rightVal.textContent=String(rh); rightSide.appendChild(rightVal);
+      } catch (_) {}
+
+      mid.append(leftFill, rightFill);
+      const rightSide = document.createElement('div');
+      rightSide.className = 'stat-side stat-right';
+      const rightVal = document.createElement('div');
+      rightVal.className = 'stat-val';
+      rightVal.textContent = String(rh);
+      rightSide.appendChild(rightVal);
       bar.append(leftSide, mid, rightSide);
       rowWrap.appendChild(bar);
       // Поддерживаем только обновление значений без новых CSS-классов
       wrap.appendChild(rowWrap);
     });
-    host.innerHTML=''; host.appendChild(wrap);
+    host.innerHTML = '';
+    host.appendChild(wrap);
     return true;
   }
 
   function checkStoreDataAvailable(match: any): boolean {
     if (!match?.home || !match?.away) return false;
-    
+
     // Проверяем через MatchesStoreAPI
     if ((window as any).MatchesStoreAPI) {
       try {
@@ -302,11 +352,11 @@ declare global {
             return true;
           }
         }
-      } catch(e) {
+      } catch (e) {
         console.warn('[Bridge] MatchesStoreAPI check error:', e);
       }
     }
-    
+
     // Fallback на старый MatchesStore
     if ((window as any).MatchesStore) {
       try {
@@ -320,27 +370,37 @@ declare global {
             }
           }
         }
-      } catch(e) {
+      } catch (e) {
         console.warn('[Bridge] Legacy store check error:', e);
       }
     }
-    
+
     return false;
   }
 
   // --- Rosters/Events override ---
   // Legacy MatchRostersEvents.render(fetch...) → заменяем на версию из стора
-  function installRostersOverride(){
+  function installRostersOverride() {
     try {
       const orig = window.MatchRostersEvents && window.MatchRostersEvents.render;
-      if(!orig || (window.MatchRostersEvents && window.MatchRostersEvents.__storeDriven)) return;
-      
+      if (!orig || (window.MatchRostersEvents && window.MatchRostersEvents.__storeDriven)) return;
+
       // Сохраняем оригинальную функцию
       window.MatchRostersEvents.__originalRender = orig;
-      
-      window.MatchRostersEvents.render = function(match: any, details: any, mdPane: any, els: any){
-        console.log('[Bridge] MatchRostersEvents.render called from store', { match, details, mdPane, els });
-        
+
+      window.MatchRostersEvents.render = function (
+        match: any,
+        details: any,
+        mdPane: any,
+        els: any
+      ) {
+        console.log('[Bridge] MatchRostersEvents.render called from store', {
+          match,
+          details,
+          mdPane,
+          els,
+        });
+
         // Администратор: используем оригинальный рендер, НО сохраняем/прокидываем эффективный счёт,
         // чтобы original не ставил «— : —» и не перетирал подтверждённый счёт
         try {
@@ -349,29 +409,48 @@ declare global {
           if (isAdmin) {
             console.log('[Bridge] Admin mode detected, preserving score during original render');
             // Определяем эффективный счёт из источников: state → DOM → details
-            let effScore: {home:number; away:number} | null = null;
+            let effScore: { home: number; away: number } | null = null;
             try {
-              const st: any = ((window as any).MatchLiveScore && (window as any).MatchLiveScore.state) || (mdPane && (mdPane as any).__liveScoreState) || null;
-              if (st && st.currentScore && typeof st.currentScore.home === 'number' && typeof st.currentScore.away === 'number') {
+              const st: any =
+                ((window as any).MatchLiveScore && (window as any).MatchLiveScore.state) ||
+                (mdPane && (mdPane as any).__liveScoreState) ||
+                null;
+              if (
+                st &&
+                st.currentScore &&
+                typeof st.currentScore.home === 'number' &&
+                typeof st.currentScore.away === 'number'
+              ) {
                 effScore = { home: st.currentScore.home, away: st.currentScore.away };
               }
-            } catch(_) {}
+            } catch (_) {}
             if (!effScore) {
               try {
                 const el = document.getElementById('md-score');
                 const txt = String(el?.textContent || '').trim();
                 const m = txt.match(/(\d+)\s*:\s*(\d+)/);
-                if (m) { effScore = { home: Number(m[1])||0, away: Number(m[2])||0 }; }
-              } catch(_) {}
+                if (m) {
+                  effScore = { home: Number(m[1]) || 0, away: Number(m[2]) || 0 };
+                }
+              } catch (_) {}
             }
-            if (!effScore && details && typeof details === 'object' && details.score && typeof details.score.home === 'number' && typeof details.score.away === 'number') {
+            if (
+              !effScore &&
+              details &&
+              typeof details === 'object' &&
+              details.score &&
+              typeof details.score.home === 'number' &&
+              typeof details.score.away === 'number'
+            ) {
               effScore = { home: details.score.home, away: details.score.away };
             }
             // Вызываем оригинальный рендер, прокидывая score, если он известен
             try {
-              const detailsWithScore = (effScore ? Object.assign({}, details || {}, { score: effScore }) : details);
+              const detailsWithScore = effScore
+                ? Object.assign({}, details || {}, { score: effScore })
+                : details;
               orig.call(this, match, detailsWithScore, mdPane, els);
-            } catch(e) {
+            } catch (e) {
               console.warn('[Bridge] Original render (admin) failed:', e);
               return;
             }
@@ -379,70 +458,73 @@ declare global {
             try {
               if (effScore) {
                 const scoreEl = document.getElementById('md-score');
-                const isPlaceholder = (scoreEl && typeof scoreEl.textContent === 'string') ? /[—-]\s*:\s*[—-]/.test(scoreEl.textContent!.trim()) : false;
+                const isPlaceholder =
+                  scoreEl && typeof scoreEl.textContent === 'string'
+                    ? /[—-]\s*:\s*[—-]/.test(scoreEl.textContent!.trim())
+                    : false;
                 const desired = `${effScore.home} : ${effScore.away}`;
                 if (scoreEl && (isPlaceholder || scoreEl.textContent!.trim() !== desired)) {
                   scoreEl.textContent = desired;
                 }
               }
-            } catch(_) {}
+            } catch (_) {}
             return; // для админа на этом заканчиваем
           }
-        } catch(_) {}
-        
+        } catch (_) {}
+
         // Если вебсокеты недоступны, используем оригинальный рендер
         try {
           if (!window.__WEBSOCKETS_ENABLED__) {
             console.log('[Bridge] WebSockets disabled, using original rosters render');
             return orig.call(this, match, details, mdPane, els);
           }
-        } catch(_) {}
-        
+        } catch (_) {}
+
         // Сначала проверяем - есть ли данные в сторе
         let hasStoreData = false;
         try {
           hasStoreData = checkStoreDataAvailable(match);
-        } catch(e) {
+        } catch (e) {
           console.warn('[Bridge] Error checking store data:', e);
         }
-        
+
         // Если данных в сторе НЕТ - используем оригинальную функцию
         if (!hasStoreData) {
           console.log('[Bridge] No store data, using original render');
           try {
             orig.call(this, match, details, mdPane, els);
-          } catch(e) {
+          } catch (e) {
             console.warn('[Bridge] Original render failed:', e);
           }
           return;
         }
-        
+
         // Только если есть данные в сторе - читаем из него
         try {
           renderRostersFromStore(match, mdPane, els);
-        } catch(e) {
+        } catch (e) {
           console.warn('[Bridge] Error rendering rosters from store:', e);
           // Fallback на оригинальную функцию если что-то пошло не так
           try {
             orig.call(this, match, details, mdPane, els);
-          } catch(_) {}
+          } catch (_) {}
         }
       };
-      
+
       window.MatchRostersEvents.__storeDriven = true;
       console.log('[Bridge] Rosters override installed successfully');
-    } catch(e) {
+    } catch (e) {
       console.error('[Bridge] Failed to install rosters override:', e);
     }
   }
 
   function renderRostersFromStore(match: any, mdPane: any, els: any) {
-    if(!els.homePane || !els.awayPane) return;
-    
+    if (!els.homePane || !els.awayPane) return;
+
     // Получаем данные из разных источников по приоритету
     let storeData: any = null;
     let hasStoreData = false;
-    
+
     // ПРИОРИТЕТ 1: MatchesStoreAPI — единый источник истины (events/rosters/score/stats)
     if ((window as any).MatchesStoreAPI && match?.home && match?.away) {
       try {
@@ -451,11 +533,11 @@ declare global {
           storeData = (window as any).MatchesStoreAPI.getMatch(matchKey);
           hasStoreData = !!(storeData && (storeData.rosters || storeData.events));
         }
-      } catch(e) {
+      } catch (e) {
         console.warn('[Bridge] MatchesStoreAPI error:', e);
       }
     }
-    
+
     // ПРИОРИТЕТ 2: __MatchEventsRegistry (только события, если стора нет)
     if (!hasStoreData && (window as any).__MatchEventsRegistry && match?.home && match?.away) {
       try {
@@ -466,9 +548,11 @@ declare global {
           storeData = { events: cachedEvents };
           hasStoreData = true;
         }
-      } catch(e) { console.warn('[Bridge] MatchEventsRegistry error:', e); }
+      } catch (e) {
+        console.warn('[Bridge] MatchEventsRegistry error:', e);
+      }
     }
-    
+
     // ПРИОРИТЕТ 3: Legacy MatchesStore
     if (!hasStoreData) {
       const st = (window as any).MatchesStore?.get();
@@ -477,12 +561,15 @@ declare global {
         if (key) {
           const entry = st.map[key];
           storeData = entry || null;
-          hasStoreData = !!(storeData && (storeData.rosters || storeData.events || storeData.score));
+          hasStoreData = !!(
+            storeData &&
+            (storeData.rosters || storeData.events || storeData.score)
+          );
         }
       }
     }
-    
-  // Извлекаем данные с fallback на кэш
+
+    // Извлекаем данные с fallback на кэш
     const rosters = storeData?.rosters || (mdPane as any).__lastRosters || { home: [], away: [] };
     const events = storeData?.events || (mdPane as any).__lastEvents || { home: [], away: [] };
     // Вычисляем эффективный счёт, чтобы избежать мерцания «— : —» при частичных патчах
@@ -494,15 +581,15 @@ declare global {
         if (m) {
           return { home: parseInt(m[1], 10) || 0, away: parseInt(m[2], 10) || 0 };
         }
-      } catch(_) {}
+      } catch (_) {}
       return null;
     };
-    const lastScore = (mdPane as any).__lastScore as { home:number; away:number } | undefined;
-    let score = storeData?.score as { home:number; away:number } | undefined;
+    const lastScore = (mdPane as any).__lastScore as { home: number; away: number } | undefined;
+    let score = storeData?.score as { home: number; away: number } | undefined;
     if (!score) {
       score = lastScore || parseDomScore() || undefined;
     }
-    
+
     // Обновляем кэш для совместимости с legacy кодом
     (mdPane as any).__lastRosters = rosters;
     (mdPane as any).__lastEvents = events;
@@ -518,34 +605,68 @@ declare global {
             scoreEl.textContent = newScoreText;
             // Добавляем анимацию обновления как в стабильном коммите
             scoreEl.classList.add('score-updated');
-            setTimeout(() => { 
-              try { scoreEl.classList.remove('score-updated'); } catch(_) {} 
+            setTimeout(() => {
+              try {
+                scoreEl.classList.remove('score-updated');
+              } catch (_) {}
             }, 2000);
           }
         }
-      } catch(_) {}
+      } catch (_) {}
     }
-    
+
     // --- Подготовка сигнатур для диффа (минимизация полных ререндеров) ---
     const buildRostersSig = (r: any): string => {
       try {
-        const h = (r.home||[]).map((p: any)=> (p.id||p.player_id||p.name||p.player||p.title||'').toString().trim().toLowerCase()).sort();
-        const a = (r.away||[]).map((p: any)=> (p.id||p.player_id||p.name||p.player||p.title||'').toString().trim().toLowerCase()).sort();
-        return 'h:'+h.join(',')+'|a:'+a.join(',');
-      } catch { return 'r-empty'; }
+        const h = (r.home || [])
+          .map((p: any) =>
+            (p.id || p.player_id || p.name || p.player || p.title || '')
+              .toString()
+              .trim()
+              .toLowerCase()
+          )
+          .sort();
+        const a = (r.away || [])
+          .map((p: any) =>
+            (p.id || p.player_id || p.name || p.player || p.title || '')
+              .toString()
+              .trim()
+              .toLowerCase()
+          )
+          .sort();
+        return 'h:' + h.join(',') + '|a:' + a.join(',');
+      } catch {
+        return 'r-empty';
+      }
     };
     const buildEventsSig = (ev: any): string => {
       try {
         if (Array.isArray(ev)) {
-          return ev.map(e=> (e.side||'h')+':' + (e.player||e.team||'') + ':' + (e.type||e.kind||'event')).sort().join('|');
+          return ev
+            .map(
+              e =>
+                (e.side || 'h') +
+                ':' +
+                (e.player || e.team || '') +
+                ':' +
+                (e.type || e.kind || 'event')
+            )
+            .sort()
+            .join('|');
         }
         if (ev && typeof ev === 'object') {
-          const h = (ev.home||[]).map((e:any)=>'h:'+(e.player||'')+':' + (e.type||'event'));
-            const a = (ev.away||[]).map((e:any)=>'a:'+(e.player||'')+':' + (e.type||'event'));
+          const h = (ev.home || []).map(
+            (e: any) => 'h:' + (e.player || '') + ':' + (e.type || 'event')
+          );
+          const a = (ev.away || []).map(
+            (e: any) => 'a:' + (e.player || '') + ':' + (e.type || 'event')
+          );
           return h.concat(a).sort().join('|');
         }
         return 'e-empty';
-      } catch { return 'e-empty'; }
+      } catch {
+        return 'e-empty';
+      }
     };
     const rostersSig = buildRostersSig(rosters);
     const eventsSigRaw = buildEventsSig(events);
@@ -558,26 +679,27 @@ declare global {
     if (Array.isArray(events)) {
       // Новый формат: массив событий с side
       for (const ev of events) {
-        const bucket = (ev.side === 'away') ? eventsFormatted.away : eventsFormatted.home;
+        const bucket = ev.side === 'away' ? eventsFormatted.away : eventsFormatted.home;
         bucket.push({
           player: ev.player || ev.team || ev.teamName || '',
-          type: ev.type || ev.kind || 'event'
+          type: ev.type || ev.kind || 'event',
         });
       }
     } else if (events && typeof events === 'object') {
       // Старый формат: {home: [], away: []}
       eventsFormatted.home = (events.home ?? []).map((e: any) => ({
         player: e.player || '',
-        type: e.type || 'event'
+        type: e.type || 'event',
       }));
       eventsFormatted.away = (events.away ?? []).map((e: any) => ({
         player: e.player || '',
-        type: e.type || 'event'
+        type: e.type || 'event',
       }));
     }
 
     // Если составы не изменились, а изменились только события – делаем лёгкий дифф-апдейт без полного рендера
-    const onlyEventsChanged = (lastRostersSig && lastRostersSig === rostersSig) && (eventsSigRaw !== lastEventsSig);
+    const onlyEventsChanged =
+      lastRostersSig && lastRostersSig === rostersSig && eventsSigRaw !== lastEventsSig;
     if (onlyEventsChanged) {
       // Обновляем кэш
       (mdPane as any).__lastEvents = events;
@@ -587,35 +709,44 @@ declare global {
           const scoreEl = document.getElementById('md-score');
           if (scoreEl) {
             const txt = `${score.home} : ${score.away}`;
-            if (scoreEl.textContent?.trim() !== txt && !(/[—-]\s*:\s*[—-]/).test(scoreEl.textContent||'')) {
+            if (
+              scoreEl.textContent?.trim() !== txt &&
+              !/[—-]\s*:\s*[—-]/.test(scoreEl.textContent || '')
+            ) {
               scoreEl.textContent = txt;
             }
           }
         }
-      } catch(_) {}
+      } catch (_) {}
       // Инкрементальное обновление иконок / селектов
-      try { updateEventIconsOnly(match, eventsFormatted); } catch(err){ console.warn('[Bridge] Incremental events update failed:', err); }
+      try {
+        updateEventIconsOnly(match, eventsFormatted);
+      } catch (err) {
+        console.warn('[Bridge] Incremental events update failed:', err);
+      }
       return; // Прерываем дальнейший тяжёлый рендер
     }
-    
+
     // Вызываем оригинальную render функцию с данными из стора
     try {
       // Получаем оригинальную функцию (до override)
       const renderFunc = window.MatchRostersEvents.__originalRender;
       if (!renderFunc) {
         console.warn('[Bridge] No original render function found, using fallback');
-        if (els.homePane) els.homePane.innerHTML = `<div>Команда 1: ${rosters.home?.length || 0} игроков</div>`;
-        if (els.awayPane) els.awayPane.innerHTML = `<div>Команда 2: ${rosters.away?.length || 0} игроков</div>`;
+        if (els.homePane)
+          els.homePane.innerHTML = `<div>Команда 1: ${rosters.home?.length || 0} игроков</div>`;
+        if (els.awayPane)
+          els.awayPane.innerHTML = `<div>Команда 2: ${rosters.away?.length || 0} игроков</div>`;
         return;
       }
-      
+
       const detailsObj = {
         rosters: {
           home: rosters.home ?? [],
-          away: rosters.away ?? []
+          away: rosters.away ?? [],
         },
         events: eventsFormatted,
-        score: score // всегда передаём эффективный счёт, чтобы оригинальный рендер не ставил «— : —»
+        score: score, // всегда передаём эффективный счёт, чтобы оригинальный рендер не ставил «— : —»
       };
 
       // Защитно выставляем счёт ДО вызова оригинального рендера (уменьшает окно мерцания)
@@ -630,45 +761,58 @@ declare global {
             }
           }
         }
-      } catch(_) {}
+      } catch (_) {}
 
       // Сохраняем сигнатуры после полноценного рендера
       (mdPane as any).__lastRostersSig = rostersSig;
       (mdPane as any).__lastEventsSig = eventsSigRaw;
-      
+
       renderFunc(match, detailsObj, mdPane, els);
-      
+
       // РЕШЕНИЕ: Immediate restoration после рендера — только безопасная проверка
       setTimeout(() => {
         try {
           const scoreEl = document.getElementById('md-score');
-          if (scoreEl && score && typeof score.home === 'number' && typeof score.away === 'number') {
+          if (
+            scoreEl &&
+            score &&
+            typeof score.home === 'number' &&
+            typeof score.away === 'number'
+          ) {
             const currentText = scoreEl.textContent?.trim() || '';
-            const isPlaceholder = currentText === '— : —' || currentText === '- : -' || currentText === '';
+            const isPlaceholder =
+              currentText === '— : —' || currentText === '- : -' || currentText === '';
             const desiredText = `${score.home} : ${score.away}`;
             // Обновляем только если плейсхолдер или текст отличается
             if (isPlaceholder || currentText !== desiredText) {
               scoreEl.textContent = desiredText;
             }
           }
-          
+
           // Принудительно обновляем события в UI, если они не отобразились
-          if (eventsFormatted && (eventsFormatted.home.length > 0 || eventsFormatted.away.length > 0)) {
+          if (
+            eventsFormatted &&
+            (eventsFormatted.home.length > 0 || eventsFormatted.away.length > 0)
+          ) {
             updateEventIconsOnly(match, eventsFormatted);
           }
-        } catch(err) {
+        } catch (err) {
           console.warn('[Bridge] Error in immediate restoration:', err);
         }
       }, 0);
-      
+
       // Страховка: если оригинальный рендер всё равно вернул placeholder, восстановим счёт
       try {
         const scoreEl = document.getElementById('md-score');
-        if (scoreEl && score && (scoreEl.textContent?.trim() === '— : —' || scoreEl.textContent?.trim() === '- : -')) {
+        if (
+          scoreEl &&
+          score &&
+          (scoreEl.textContent?.trim() === '— : —' || scoreEl.textContent?.trim() === '- : -')
+        ) {
           scoreEl.textContent = `${score.home} : ${score.away}`;
         }
-      } catch(_) {}
-    } catch(err) {
+      } catch (_) {}
+    } catch (err) {
       console.warn('[Bridge] Error calling rosters render function:', err);
       // Минимальный fallback
       if (els.homePane) {
@@ -681,102 +825,151 @@ declare global {
   }
 
   // Периодически пытаемся установить override, пока legacy модуль не прогружен
-  try { 
-    let tries=0; 
-    const timer=setInterval(()=>{ 
-      tries++; 
-      installStatsOverride(); 
+  try {
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries++;
+      installStatsOverride();
       installRostersOverride();
-      if((window.MatchStats?.__storeDriven && window.MatchRostersEvents?.__storeDriven) || tries>40) 
-        clearInterval(timer); 
-    }, 250); 
-  } catch(_){ }
+      if (
+        (window.MatchStats?.__storeDriven && window.MatchRostersEvents?.__storeDriven) ||
+        tries > 40
+      )
+        clearInterval(timer);
+    }, 250);
+  } catch (_) {}
 
   // --- Events / rosters bridge ---
   // Мы НЕ рендерим roster здесь — лишь инициируем тот же механизм, что и realtime-updates (matchDetailsUpdate)
   // Формируем detail: { home, away, events: {home:[], away:[]} } адаптируя массив events из стора
 
-  function adaptEvents(list: MatchEvent[]|undefined|null){
-    if(!Array.isArray(list)) return { home:[], away:[] };
-    const home: any[] = []; const away: any[] = [];
-    for(const ev of list){
-      const bucket = (ev.side === 'away')? away: home; // default home если side не задан
+  function adaptEvents(list: MatchEvent[] | undefined | null) {
+    if (!Array.isArray(list)) return { home: [], away: [] };
+    const home: any[] = [];
+    const away: any[] = [];
+    for (const ev of list) {
+      const bucket = ev.side === 'away' ? away : home; // default home если side не задан
       // legacy структура использует поля: player, type
       bucket.push({
         player: ev.player || ev.team || ev.teamName || '',
-        type: ev.type || ev.kind || 'event'
+        type: ev.type || ev.kind || 'event',
       });
     }
     return { home, away };
   }
 
-  let lastSig: string|null = null;
+  let lastSig: string | null = null;
   let debounceTimer: any = null;
 
   // Вспомогательная функция обновления иконок / селектов (повторное использование и для инкрементальных апдейтов)
-  function updateEventIconsOnly(match: any, eventsFormatted: {home:any[]; away:any[]}){
+  function updateEventIconsOnly(match: any, eventsFormatted: { home: any[]; away: any[] }) {
     try {
       // Обновляем селекты (админ)
-      document.querySelectorAll(`select[data-match-home="${match.home}"][data-match-away="${match.away}"]`).forEach(select => {
-        try {
-          const selectEl = select as HTMLSelectElement;
-          const playerKey = (selectEl.getAttribute('data-player') || '').toLowerCase().trim();
-          const eventType = selectEl.getAttribute('data-event-type');
-          const team = selectEl.getAttribute('data-team');
-          if (playerKey && eventType && team) {
-            const sideEvents = (eventsFormatted as any)[team] || [];
-            let count = 0;
-            for (const ev of sideEvents) {
-              if ((ev.player || '').toLowerCase().trim() === playerKey && ev.type === eventType) count++;
+      document
+        .querySelectorAll(
+          `select[data-match-home="${match.home}"][data-match-away="${match.away}"]`
+        )
+        .forEach(select => {
+          try {
+            const selectEl = select as HTMLSelectElement;
+            const playerKey = (selectEl.getAttribute('data-player') || '').toLowerCase().trim();
+            const eventType = selectEl.getAttribute('data-event-type');
+            const team = selectEl.getAttribute('data-team');
+            if (playerKey && eventType && team) {
+              const sideEvents = (eventsFormatted as any)[team] || [];
+              let count = 0;
+              for (const ev of sideEvents) {
+                if ((ev.player || '').toLowerCase().trim() === playerKey && ev.type === eventType)
+                  count++;
+              }
+              const currentValue = parseInt(selectEl.value, 10) || 0;
+              if (currentValue !== count) {
+                selectEl.value = String(count);
+                const icon = selectEl.parentElement?.querySelector('img');
+                if (icon) (icon as HTMLImageElement).style.opacity = count > 0 ? '1' : '0.25';
+              }
             }
-            const currentValue = parseInt(selectEl.value, 10) || 0;
-            if (currentValue !== count) {
-              selectEl.value = String(count);
-              const icon = selectEl.parentElement?.querySelector('img');
-              if (icon) (icon as HTMLImageElement).style.opacity = count > 0 ? '1' : '0.25';
-            }
+          } catch (err) {
+            console.warn('[Bridge] Event select update error:', err);
           }
-        } catch(err){ console.warn('[Bridge] Event select update error:', err); }
-      });
+        });
       // Обновляем иконки в таблицах состава
       document.querySelectorAll('.roster-table tbody tr').forEach(row => {
         try {
-          const nameCell = row.querySelector('td:first-child'); if(!nameCell) return;
+          const nameCell = row.querySelector('td:first-child');
+          if (!nameCell) return;
           const playerName = nameCell.textContent?.trim() || '';
           const playerKey = playerName.toLowerCase().trim();
-          const cells = row.querySelectorAll('td'); if(cells.length < 5) return;
-          const yellowCell = cells[1]; const redCell = cells[2]; const assistCell = cells[3]; const goalCell = cells[4];
+          const cells = row.querySelectorAll('td');
+          if (cells.length < 5) return;
+          const yellowCell = cells[1];
+          const redCell = cells[2];
+          const assistCell = cells[3];
+          const goalCell = cells[4];
           const homePane = document.getElementById('roster-home');
           const isHomeTeam = homePane?.contains(row as Node);
           const teamEvents = isHomeTeam ? eventsFormatted.home : eventsFormatted.away;
           const updateEventIcon = (cell: Element, eventType: string) => {
-            let count = 0; for(const ev of teamEvents){ if((ev.player||'').toLowerCase().trim()===playerKey && ev.type===eventType) count++; }
-            if(count>0){
+            let count = 0;
+            for (const ev of teamEvents) {
+              if ((ev.player || '').toLowerCase().trim() === playerKey && ev.type === eventType)
+                count++;
+            }
+            if (count > 0) {
               const existingIcon = cell.querySelector('img');
-              if(!existingIcon){
-                const wrap = document.createElement('div'); wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.justifyContent='center'; wrap.style.gap='4px';
-                const img = document.createElement('img'); img.style.width='18px'; img.style.height='18px'; img.style.objectFit='contain';
-                const srcMap: any = { yellow:'/static/img/icons/yellow.png', red:'/static/img/icons/red.png', assist:'/static/img/icons/assist.png', goal:'/static/img/icons/goal.png' };
-                img.src = srcMap[eventType] || '/static/img/icons/placeholder.png'; wrap.appendChild(img);
-                if((eventType==='goal'||eventType==='assist') && count>1){ const badge=document.createElement('span'); badge.textContent='x'+count; badge.style.fontSize='11px'; badge.style.opacity='0.8'; wrap.appendChild(badge);}                
-                cell.innerHTML=''; cell.appendChild(wrap);
+              if (!existingIcon) {
+                const wrap = document.createElement('div');
+                wrap.style.display = 'flex';
+                wrap.style.alignItems = 'center';
+                wrap.style.justifyContent = 'center';
+                wrap.style.gap = '4px';
+                const img = document.createElement('img');
+                img.style.width = '18px';
+                img.style.height = '18px';
+                img.style.objectFit = 'contain';
+                const srcMap: any = {
+                  yellow: '/static/img/icons/yellow.png',
+                  red: '/static/img/icons/red.png',
+                  assist: '/static/img/icons/assist.png',
+                  goal: '/static/img/icons/goal.png',
+                };
+                img.src = srcMap[eventType] || '/static/img/icons/placeholder.png';
+                wrap.appendChild(img);
+                if ((eventType === 'goal' || eventType === 'assist') && count > 1) {
+                  const badge = document.createElement('span');
+                  badge.textContent = 'x' + count;
+                  badge.style.fontSize = '11px';
+                  badge.style.opacity = '0.8';
+                  wrap.appendChild(badge);
+                }
+                cell.innerHTML = '';
+                cell.appendChild(wrap);
               } else {
                 // если есть badge и изменилось количество – обновим
-                const badge = cell.querySelector('span'); if(badge && (eventType==='goal'||eventType==='assist')){ badge.textContent='x'+count; }
+                const badge = cell.querySelector('span');
+                if (badge && (eventType === 'goal' || eventType === 'assist')) {
+                  badge.textContent = 'x' + count;
+                }
               }
-            } else { cell.innerHTML=''; }
+            } else {
+              cell.innerHTML = '';
+            }
           };
-          updateEventIcon(yellowCell,'yellow');
-          updateEventIcon(redCell,'red');
-          updateEventIcon(assistCell,'assist');
-          updateEventIcon(goalCell,'goal');
-        } catch(err){ console.warn('[Bridge] Event icons row update error:', err); }
+          updateEventIcon(yellowCell, 'yellow');
+          updateEventIcon(redCell, 'red');
+          updateEventIcon(assistCell, 'assist');
+          updateEventIcon(goalCell, 'goal');
+        } catch (err) {
+          console.warn('[Bridge] Event icons row update error:', err);
+        }
       });
-    } catch(err){ console.warn('[Bridge] updateEventIconsOnly fatal:', err); }
+    } catch (err) {
+      console.warn('[Bridge] updateEventIconsOnly fatal:', err);
+    }
   }
 
   // КРИТИЧНО: Подписка на обновления событий реестра для пользователей (store-driven)
-  (function installEventsRegistryListener(){
+  (function installEventsRegistryListener() {
     try {
       if ((window as any).__storeEventsListenerInstalled) return;
       (window as any).__storeEventsListenerInstalled = true;
@@ -784,110 +977,148 @@ declare global {
         try {
           const d = e?.detail || {};
           if (!d || !d.home || !d.away) return;
-          
+
           console.log('[Bridge] eventsRegistryUpdate received:', d);
-          
+
           // Проверяем, открыт ли модал деталей именно этого матча
           const mdPane = document.getElementById('ufo-match-details') as HTMLElement | null;
           if (!mdPane || mdPane.style.display === 'none') {
             console.log('[Bridge] Match details not visible, skipping');
             return;
           }
-          
+
           const cur = (window as any).__currentMatchDetails || null;
           if (!cur || cur.home !== d.home || cur.away !== d.away) {
             console.log('[Bridge] Different match or no current match, skipping');
             return;
           }
-          
+
           // Берём данные из реестра — это самый свежий источник
           const reg = (window as any).__MatchEventsRegistry;
-          const events = reg && typeof reg.getEvents === 'function' ? reg.getEvents(d.home, d.away) : (d.events || { home: [], away: [] });
-          
+          const events =
+            reg && typeof reg.getEvents === 'function'
+              ? reg.getEvents(d.home, d.away)
+              : d.events || { home: [], away: [] };
+
           console.log('[Bridge] Events from registry:', events);
-          
-          // Обновим кэш панели 
+
+          // Обновим кэш панели
           (mdPane as any).__lastEvents = events;
-          
+
           // Найдём базовые элементы
           const els = {
-            homePane: document.querySelector('.roster-table')?.closest('div') || document.querySelector('#ufo-match-details .home-roster') as HTMLElement | null,
-            awayPane: document.querySelectorAll('.roster-table')[1]?.closest('div') || document.querySelector('#ufo-match-details .away-roster') as HTMLElement | null,
+            homePane:
+              document.querySelector('.roster-table')?.closest('div') ||
+              (document.querySelector('#ufo-match-details .home-roster') as HTMLElement | null),
+            awayPane:
+              document.querySelectorAll('.roster-table')[1]?.closest('div') ||
+              (document.querySelector('#ufo-match-details .away-roster') as HTMLElement | null),
           };
-          
+
           if (!els.homePane || !els.awayPane) {
             console.log('[Bridge] Roster panes not found');
             return;
           }
-          
+
           // Для предотвращения частого мерцания - debounce
           clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             try {
               console.log('[Bridge] Triggering store-driven roster update');
-              
+
               // Вызываем MatchRostersEvents.render с обновлёнными событиями
               if (window.MatchRostersEvents && window.MatchRostersEvents.render) {
                 const match = cur;
                 const details = {
                   events: events,
                   rosters: (mdPane as any).__lastRosters || { home: [], away: [] },
-                  score: (mdPane as any).__lastScore || null
+                  score: (mdPane as any).__lastScore || null,
                 };
-                
+
                 // Вызываем рендер с новыми событиями
                 window.MatchRostersEvents.render(match, details, mdPane, els);
                 console.log('[Bridge] Store-driven: UI синхронизирован по eventsRegistryUpdate');
               } else {
                 console.warn('[Bridge] MatchRostersEvents.render not available');
               }
-            } catch(err) {
+            } catch (err) {
               console.warn('[Bridge] Store-driven events sync error:', err);
             }
           }, 50); // Уменьшили debounce для быстрого отклика
-        } catch(err) {
+        } catch (err) {
           console.warn('[Bridge] eventsRegistryUpdate listener error:', err);
         }
       });
       console.log('[Bridge] Store-driven eventsRegistryUpdate listener installed');
-    } catch(e){ console.warn('[Bridge] Failed to install store events listener:', e); }
+    } catch (e) {
+      console.warn('[Bridge] Failed to install store events listener:', e);
+    }
   })();
 
-  function computeSig(entry: MatchEntry|undefined){
-    if(!entry) return 'empty';
-    const score = entry.score? `${entry.score.home}:${entry.score.away}`:'-';
-    const evCount = entry.events? entry.events.length:0;
+  function computeSig(entry: MatchEntry | undefined) {
+    if (!entry) return 'empty';
+    const score = entry.score ? `${entry.score.home}:${entry.score.away}` : '-';
+    const evCount = entry.events ? entry.events.length : 0;
     // Поддержка обоих форматов статистики: {home/away} и верхнеуровневые массивы (shots_total: [h,a], ...)
     const statsObj: any = entry.stats || {};
-    const sigHomeAway = (()=>{ try { const h=statsObj?.home||{}; const a=statsObj?.away||{}; return Object.keys(h).sort().map(k=>k+':'+h[k]).join(',')+'|'+Object.keys(a).sort().map(k=>k+':'+a[k]).join(','); } catch { return ''; } })();
-    const sigTopLevel = (()=>{
+    const sigHomeAway = (() => {
       try {
-        const keys = Object.keys(statsObj).filter(k => k !== 'home' && k !== 'away').sort();
-        if(keys.length===0) return '';
+        const h = statsObj?.home || {};
+        const a = statsObj?.away || {};
+        return (
+          Object.keys(h)
+            .sort()
+            .map(k => k + ':' + h[k])
+            .join(',') +
+          '|' +
+          Object.keys(a)
+            .sort()
+            .map(k => k + ':' + a[k])
+            .join(',')
+        );
+      } catch {
+        return '';
+      }
+    })();
+    const sigTopLevel = (() => {
+      try {
+        const keys = Object.keys(statsObj)
+          .filter(k => k !== 'home' && k !== 'away')
+          .sort();
+        if (keys.length === 0) return '';
         const parts: string[] = [];
-        for(const k of keys){
+        for (const k of keys) {
           const v = (statsObj as any)[k];
           if (Array.isArray(v)) {
-            parts.push(k+':'+v.map(x=>Number(x)||0).join('-'));
+            parts.push(k + ':' + v.map(x => Number(x) || 0).join('-'));
           } else if (typeof v === 'number') {
-            parts.push(k+':'+v);
+            parts.push(k + ':' + v);
           } else if (v && typeof v === 'object') {
             // редкий случай: вложенный объект
-            parts.push(k+':'+Object.values(v).map(x=>Number(x)||0).join('-'));
+            parts.push(
+              k +
+                ':' +
+                Object.values(v)
+                  .map(x => Number(x) || 0)
+                  .join('-')
+            );
           } else {
-            parts.push(k+':'+String(v));
+            parts.push(k + ':' + String(v));
           }
         }
         return parts.join('|');
-      } catch { return ''; }
+      } catch {
+        return '';
+      }
     })();
-    const ts = Number(entry.lastUpdated||0) || 0;
+    const ts = Number(entry.lastUpdated || 0) || 0;
     return `${score}|${evCount}|${sigHomeAway}|${sigTopLevel}|${ts}`;
   }
 
-  function dispatchUpdates(entry: MatchEntry){
+  function dispatchUpdates(entry: MatchEntry) {
     try {
-      const info = entry.info || null; if(!info) return;
+      const info = entry.info || null;
+      if (!info) return;
       const eventsAdapted = adaptEvents(entry.events);
       const detailsPayload: any = { home: info.home, away: info.away, events: eventsAdapted };
       // Событие для обновления вкладок Команда 1/2
@@ -902,33 +1133,41 @@ declare global {
         try {
           const adminId = document.body.getAttribute('data-admin');
           isAdmin = !!(adminId && adminId.trim() !== '');
-        } catch(_) {}
-        if(isStatsVisible && !isAdmin && window.MatchStats?.__storeDriven && !!window.__WEBSOCKETS_ENABLED__){
+        } catch (_) {}
+        if (
+          isStatsVisible &&
+          !isAdmin &&
+          window.MatchStats?.__storeDriven &&
+          !!window.__WEBSOCKETS_ENABLED__
+        ) {
           renderStatsFromStore(statsPane as HTMLElement, { home: info.home, away: info.away });
         }
-      } catch(_){}
-    } catch(_) {}
+      } catch (_) {}
+    } catch (_) {}
   }
 
-  function schedule(entry: MatchEntry){
+  function schedule(entry: MatchEntry) {
     const sig = computeSig(entry);
-    if(sig === lastSig) return; // нет изменений в существенных частях
+    if (sig === lastSig) return; // нет изменений в существенных частях
     lastSig = sig;
-    if(debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(()=>dispatchUpdates(entry), 120); // мягкий debounce
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => dispatchUpdates(entry), 120); // мягкий debounce
   }
 
-  function onState(state: MatchesState){
-    const pane = detailsPane(); if(!visible(pane as any)) return;
-    const key = findMatchKey(state); if(!key) return;
-    const entry = state.map[key]; if(!entry) return;
+  function onState(state: MatchesState) {
+    const pane = detailsPane();
+    if (!visible(pane as any)) return;
+    const key = findMatchKey(state);
+    if (!key) return;
+    const entry = state.map[key];
+    if (!entry) return;
     schedule(entry);
   }
 
   try {
-    if(window.MatchesStore){
+    if (window.MatchesStore) {
       onState(window.MatchesStore.get());
       window.MatchesStore.subscribe(onState);
     }
-  } catch(_){}
+  } catch (_) {}
 })();

@@ -50,12 +50,12 @@ declare global {
 
   // Ждём готовности ProfileStore
   const waitForStore = () => {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>(resolve => {
       if (window.ProfileStore) {
         resolve();
         return;
       }
-      
+
       const check = () => {
         if (window.ProfileStore) {
           resolve();
@@ -70,7 +70,7 @@ declare global {
   // Новая логика инициализации через стор
   const initWithStore = async () => {
     await waitForStore();
-    
+
     if (!window.ProfileStore) {
       return;
     }
@@ -78,10 +78,10 @@ declare global {
     const store = window.ProfileStore as ExtendedProfileStore;
     const tg = window.Telegram?.WebApp || null;
 
-    try { 
-      tg?.expand?.(); 
-      tg?.ready?.(); 
-    } catch(_) {}
+    try {
+      tg?.expand?.();
+      tg?.ready?.();
+    } catch (_) {}
 
     let userLoaded = false;
     let achievementsLoaded = false;
@@ -135,10 +135,7 @@ declare global {
     };
 
     // Параллельная загрузка
-    await Promise.allSettled([
-      loadUser(),
-      loadAchievements(),
-    ]);
+    await Promise.allSettled([loadUser(), loadAchievements()]);
 
     console.log('[ProfileStore] Core adapter initialized');
   };
@@ -148,17 +145,17 @@ declare global {
     // Если есть оригинальный ProfileCore, заменяем его логику
     if (window.ProfileCore) {
       const legacy = window.ProfileCore;
-      
+
       // Переопределяем init
       legacy.init = initWithStore;
-      
+
       console.log('[ProfileStore] Core adapter integrated with legacy');
     } else {
       // Создаём новый ProfileCore
       window.ProfileCore = {
-        init: initWithStore
+        init: initWithStore,
       };
-      
+
       console.log('[ProfileStore] New Core adapter created');
     }
   };

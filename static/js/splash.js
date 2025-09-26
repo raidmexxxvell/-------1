@@ -1,353 +1,492 @@
 // static/js/splash.js
 document.addEventListener('DOMContentLoaded', () => {
-    // Гарантируем пульсацию логотипа даже при сниженных системных анимациях
-    try { document.body.classList.add('force-anim'); } catch (_) {}
-    // --- Логгер -------------------------------------------------------------
-    const LOG_PREFIX = '[SPLASH]';
-    const debugEnabled = (typeof URL !== 'undefined' && (() => {
-        try {
-            const params = new URL(window.location.href).searchParams;
-            return params.get('debug') === 'splash' || localStorage.getItem('splashDebug') === '1';
-        } catch (_) { return false; }
-    })());
-
-    const pushLog = (level, msg, data) => {
-        const t = new Date().toISOString();
-        const entry = { t, level, msg, data: data ?? undefined };
-        try {
-            window.__SPLASH_LOGS = window.__SPLASH_LOGS || [];
-            window.__SPLASH_LOGS.push(entry);
-        } catch (_) { /* no-op */ }
-    if (!debugEnabled) { return; }
-        const line = `${LOG_PREFIX} ${t} ${level.toUpperCase()}: ${msg}`;
-        const c = function(){}; // console disabled in production
-        data !== undefined ? c(line, data) : c(line);
-    };
-    const log = (msg, data) => pushLog('log', msg, data);
-    const info = (msg, data) => pushLog('info', msg, data);
-    const warn = (msg, data) => pushLog('warn', msg, data);
-    const error = (msg, data) => pushLog('error', msg, data);
-
-    info('DOMContentLoaded');
-
-    // Подписка на ошибки страницы для лучшей диагностики
-    window.addEventListener('error', (e) => {
-        error('window.error', {
-            message: e.message,
-            filename: e.filename,
-            lineno: e.lineno,
-            colno: e.colno
-        });
-    });
-    window.addEventListener('unhandledrejection', (e) => {
-        error('unhandledrejection', { reason: e.reason && (e.reason.stack || e.reason.message || String(e.reason)) });
-    });
-    document.addEventListener('visibilitychange', () => {
-        info('visibilitychange', { hidden: document.hidden });
-    });
-
-    const splash = document.getElementById('splash');
-    const loadingProgress = document.getElementById('loading-progress');
-    const loadingProgressText = document.getElementById('loading-progress-text');
-    const appContent = document.getElementById('app-content');
-    info('Elements lookup', {
-        splash: !!splash,
-        loadingProgress: !!loadingProgress,
-        appContent: !!appContent
-    });
-
-    // Предварительная загрузка ключевых логотипов для устранения мерцания
-    (function preloadCoreImages(){
-        try {
-            const core = [
-                '/static/img/logo.png',
-                '/static/img/logo_liga.png',
-                '/static/img/placeholderlogo.png'
-            ];
-            // Дополнительно прогреваем только существующие варианты логотипов (по соглашению файлов)
-            core.concat([
-                '/static/img/team-logos/фкобнинск.png',
-                '/static/img/team-logos/фкsetka4real.png'
-            ]).forEach(u=>{ const im=new Image(); im.decoding='async'; im.src=u; });
-            // Через небольшой интервал попробуем захватить уже вставленные логотипы команд
-            setTimeout(()=>{
-                try { document.querySelectorAll('.match-card.home-feature img, .league-logo').forEach(el=>{ const im=new Image(); im.src=el.src; }); } catch(_) {}
-            }, 800);
-        } catch(_) {}
+  // Гарантируем пульсацию логотипа даже при сниженных системных анимациях
+  try {
+    document.body.classList.add('force-anim');
+  } catch (_) {}
+  // --- Логгер -------------------------------------------------------------
+  const LOG_PREFIX = '[SPLASH]';
+  const debugEnabled =
+    typeof URL !== 'undefined' &&
+    (() => {
+      try {
+        const params = new URL(window.location.href).searchParams;
+        return params.get('debug') === 'splash' || localStorage.getItem('splashDebug') === '1';
+      } catch (_) {
+        return false;
+      }
     })();
 
-    // Если шаблона нет — выходим
-    if (!splash) {
-        warn('No #splash element found. Skip splash flow.');
-        return;
+  const pushLog = (level, msg, data) => {
+    const t = new Date().toISOString();
+    const entry = { t, level, msg, data: data ?? undefined };
+    try {
+      window.__SPLASH_LOGS = window.__SPLASH_LOGS || [];
+      window.__SPLASH_LOGS.push(entry);
+    } catch (_) {
+      /* no-op */
+    }
+    if (!debugEnabled) {
+      return;
+    }
+    const line = `${LOG_PREFIX} ${t} ${level.toUpperCase()}: ${msg}`;
+    const c = function () {}; // console disabled in production
+    data !== undefined ? c(line, data) : c(line);
+  };
+  const log = (msg, data) => pushLog('log', msg, data);
+  const info = (msg, data) => pushLog('info', msg, data);
+  const warn = (msg, data) => pushLog('warn', msg, data);
+  const error = (msg, data) => pushLog('error', msg, data);
+
+  info('DOMContentLoaded');
+
+  // Подписка на ошибки страницы для лучшей диагностики
+  window.addEventListener('error', e => {
+    error('window.error', {
+      message: e.message,
+      filename: e.filename,
+      lineno: e.lineno,
+      colno: e.colno,
+    });
+  });
+  window.addEventListener('unhandledrejection', e => {
+    error('unhandledrejection', {
+      reason: e.reason && (e.reason.stack || e.reason.message || String(e.reason)),
+    });
+  });
+  document.addEventListener('visibilitychange', () => {
+    info('visibilitychange', { hidden: document.hidden });
+  });
+
+  const splash = document.getElementById('splash');
+  const loadingProgress = document.getElementById('loading-progress');
+  const loadingProgressText = document.getElementById('loading-progress-text');
+  const appContent = document.getElementById('app-content');
+  info('Elements lookup', {
+    splash: !!splash,
+    loadingProgress: !!loadingProgress,
+    appContent: !!appContent,
+  });
+
+  // Предварительная загрузка ключевых логотипов для устранения мерцания
+  (function preloadCoreImages() {
+    try {
+      const core = [
+        '/static/img/logo.png',
+        '/static/img/logo_liga.png',
+        '/static/img/placeholderlogo.png',
+      ];
+      // Дополнительно прогреваем только существующие варианты логотипов (по соглашению файлов)
+      core
+        .concat(['/static/img/team-logos/фкобнинск.png', '/static/img/team-logos/фкsetka4real.png'])
+        .forEach(u => {
+          const im = new Image();
+          im.decoding = 'async';
+          im.src = u;
+        });
+      // Через небольшой интервал попробуем захватить уже вставленные логотипы команд
+      setTimeout(() => {
+        try {
+          document.querySelectorAll('.match-card.home-feature img, .league-logo').forEach(el => {
+            const im = new Image();
+            im.src = el.src;
+          });
+        } catch (_) {}
+      }, 800);
+    } catch (_) {}
+  })();
+
+  // Если шаблона нет — выходим
+  if (!splash) {
+    warn('No #splash element found. Skip splash flow.');
+    return;
+  }
+
+  // Защитный фон — явно показываем заставку (если CSS/inline меняли)
+  try {
+    const before = window.getComputedStyle ? window.getComputedStyle(splash) : null;
+    log('Before show', before ? { display: before.display, opacity: before.opacity } : undefined);
+  } catch (_) {}
+  splash.style.opacity = '1';
+  splash.style.display = 'flex';
+  if (appContent) {
+    appContent.style.display = 'none';
+  }
+  // Запуск предзагрузки содержимого главной вкладки (рекламные щиты и "Игра недели")
+  // делаем это прямо во время отображения заставки, чтобы главный экран
+  // уже загружал данные и изображения пока виден сплеш.
+  (function startMainPreload() {
+    const tryStart = () => {
+      try {
+        // init carousel if available
+        if (window.AdsFeatured && typeof window.AdsFeatured.initHomeAdsCarousel === 'function') {
+          try {
+            window.AdsFeatured.initHomeAdsCarousel();
+          } catch (_) {}
+        }
+        // render top match (alias might be on window or on AdsFeatured)
+        if (typeof window.renderTopMatchOfWeek === 'function') {
+          try {
+            window.renderTopMatchOfWeek();
+          } catch (_) {}
+        } else if (
+          window.AdsFeatured &&
+          typeof window.AdsFeatured.renderTopMatchOfWeek === 'function'
+        ) {
+          try {
+            window.AdsFeatured.renderTopMatchOfWeek();
+          } catch (_) {}
+        }
+        info('Triggered main tab preload (ads / match-of-week)');
+        return true;
+      } catch (e) {
+        warn('main preload attempt failed', e && (e.stack || e.message || String(e)));
+        return false;
+      }
+    };
+
+    // попытка сразу и с несколькими повторениями, пока модули не инициализируются
+    tryStart();
+    let tries = 0;
+    const pid = setInterval(() => {
+      tries += 1;
+      const ok = tryStart();
+      if (ok || tries >= 6) {
+        clearInterval(pid);
+      }
+    }, 300);
+  })();
+
+  // Предзагрузка новостей ещё на этапе заставки (без модификации DOM)
+  (function preloadNews() {
+    try {
+      fetch('/api/news?limit=5&_=' + Date.now(), { cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (data) {
+            window.__NEWS_PRELOADED_DATA__ = data;
+            try {
+              window.dispatchEvent(new CustomEvent('preload:news-ready'));
+            } catch (_) {}
+          }
+        });
+    } catch (_) {}
+  })();
+  // мгновенно сдвинем прогресс с 0 чтобы избежать визуального залипания
+  try {
+    if (loadingProgress) {
+      loadingProgress.style.width = '1%';
+    }
+  } catch (_) {}
+  try {
+    const after = window.getComputedStyle ? window.getComputedStyle(splash) : null;
+    log('After show', after ? { display: after.display, opacity: after.opacity } : undefined);
+  } catch (_) {}
+
+  // Настройки ожидания готовности (этапы)
+  let progress = 0;
+  const intervalTime = 50;
+  const baseMinMs = 800; // минимальное время показа, мс
+  const maxWaitMs = 10000; // максимум ожидания, мс
+  const stepWait = 1.2; // базовый шаг
+  const stepFinish = 4.5; // финальный шаг до 100%
+  // Целевые пороги этапов
+  const stageTargets = {
+    base: 50,
+    profile: 70,
+    data: 90,
+  };
+  // Флаги этапов
+  let stageProfileReady = false; // имя+аватар загружены
+  let stageDataReady = false; // достижения и таблицы загружены
+  let ready = false; // финальная готовность
+  const t0 = performance && performance.now ? performance.now() : Date.now();
+  let finished = false;
+  info('Timer config', { intervalTime, baseMinMs, maxWaitMs, stepWait, stepFinish });
+
+  const maybeHide = () => {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    info('Start fade out');
+    splash.style.opacity = '0';
+    setTimeout(() => {
+      const beforeHide = window.getComputedStyle ? window.getComputedStyle(splash) : null;
+      log(
+        'Before hide',
+        beforeHide ? { display: beforeHide.display, opacity: beforeHide.opacity } : undefined
+      );
+
+      splash.style.display = 'none';
+      if (appContent) {
+        appContent.style.display = 'block';
+      }
+      document.body.classList.add('loaded');
+
+      const afterHide = window.getComputedStyle ? window.getComputedStyle(splash) : null;
+      log(
+        'After hide',
+        afterHide ? { display: afterHide.display, opacity: afterHide.opacity } : undefined
+      );
+      info('Splash hidden, app-content shown');
+    }, 450);
+  };
+
+  // Логирование прогресса с троттлингом
+  let lastLogPct = -10;
+  let lastLogTime = 0;
+
+  const interval = setInterval(() => {
+    const now = performance && performance.now ? performance.now() : Date.now();
+    const elapsed = now - t0;
+
+    // Объявляем готовность по таймауту
+    if (!ready && elapsed >= maxWaitMs) {
+      warn('Max wait exceeded -> forcing ready');
+      ready = true;
     }
 
-    // Защитный фон — явно показываем заставку (если CSS/inline меняли)
-    try {
-        const before = window.getComputedStyle ? window.getComputedStyle(splash) : null;
-        log('Before show', before ? { display: before.display, opacity: before.opacity } : undefined);
-    } catch (_) {}
-    splash.style.opacity = '1';
-    splash.style.display = 'flex';
-    if (appContent) { appContent.style.display = 'none'; }
-    // Запуск предзагрузки содержимого главной вкладки (рекламные щиты и "Игра недели")
-    // делаем это прямо во время отображения заставки, чтобы главный экран
-    // уже загружал данные и изображения пока виден сплеш.
-    (function startMainPreload(){
-        const tryStart = () => {
-            try {
-                // init carousel if available
-                if (window.AdsFeatured && typeof window.AdsFeatured.initHomeAdsCarousel === 'function') {
-                    try { window.AdsFeatured.initHomeAdsCarousel(); } catch(_) {}
-                }
-                // render top match (alias might be on window or on AdsFeatured)
-                if (typeof window.renderTopMatchOfWeek === 'function') {
-                    try { window.renderTopMatchOfWeek(); } catch(_) {}
-                } else if (window.AdsFeatured && typeof window.AdsFeatured.renderTopMatchOfWeek === 'function') {
-                    try { window.AdsFeatured.renderTopMatchOfWeek(); } catch(_) {}
-                }
-                info('Triggered main tab preload (ads / match-of-week)');
-                return true;
-            } catch (e) {
-                warn('main preload attempt failed', e && (e.stack || e.message || String(e)));
-                return false;
-            }
-        };
+    // Обеспечиваем минимальную длительность показа
+    const minElapsedReached = elapsed >= baseMinMs;
 
-        // попытка сразу и с несколькими повторениями, пока модули не инициализируются
-        tryStart();
-        let tries = 0;
-        const pid = setInterval(() => {
-            tries += 1;
-            const ok = tryStart();
-            if (ok || tries >= 6) { clearInterval(pid); }
-        }, 300);
-    })();
-
-    // Предзагрузка новостей ещё на этапе заставки (без модификации DOM)
-    (function preloadNews(){
-        try {
-            fetch('/api/news?limit=5&_=' + Date.now(), { cache:'no-store' })
-              .then(r=> r.ok ? r.json() : null)
-              .then(data=>{ if(data){ window.__NEWS_PRELOADED_DATA__ = data; try { window.dispatchEvent(new CustomEvent('preload:news-ready')); } catch(_) {} } });
-        } catch(_) {}
-    })();
-    // мгновенно сдвинем прогресс с 0 чтобы избежать визуального залипания
-    try {
-    if (loadingProgress) { loadingProgress.style.width = '1%'; }
-    } catch (_) {}
-    try {
-        const after = window.getComputedStyle ? window.getComputedStyle(splash) : null;
-        log('After show', after ? { display: after.display, opacity: after.opacity } : undefined);
-    } catch (_) {}
-
-    // Настройки ожидания готовности (этапы)
-    let progress = 0;
-    const intervalTime = 50;
-    const baseMinMs = 800;           // минимальное время показа, мс
-    const maxWaitMs = 10000;         // максимум ожидания, мс
-    const stepWait = 1.2;            // базовый шаг
-    const stepFinish = 4.5;          // финальный шаг до 100%
-    // Целевые пороги этапов
-    const stageTargets = {
-        base: 50,
-        profile: 70,
-        data: 90
-    };
-    // Флаги этапов
-    let stageProfileReady = false;   // имя+аватар загружены
-    let stageDataReady = false;      // достижения и таблицы загружены
-    let ready = false;               // финальная готовность
-    const t0 = (performance && performance.now) ? performance.now() : Date.now();
-    let finished = false;
-    info('Timer config', { intervalTime, baseMinMs, maxWaitMs, stepWait, stepFinish });
-
-    const maybeHide = () => {
-        if (finished) { return; }
-        finished = true;
-        info('Start fade out');
-        splash.style.opacity = '0';
-        setTimeout(() => {
-            const beforeHide = window.getComputedStyle ? window.getComputedStyle(splash) : null;
-            log('Before hide', beforeHide ? { display: beforeHide.display, opacity: beforeHide.opacity } : undefined);
-
-            splash.style.display = 'none';
-            if (appContent) {
-                appContent.style.display = 'block';
-            }
-            document.body.classList.add('loaded');
-
-            const afterHide = window.getComputedStyle ? window.getComputedStyle(splash) : null;
-            log('After hide', afterHide ? { display: afterHide.display, opacity: afterHide.opacity } : undefined);
-            info('Splash hidden, app-content shown');
-        }, 450);
-    };
-
-    // Логирование прогресса с троттлингом
-    let lastLogPct = -10;
-    let lastLogTime = 0;
-
-    const interval = setInterval(() => {
-        const now = (performance && performance.now) ? performance.now() : Date.now();
-        const elapsed = now - t0;
-
-        // Объявляем готовность по таймауту
-        if (!ready && elapsed >= maxWaitMs) {
-            warn('Max wait exceeded -> forcing ready');
-            ready = true;
-        }
-
-        // Обеспечиваем минимальную длительность показа
-        const minElapsedReached = elapsed >= baseMinMs;
-
-        // Этапное наращивание прогресса
+    // Этапное наращивание прогресса
     let currentTarget = stageTargets.base;
-    if (stageProfileReady) { currentTarget = stageTargets.profile; }
-    if (stageDataReady) { currentTarget = stageTargets.data; }
-        if (!ready) {
-            // стремимся к текущему целевому порогу
-            if (progress < currentTarget) {
-                progress = Math.min(progress + stepWait, currentTarget);
-            } else {
-                // ждём наступления следующего этапа
-                progress = Math.min(progress + 0.2, currentTarget); // микро-тремор
-            }
-        } else {
-            // финальный добег до 100%
-            progress = Math.min(progress + stepFinish, 100);
-        }
+    if (stageProfileReady) {
+      currentTarget = stageTargets.profile;
+    }
+    if (stageDataReady) {
+      currentTarget = stageTargets.data;
+    }
+    if (!ready) {
+      // стремимся к текущему целевому порогу
+      if (progress < currentTarget) {
+        progress = Math.min(progress + stepWait, currentTarget);
+      } else {
+        // ждём наступления следующего этапа
+        progress = Math.min(progress + 0.2, currentTarget); // микро-тремор
+      }
+    } else {
+      // финальный добег до 100%
+      progress = Math.min(progress + stepFinish, 100);
+    }
 
-    if (!isFinite(progress)) { progress = 100; }
-        progress = Math.min(Math.max(progress, 0), 100);
-    if (loadingProgress) { loadingProgress.style.width = `${progress}%`; }
-    if (loadingProgressText) { loadingProgressText.textContent = `${Math.round(progress)}%`; }
+    if (!isFinite(progress)) {
+      progress = 100;
+    }
+    progress = Math.min(Math.max(progress, 0), 100);
+    if (loadingProgress) {
+      loadingProgress.style.width = `${progress}%`;
+    }
+    if (loadingProgressText) {
+      loadingProgressText.textContent = `${Math.round(progress)}%`;
+    }
 
-        if (progress - lastLogPct >= 10 || now - lastLogTime >= 500) {
-            log('Progress', { progress: Math.round(progress), elapsed: Math.round(elapsed), ready, minElapsedReached });
-            lastLogPct = progress;
-            lastLogTime = now;
-        }
+    if (progress - lastLogPct >= 10 || now - lastLogTime >= 500) {
+      log('Progress', {
+        progress: Math.round(progress),
+        elapsed: Math.round(elapsed),
+        ready,
+        minElapsedReached,
+      });
+      lastLogPct = progress;
+      lastLogTime = now;
+    }
 
-        if (progress >= 100 && minElapsedReached) {
-            info('Progress complete -> clearing interval');
-            clearInterval(interval);
-            // небольшая задержка чтобы анимация дошла до конца полосы
-            setTimeout(() => maybeHide(), 200);
-        }
-    }, intervalTime);
+    if (progress >= 100 && minElapsedReached) {
+      info('Progress complete -> clearing interval');
+      clearInterval(interval);
+      // небольшая задержка чтобы анимация дошла до конца полосы
+      setTimeout(() => maybeHide(), 200);
+    }
+  }, intervalTime);
 
-    // страховочный kickstart: если через 400мс прогресс всё ещё 0 — принудительно поставить 5%
-    setTimeout(() => {
-        try {
-            const cur = parseFloat((loadingProgress?.style?.width || '0').replace('%','')) || 0;
-            if (cur <= 0.1 && loadingProgress) { loadingProgress.style.width = '5%'; }
-        } catch (_) {}
-    }, 400);
-
-    // Этапы готовности приходят событиями
-    // Учитываем готовность новостей и рекламных блоков/матча недели
-    let newsReady = false;
-    let adsReady = false;
-    let topMatchReady = false;
-    // Новая логика: ждём именно main:*-ready (после полной отрисовки)
-    const tryMarkDataReady = () => {
-        if (!stageDataReady && newsReady && adsReady && topMatchReady) {
-            stageDataReady = true;
-            info('Data stage ready via main:* events');
-            try { window.dispatchEvent(new CustomEvent('app:data-ready')); } catch(_) {}
-        }
-        if (!ready && newsReady && adsReady && topMatchReady) {
-            ready = true;
-            info('All main content rendered -> finish');
-            try { window.dispatchEvent(new CustomEvent('app:all-ready')); } catch(_) {}
-        }
-    };
-    document.addEventListener('main:news-ready', () => { newsReady = true; tryMarkDataReady(); }, { once:true });
-    document.addEventListener('main:ads-ready', () => { adsReady = true; tryMarkDataReady(); }, { once:true });
-    document.addEventListener('main:topmatch-ready', () => { topMatchReady = true; tryMarkDataReady(); }, { once:true });
-    // 1) Профиль (имя + аватар)
-    window.addEventListener('app:profile-ready', () => {
-        info('Received app:profile-ready');
-        stageProfileReady = true;
-    }, { once: true });
-    // 2) Данные (достижения + таблицы)
-    window.addEventListener('app:data-ready', () => {
-        info('Received app:data-ready');
-        stageDataReady = true;
-    }, { once: true });
-    // 3) Финальная готовность (когда всё остальное сделано)
-    window.addEventListener('app:all-ready', () => {
-        info('Received app:all-ready');
-        ready = true;
-    }, { once: true });
-
-    // Публичные помощники для поэтапной привязки загрузки к шкале
-    // Использование: window.splashStages.profile(); window.splashStages.data(); window.splashStages.finish();
-    window.splashStages = {
-        profile(){ if(!stageProfileReady){ stageProfileReady = true; info('Manual stage: profile'); } },
-        data(){ if(!stageDataReady){ stageDataReady = true; info('Manual stage: data'); } },
-        finish(){ if(!ready){ ready = true; info('Manual stage: finish'); } }
-    };
-    // Ручное инкрементирование (не поднимает выше дедуп цели текущего этапа)
-    window.setSplashProgress = function(extra){
-        try {
-            const val = Number(extra) || 0;
-            progress = Math.min(99, Math.max(progress, val));
-        } catch(_) {}
-    };
-
-    // Проверка версии при входе (без фонового опроса)
-    (function versionCheckOnLoad(){
-        try {
-            const VER_KEY = 'appVersion:lastSeen';
-            fetch('/api/version', { cache: 'no-store' })
-                .then(r => r.json())
-                .then(data => {
-                    const ver = Number(data?.ver || 0) || 0;
-                    const lastSeen = Number(localStorage.getItem(VER_KEY) || '0') || 0;
-                    info('Version fetched', { ver, lastSeen });
-                    if (ver > lastSeen) {
-                        const ask = 'Доступно обновление, перезагрузить?';
-                        let agree = false;
-                        try { agree = window.confirm(ask); } catch(_) { agree = false; }
-                        if (agree) {
-                            try {
-                                // Сохраним новую версию заранее, чтобы после перезагрузки не спрашивать снова
-                                try { localStorage.setItem(VER_KEY, String(ver)); } catch (_) {}
-                                const base = window.location.href.split('#')[0];
-                                const sep = base.includes('?') ? '&' : '?';
-                                window.location.replace(base + sep + 'v=' + ver + '&t=' + Date.now());
-                                return;
-                            } catch(_) { try { window.location.reload(true); } catch(_) { window.location.reload(); } }
-                        }
-                    }
-                    try { localStorage.setItem(VER_KEY, String(ver)); } catch(_) {}
-                })
-                .catch(() => {});
-        } catch (_) { /* no-op */ }
-    })();
-
-    // Отключено: фоновое периодическое оповещение об обновлении версии. По требованию клиента
-
-    // Если все прошло штатно — чистим аварийный таймер при скрытии
-    // Сохраняем аварийный таймер как ранее, но теперь он только форсит готовность
-    const failSafeTimeout = setTimeout(() => {
-        if (!ready) {
-            warn('Fail-safe timeout -> set ready');
-            ready = true;
-        } else {
-            log('Fail-safe timeout fired but already ready');
-        }
-    }, maxWaitMs);
-    // Чистим аварийный таймер при скрытии
+  // страховочный kickstart: если через 400мс прогресс всё ещё 0 — принудительно поставить 5%
+  setTimeout(() => {
     try {
-        const mo = new MutationObserver(() => {
-            if (splash.style.display === 'none') {
-                try { clearTimeout(failSafeTimeout); } catch (_) {}
-                mo.disconnect();
-                info('MutationObserver: splash hidden -> fail-safe cleared');
+      const cur = parseFloat((loadingProgress?.style?.width || '0').replace('%', '')) || 0;
+      if (cur <= 0.1 && loadingProgress) {
+        loadingProgress.style.width = '5%';
+      }
+    } catch (_) {}
+  }, 400);
+
+  // Этапы готовности приходят событиями
+  // Учитываем готовность новостей и рекламных блоков/матча недели
+  let newsReady = false;
+  let adsReady = false;
+  let topMatchReady = false;
+  // Новая логика: ждём именно main:*-ready (после полной отрисовки)
+  const tryMarkDataReady = () => {
+    if (!stageDataReady && newsReady && adsReady && topMatchReady) {
+      stageDataReady = true;
+      info('Data stage ready via main:* events');
+      try {
+        window.dispatchEvent(new CustomEvent('app:data-ready'));
+      } catch (_) {}
+    }
+    if (!ready && newsReady && adsReady && topMatchReady) {
+      ready = true;
+      info('All main content rendered -> finish');
+      try {
+        window.dispatchEvent(new CustomEvent('app:all-ready'));
+      } catch (_) {}
+    }
+  };
+  document.addEventListener(
+    'main:news-ready',
+    () => {
+      newsReady = true;
+      tryMarkDataReady();
+    },
+    { once: true }
+  );
+  document.addEventListener(
+    'main:ads-ready',
+    () => {
+      adsReady = true;
+      tryMarkDataReady();
+    },
+    { once: true }
+  );
+  document.addEventListener(
+    'main:topmatch-ready',
+    () => {
+      topMatchReady = true;
+      tryMarkDataReady();
+    },
+    { once: true }
+  );
+  // 1) Профиль (имя + аватар)
+  window.addEventListener(
+    'app:profile-ready',
+    () => {
+      info('Received app:profile-ready');
+      stageProfileReady = true;
+    },
+    { once: true }
+  );
+  // 2) Данные (достижения + таблицы)
+  window.addEventListener(
+    'app:data-ready',
+    () => {
+      info('Received app:data-ready');
+      stageDataReady = true;
+    },
+    { once: true }
+  );
+  // 3) Финальная готовность (когда всё остальное сделано)
+  window.addEventListener(
+    'app:all-ready',
+    () => {
+      info('Received app:all-ready');
+      ready = true;
+    },
+    { once: true }
+  );
+
+  // Публичные помощники для поэтапной привязки загрузки к шкале
+  // Использование: window.splashStages.profile(); window.splashStages.data(); window.splashStages.finish();
+  window.splashStages = {
+    profile() {
+      if (!stageProfileReady) {
+        stageProfileReady = true;
+        info('Manual stage: profile');
+      }
+    },
+    data() {
+      if (!stageDataReady) {
+        stageDataReady = true;
+        info('Manual stage: data');
+      }
+    },
+    finish() {
+      if (!ready) {
+        ready = true;
+        info('Manual stage: finish');
+      }
+    },
+  };
+  // Ручное инкрементирование (не поднимает выше дедуп цели текущего этапа)
+  window.setSplashProgress = function (extra) {
+    try {
+      const val = Number(extra) || 0;
+      progress = Math.min(99, Math.max(progress, val));
+    } catch (_) {}
+  };
+
+  // Проверка версии при входе (без фонового опроса)
+  (function versionCheckOnLoad() {
+    try {
+      const VER_KEY = 'appVersion:lastSeen';
+      fetch('/api/version', { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+          const ver = Number(data?.ver || 0) || 0;
+          const lastSeen = Number(localStorage.getItem(VER_KEY) || '0') || 0;
+          info('Version fetched', { ver, lastSeen });
+          if (ver > lastSeen) {
+            const ask = 'Доступно обновление, перезагрузить?';
+            let agree = false;
+            try {
+              agree = window.confirm(ask);
+            } catch (_) {
+              agree = false;
             }
-        });
-        mo.observe(splash, { attributes: true, attributeFilter: ['style'] });
-    } catch (_) { /* no-op */ }
+            if (agree) {
+              try {
+                // Сохраним новую версию заранее, чтобы после перезагрузки не спрашивать снова
+                try {
+                  localStorage.setItem(VER_KEY, String(ver));
+                } catch (_) {}
+                const base = window.location.href.split('#')[0];
+                const sep = base.includes('?') ? '&' : '?';
+                window.location.replace(base + sep + 'v=' + ver + '&t=' + Date.now());
+                return;
+              } catch (_) {
+                try {
+                  window.location.reload(true);
+                } catch (_) {
+                  window.location.reload();
+                }
+              }
+            }
+          }
+          try {
+            localStorage.setItem(VER_KEY, String(ver));
+          } catch (_) {}
+        })
+        .catch(() => {});
+    } catch (_) {
+      /* no-op */
+    }
+  })();
+
+  // Отключено: фоновое периодическое оповещение об обновлении версии. По требованию клиента
+
+  // Если все прошло штатно — чистим аварийный таймер при скрытии
+  // Сохраняем аварийный таймер как ранее, но теперь он только форсит готовность
+  const failSafeTimeout = setTimeout(() => {
+    if (!ready) {
+      warn('Fail-safe timeout -> set ready');
+      ready = true;
+    } else {
+      log('Fail-safe timeout fired but already ready');
+    }
+  }, maxWaitMs);
+  // Чистим аварийный таймер при скрытии
+  try {
+    const mo = new MutationObserver(() => {
+      if (splash.style.display === 'none') {
+        try {
+          clearTimeout(failSafeTimeout);
+        } catch (_) {}
+        mo.disconnect();
+        info('MutationObserver: splash hidden -> fail-safe cleared');
+      }
+    });
+    mo.observe(splash, { attributes: true, attributeFilter: ['style'] });
+  } catch (_) {
+    /* no-op */
+  }
 });

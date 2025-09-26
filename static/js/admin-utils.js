@@ -1,7 +1,9 @@
 // static/js/admin-utils.js
 // Унифицированные утилиты для админских функций и Telegram WebApp интеграции
-(function(){
-  if (window.AdminUtils) { return; } // idempotent
+(function () {
+  if (window.AdminUtils) {
+    return;
+  } // idempotent
 
   // Получение Telegram WebApp объекта
   function getTelegramWebApp() {
@@ -32,8 +34,8 @@
       const adminId = document.body.getAttribute('data-admin');
       const currentId = getTelegramUserId();
       return !!(adminId && currentId && String(adminId) === currentId);
-    } catch(_) { 
-      return false; 
+    } catch (_) {
+      return false;
     }
   }
 
@@ -44,14 +46,14 @@
     if (initData) {
       fd.append('initData', initData);
     }
-    
+
     // Добавляем дополнительные поля
     Object.entries(additionalFields).forEach(([key, value]) => {
       if (value !== null && value !== undefined) {
         fd.append(key, String(value));
       }
     });
-    
+
     return fd;
   }
 
@@ -60,22 +62,22 @@
     const {
       className = 'details-btn',
       style = { padding: '0 6px', minWidth: 'unset' },
-      onClick = null
+      onClick = null,
     } = options;
-    
+
     const button = document.createElement('button');
     button.className = className;
     button.textContent = text;
-    
+
     // Применяем стили
     Object.entries(style).forEach(([prop, value]) => {
       button.style[prop] = value;
     });
-    
+
     if (onClick && typeof onClick === 'function') {
       button.addEventListener('click', onClick);
     }
-    
+
     return button;
   }
 
@@ -84,14 +86,14 @@
     if (!button || typeof action !== 'function') {
       throw new Error('Button element and action function required');
     }
-    
+
     const originalText = button.textContent;
     const originalDisabled = button.disabled;
-    
+
     try {
       button.disabled = true;
       button.textContent = 'Загрузка...';
-      
+
       const result = await action();
       return result;
     } catch (error) {
@@ -116,7 +118,7 @@
   // Проверка и показ админского интерфейса
   function showAdminOnlyElement(element) {
     if (!element) return false;
-    
+
     if (isCurrentUserAdmin()) {
       element.style.display = element.style.display || 'block';
       return true;
@@ -137,7 +139,7 @@
     createAdminButton,
     executeWithLoading,
     showAdminAlert,
-    showAdminOnlyElement
+    showAdminOnlyElement,
   };
 
   // Удобные глобальные шорткаты для обратной совместимости
@@ -148,5 +150,5 @@
     if (!window.createAdminFormData) {
       window.createAdminFormData = createAdminFormData;
     }
-  } catch(_) {}
+  } catch (_) {}
 })();

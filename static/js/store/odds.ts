@@ -1,9 +1,17 @@
 import type { StoreApi } from './core';
 
 declare global {
-  interface OddsEntry { value: number; version: number; lastUpdated: number }
-  interface OddsState { map: Record<string, OddsEntry> }
-  interface Window { OddsStore?: StoreApi<OddsState> }
+  interface OddsEntry {
+    value: number;
+    version: number;
+    lastUpdated: number;
+  }
+  interface OddsState {
+    map: Record<string, OddsEntry>;
+  }
+  interface Window {
+    OddsStore?: StoreApi<OddsState>;
+  }
 }
 
 (() => {

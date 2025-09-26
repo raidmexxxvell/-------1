@@ -2,7 +2,9 @@
 // Sends logs to server endpoint for centralized viewing
 
 (() => {
-  if (typeof window === 'undefined') {return;}
+  if (typeof window === 'undefined') {
+    return;
+  }
 
   class AdminLogger {
     constructor() {
@@ -12,7 +14,7 @@
       this.flushInterval = 5000; // 5 seconds
       this.endpoint = '/api/admin/client-logs';
       this.sessionId = this.generateSessionId();
-      
+
       this.checkAdminStatus();
       if (this.enabled) {
         this.startAutoFlush();
@@ -23,7 +25,7 @@
       try {
         const user = window.UserStore?.get();
         this.enabled = user?.role === 'admin' || user?.role === 'owner';
-      } catch(_) {
+      } catch (_) {
         this.enabled = false;
       }
     }
@@ -33,24 +35,25 @@
     }
 
     log(level, category, message, metadata = {}) {
-      if (!this.enabled) {return;}
+      if (!this.enabled) {
+        return;
+      }
 
       const entry = {
         timestamp: new Date().toISOString(),
         sessionId: this.sessionId,
-        level,           // 'info', 'warn', 'error', 'debug'
-        category,        // 'store', 'ws', 'etag', 'ui', 'cache'
+        level, // 'info', 'warn', 'error', 'debug'
+        category, // 'store', 'ws', 'etag', 'ui', 'cache'
         message,
         metadata,
         url: window.location.href,
-        userAgent: navigator.userAgent
+        userAgent: navigator.userAgent,
       };
 
       this.buffer.push(entry);
 
       // Also log to console for immediate debugging
-      const consoleMethod = level === 'error' ? 'error' : 
-                           level === 'warn' ? 'warn' : 'log';
+      const consoleMethod = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log';
       console[consoleMethod](`[${category}] ${message}`, metadata);
 
       // Flush if buffer is full
@@ -76,7 +79,9 @@
     }
 
     async flush() {
-      if (!this.enabled || this.buffer.length === 0) {return;}
+      if (!this.enabled || this.buffer.length === 0) {
+        return;
+      }
 
       const logs = [...this.buffer];
       this.buffer = [];
@@ -87,7 +92,7 @@
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ logs })
+          body: JSON.stringify({ logs }),
         });
       } catch (error) {
         console.warn('Failed to send logs to server:', error);
@@ -116,7 +121,7 @@
         storeName,
         action,
         stateKeys: Object.keys(state || {}),
-        stateSize: JSON.stringify(state || {}).length
+        stateSize: JSON.stringify(state || {}).length,
       });
     }
 
@@ -124,7 +129,7 @@
       this.info('ws', `WebSocket ${this.translateWSEvent(eventType)}`, {
         eventType,
         hasData: !!data,
-        dataKeys: data ? Object.keys(data) : []
+        dataKeys: data ? Object.keys(data) : [],
       });
     }
 
@@ -132,7 +137,7 @@
       this.info('кэш', `ETag ${this.translateETagEvent(event)} для ${cacheKey}`, {
         cacheKey,
         event,
-        ...metadata
+        ...metadata,
       });
     }
 
@@ -140,7 +145,7 @@
       this.debug('кэш', `Кэш ${this.translateCacheOperation(operation)}: ${key}`, {
         operation,
         key,
-        result: typeof result === 'object' ? Object.keys(result || {}) : result
+        result: typeof result === 'object' ? Object.keys(result || {}) : result,
       });
     }
 
@@ -150,70 +155,70 @@
         error: {
           name: error.name,
           message: error.message,
-          stack: error.stack
+          stack: error.stack,
         },
-        context
+        context,
       });
     }
 
     translateAction(action) {
       const translations = {
-        'updated': 'обновлен',
-        'initialized': 'инициализирован',
-        'reset': 'сброшен',
-        'changed': 'изменен',
-        'loaded': 'загружен'
+        updated: 'обновлен',
+        initialized: 'инициализирован',
+        reset: 'сброшен',
+        changed: 'изменен',
+        loaded: 'загружен',
       };
       return translations[action] || action;
     }
 
     translateWSEvent(eventType) {
       const translations = {
-        'connected': 'подключен',
-        'disconnected': 'отключен',
-        'reconnect_scheduled': 'переподключение запланировано',
-        'reconnecting': 'переподключение',
-        'error': 'ошибка',
-        'data_patch': 'обновление данных',
-        'heartbeat': 'проверка связи'
+        connected: 'подключен',
+        disconnected: 'отключен',
+        reconnect_scheduled: 'переподключение запланировано',
+        reconnecting: 'переподключение',
+        error: 'ошибка',
+        data_patch: 'обновление данных',
+        heartbeat: 'проверка связи',
       };
       return translations[eventType] || eventType;
     }
 
     translateETagEvent(event) {
       const translations = {
-        'success': 'успех',
-        'error': 'ошибка',
-        'hit': 'попадание',
-        'miss': 'промах',
-        'stale': 'устарел',
-        'refresh': 'обновление'
+        success: 'успех',
+        error: 'ошибка',
+        hit: 'попадание',
+        miss: 'промах',
+        stale: 'устарел',
+        refresh: 'обновление',
       };
       return translations[event] || event;
     }
 
     translateCacheOperation(operation) {
       const translations = {
-        'get': 'получение',
-        'set': 'сохранение',
-        'delete': 'удаление',
-        'clear': 'очистка',
-        'hit': 'попадание',
-        'miss': 'промах'
+        get: 'получение',
+        set: 'сохранение',
+        delete: 'удаление',
+        clear: 'очистка',
+        hit: 'попадание',
+        miss: 'промах',
       };
       return translations[operation] || operation;
     }
 
     translateCategory(category) {
       const translations = {
-        'store': 'стор',
-        'ws': 'ws',
-        'etag': 'кэш',
-        'ui': 'интерфейс',
-        'cache': 'кэш',
-        'global': 'система',
-        'promise': 'промис',
-        'debug': 'отладка'
+        store: 'стор',
+        ws: 'ws',
+        etag: 'кэш',
+        ui: 'интерфейс',
+        cache: 'кэш',
+        global: 'система',
+        promise: 'промис',
+        debug: 'отладка',
       };
       return translations[category] || category;
     }
@@ -225,7 +230,7 @@
   // Integrate with existing systems
   if (window.StoreDebugger) {
     const originalToggle = window.StoreDebugger.toggle;
-    window.StoreDebugger.toggle = function() {
+    window.StoreDebugger.toggle = function () {
       originalToggle.call(this);
       window.AdminLogger.checkAdminStatus();
       window.AdminLogger.info('отладка', `Отладчик стора ${this.enabled ? 'включен' : 'отключен'}`);
@@ -233,46 +238,45 @@
   }
 
   // Integrate with fetch events
-  window.addEventListener('etag:success', (e) => {
+  window.addEventListener('etag:success', e => {
     window.AdminLogger?.logETagEvent(e.detail.cacheKey, 'success', {
       fromCache: e.detail.fromCache,
-      updated: e.detail.updated
+      updated: e.detail.updated,
     });
   });
 
-  window.addEventListener('etag:error', (e) => {
+  window.addEventListener('etag:error', e => {
     window.AdminLogger?.logETagEvent(e.detail.cacheKey, 'error', {
-      error: e.detail.error
+      error: e.detail.error,
     });
   });
 
   // Integrate with WS events
-  window.addEventListener('ws:connected', (e) => {
+  window.addEventListener('ws:connected', e => {
     window.AdminLogger?.logWSEvent('connected', e.detail);
   });
 
-  window.addEventListener('ws:disconnected', (e) => {
+  window.addEventListener('ws:disconnected', e => {
     window.AdminLogger?.logWSEvent('disconnected', e.detail);
   });
 
-  window.addEventListener('ws:reconnect_scheduled', (e) => {
+  window.addEventListener('ws:reconnect_scheduled', e => {
     window.AdminLogger?.logWSEvent('reconnect_scheduled', e.detail);
   });
 
   // Catch unhandled errors
-  window.addEventListener('error', (e) => {
+  window.addEventListener('error', e => {
     window.AdminLogger?.logError('система', e.error || new Error(e.message), {
       filename: e.filename,
       lineno: e.lineno,
-      colno: e.colno
+      colno: e.colno,
     });
   });
 
   // Catch unhandled promise rejections
-  window.addEventListener('unhandledrejection', (e) => {
+  window.addEventListener('unhandledrejection', e => {
     window.AdminLogger?.logError('промис', e.reason, {
-      type: 'unhandledrejection'
+      type: 'unhandledrejection',
     });
   });
-
 })();

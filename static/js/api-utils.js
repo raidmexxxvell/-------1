@@ -1,13 +1,15 @@
 // static/js/api-utils.js
 // Унифицированные утилиты для API запросов и обработки ответов
-(function(){
-  if (window.APIUtils) { return; } // idempotent
+(function () {
+  if (window.APIUtils) {
+    return;
+  } // idempotent
 
   // Безопасное получение JSON из response
   async function safeJsonParse(response) {
     try {
       return await response.json();
-    } catch(_) {
+    } catch (_) {
       return null;
     }
   }
@@ -15,13 +17,13 @@
   // Создание FormData с базовыми полями
   function createFormData(fields = {}) {
     const fd = new FormData();
-    
+
     Object.entries(fields).forEach(([key, value]) => {
       if (value !== null && value !== undefined) {
         fd.append(key, String(value));
       }
     });
-    
+
     return fd;
   }
 
@@ -29,20 +31,16 @@
   function createTelegramFormData(fields = {}) {
     const tg = window.Telegram?.WebApp || null;
     const initData = tg?.initData || '';
-    
+
     return createFormData({
       initData,
-      ...fields
+      ...fields,
     });
   }
 
   // Стандартный POST запрос с обработкой ошибок
   async function postRequest(url, data = {}, options = {}) {
-    const {
-      useFormData = true,
-      headers = {},
-      timeout = 30000
-    } = options;
+    const { useFormData = true, headers = {}, timeout = 30000 } = options;
 
     let body;
     if (useFormData) {
@@ -60,22 +58,22 @@
         method: 'POST',
         body,
         headers,
-        signal: controller.signal
+        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
       const result = await safeJsonParse(response);
-      
+
       return {
         ok: response.ok,
         status: response.status,
         data: result,
-        response
+        response,
       };
     } catch (error) {
       clearTimeout(timeoutId);
-      
+
       if (error.name === 'AbortError') {
         throw new Error('Запрос превысил время ожидания');
       }
@@ -85,15 +83,10 @@
 
   // ETag запрос с кэшированием
   async function etagRequest(url, options = {}) {
-    const {
-      cacheKey = null,
-      headers = {},
-      onSuccess = null,
-      onStale = null
-    } = options;
+    const { cacheKey = null, headers = {}, onSuccess = null, onStale = null } = options;
 
     const etag = cacheKey ? localStorage.getItem(`etag:${cacheKey}`) : null;
-    
+
     if (etag) {
       headers['If-None-Match'] = etag;
     }
@@ -101,7 +94,7 @@
     try {
       const response = await fetch(url, { headers });
       const newEtag = response.headers.get('ETag');
-      
+
       if (response.status === 304) {
         // Данные не изменились
         if (onStale && typeof onStale === 'function') {
@@ -111,7 +104,7 @@
       }
 
       const data = await safeJsonParse(response);
-      
+
       // Сохраняем новый ETag
       if (newEtag && cacheKey) {
         localStorage.setItem(`etag:${cacheKey}`, newEtag);
@@ -125,7 +118,7 @@
         updated: true,
         status: response.status,
         data,
-        etag: newEtag
+        etag: newEtag,
       };
     } catch (error) {
       console.error('ETag request error:', error);
@@ -136,7 +129,7 @@
   // Обработчик стандартных ошибок API
   function handleAPIError(error, context = '') {
     let message = 'Произошла ошибка';
-    
+
     if (error?.message) {
       message = error.message;
     } else if (typeof error === 'string') {
@@ -144,22 +137,18 @@
     }
 
     console.error(`API Error ${context}:`, error);
-    
+
     // Показываем ошибку пользователю
     if (window.showAlert && typeof window.showAlert === 'function') {
       window.showAlert(message, 'error');
     }
-    
+
     return message;
   }
 
   // Обертка для безопасного выполнения API запросов с UI обратной связью
   async function executeAPICall(apiCall, button = null, options = {}) {
-    const {
-      loadingText = 'Сохранение...',
-      successMessage = null,
-      errorContext = ''
-    } = options;
+    const { loadingText = 'Сохранение...', successMessage = null, errorContext = '' } = options;
 
     if (!apiCall || typeof apiCall !== 'function') {
       throw new Error('API call function is required');
@@ -176,7 +165,7 @@
       }
 
       const result = await apiCall();
-      
+
       // Проверяем результат
       if (result?.ok === false) {
         throw new Error(result?.data?.error || 'Ошибка API запроса');
@@ -235,22 +224,22 @@
   // Retry логика для неустойчивых запросов
   async function retryRequest(requestFn, maxRetries = 3, delay = 1000) {
     let lastError;
-    
+
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await requestFn();
       } catch (error) {
         lastError = error;
-        
+
         if (attempt === maxRetries) {
           break;
         }
-        
+
         // Экспоненциальная задержка
         await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, attempt)));
       }
     }
-    
+
     throw lastError;
   }
 
@@ -264,7 +253,7 @@
     handleAPIError,
     executeAPICall,
     batchRequests,
-    retryRequest
+    retryRequest,
   };
 
   // Удобные глобальные шорткаты для обратной совместимости
@@ -275,5 +264,5 @@
     if (!window.handleAPIError) {
       window.handleAPIError = handleAPIError;
     }
-  } catch(_) {}
+  } catch (_) {}
 })();

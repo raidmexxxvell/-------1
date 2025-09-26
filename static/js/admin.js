@@ -1,163 +1,264 @@
 // static/js/admin.js
 // Admin module: admin subtabs, refresh, orders, streams. Exposes window.Admin
-(function(){
+(function () {
   // Одноразовая инициализация и защита от параллельных обновлений
   let __adminInitDone = false;
   let __ordersReqSeq = 0;
   function ensureAdminInit() {
-    if (__adminInitDone) {return;} // уже инициализировано
-  const btnAll = document.getElementById('admin-refresh-all');
-  const btnUsers = document.getElementById('admin-users-refresh');
+    if (__adminInitDone) {
+      return;
+    } // уже инициализировано
+    const btnAll = document.getElementById('admin-refresh-all');
+    const btnUsers = document.getElementById('admin-users-refresh');
     const btnBump = document.getElementById('admin-bump-version');
     const btnFullReset = document.getElementById('admin-full-reset');
     const lblUsers = document.getElementById('admin-users-stats');
     try {
       const tabs = document.querySelectorAll('#admin-subtabs .subtab-item');
-      const panes = { service: document.getElementById('admin-pane-service'), stats: document.getElementById('admin-pane-stats'), orders: document.getElementById('admin-pane-orders'), streams: document.getElementById('admin-pane-streams') };
+      const panes = {
+        service: document.getElementById('admin-pane-service'),
+        stats: document.getElementById('admin-pane-stats'),
+        orders: document.getElementById('admin-pane-orders'),
+        streams: document.getElementById('admin-pane-streams'),
+      };
       tabs.forEach(btn => {
         btn.setAttribute('data-throttle', '600');
         btn.addEventListener('click', () => {
           const key = btn.getAttribute('data-atab');
           tabs.forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          Object.values(panes).forEach(p => { if (p) {p.style.display = 'none';} });
-          if (panes[key]) {panes[key].style.display = '';}
-          if (key === 'orders') {renderAdminOrders();}
-          if (key === 'streams') {initAdminStreams();}
-          if (key === 'stats') {renderAdminStats();}
+          Object.values(panes).forEach(p => {
+            if (p) {
+              p.style.display = 'none';
+            }
+          });
+          if (panes[key]) {
+            panes[key].style.display = '';
+          }
+          if (key === 'orders') {
+            renderAdminOrders();
+          }
+          if (key === 'streams') {
+            initAdminStreams();
+          }
+          if (key === 'stats') {
+            renderAdminStats();
+          }
         });
       });
-    } catch(_) {}
-  __adminInitDone = true;
-    if (btnAll) {btnAll.addEventListener('click', () => {
-      const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-      btnAll.disabled = true; const orig = btnAll.textContent; btnAll.textContent = 'Обновляю...';
-      Promise.allSettled([
-        fetch('/api/league-table/refresh', { method: 'POST', body: fd }),
-  // stats-table refresh deprecated; endpoint removed
-        fetch('/api/schedule/refresh', { method: 'POST', body: fd }),
-  fetch('/api/results/refresh', { method: 'POST', body: fd }),
-  // Также обновим туры для ставок, чтобы подтянулись прогнозы и «матч недели»
-  fetch('/api/betting/tours/refresh', { method: 'POST', body: fd })
-      ]).finally(() => { btnAll.disabled = false; btnAll.textContent = orig; });
-    });}
-    if (btnUsers && lblUsers) {btnUsers.addEventListener('click', renderAdminStats);}
-    if (btnBump) {btnBump.addEventListener('click', async () => {
-      try {
-        btnBump.disabled = true; const o = btnBump.textContent; btnBump.textContent = '...';
-        const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-        const r = await fetch('/api/admin/bump-version', { method: 'POST', body: fd });
-        const d = await r.json().catch(()=>({}));
-        const v = d?.ver != null ? d.ver : '—';
-        const msg = r.ok ? `Версия обновлена до v${v}. Клиентам будет предложено обновление.` : (d?.error || 'Ошибка');
-        try { window.showAlert?.(msg, 'info'); } catch(_) { alert(msg); }
-      } finally {
-        btnBump.disabled = false; btnBump.textContent = 'Применить';
-      }
-    });}
-    if (btnFullReset) {btnFullReset.addEventListener('click', async () => {
-      // Проверка feature flag для опасной операции
-      if (window.AdminFeatureFlags && !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:season_reset')) {
-        const enable = window.AdminFeatureFlags.enableDangerousOperation(
-          'feature:admin:season_reset',
-          'Полный сброс сезона (удаление всех временных данных)'
-        );
-        if (!enable) {
+    } catch (_) {}
+    __adminInitDone = true;
+    if (btnAll) {
+      btnAll.addEventListener('click', () => {
+        const fd = new FormData();
+        fd.append('initData', window.Telegram?.WebApp?.initData || '');
+        btnAll.disabled = true;
+        const orig = btnAll.textContent;
+        btnAll.textContent = 'Обновляю...';
+        Promise.allSettled([
+          fetch('/api/league-table/refresh', { method: 'POST', body: fd }),
+          // stats-table refresh deprecated; endpoint removed
+          fetch('/api/schedule/refresh', { method: 'POST', body: fd }),
+          fetch('/api/results/refresh', { method: 'POST', body: fd }),
+          // Также обновим туры для ставок, чтобы подтянулись прогнозы и «матч недели»
+          fetch('/api/betting/tours/refresh', { method: 'POST', body: fd }),
+        ]).finally(() => {
+          btnAll.disabled = false;
+          btnAll.textContent = orig;
+        });
+      });
+    }
+    if (btnUsers && lblUsers) {
+      btnUsers.addEventListener('click', renderAdminStats);
+    }
+    if (btnBump) {
+      btnBump.addEventListener('click', async () => {
+        try {
+          btnBump.disabled = true;
+          const o = btnBump.textContent;
+          btnBump.textContent = '...';
+          const fd = new FormData();
+          fd.append('initData', window.Telegram?.WebApp?.initData || '');
+          const r = await fetch('/api/admin/bump-version', { method: 'POST', body: fd });
+          const d = await r.json().catch(() => ({}));
+          const v = d?.ver != null ? d.ver : '—';
+          const msg = r.ok
+            ? `Версия обновлена до v${v}. Клиентам будет предложено обновление.`
+            : d?.error || 'Ошибка';
           try {
-            window.showAlert?.('Операция заблокирована feature flag', 'warning');
-          } catch(_) {
-            alert('Операция заблокирована feature flag: feature:admin:season_reset');
+            window.showAlert?.(msg, 'info');
+          } catch (_) {
+            alert(msg);
           }
-          return;
+        } finally {
+          btnBump.disabled = false;
+          btnBump.textContent = 'Применить';
         }
-      }
+      });
+    }
+    if (btnFullReset) {
+      btnFullReset.addEventListener('click', async () => {
+        // Проверка feature flag для опасной операции
+        if (
+          window.AdminFeatureFlags &&
+          !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:season_reset')
+        ) {
+          const enable = window.AdminFeatureFlags.enableDangerousOperation(
+            'feature:admin:season_reset',
+            'Полный сброс сезона (удаление всех временных данных)'
+          );
+          if (!enable) {
+            try {
+              window.showAlert?.('Операция заблокирована feature flag', 'warning');
+            } catch (_) {
+              alert('Операция заблокирована feature flag: feature:admin:season_reset');
+            }
+            return;
+          }
+        }
 
-      try {
-        const ok = confirm('Полный сброс данных за сезон 25-26? Это удалит временные данные (снимки, ставки, заказы, стримы, комментарии). Пользователи и логи останутся.');
-        if (!ok) {return;}
-        btnFullReset.disabled = true; const o = btnFullReset.textContent; btnFullReset.textContent = '...';
-        const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-        const r = await fetch('/api/admin/full-reset', { method: 'POST', body: fd });
-        const d = await r.json().catch(()=>({}));
-        const msg = r.ok ? ('Готово. Очищено: ' + JSON.stringify(d.summary||{})) : (d?.error || 'Ошибка');
-        try { window.showAlert?.(msg, r.ok?'info':'error'); } catch(_) { alert(msg); }
-      } finally {
-        btnFullReset.disabled = false; btnFullReset.textContent = 'Сбросить';
-      }
-    });}
+        try {
+          const ok = confirm(
+            'Полный сброс данных за сезон 25-26? Это удалит временные данные (снимки, ставки, заказы, стримы, комментарии). Пользователи и логи останутся.'
+          );
+          if (!ok) {
+            return;
+          }
+          btnFullReset.disabled = true;
+          const o = btnFullReset.textContent;
+          btnFullReset.textContent = '...';
+          const fd = new FormData();
+          fd.append('initData', window.Telegram?.WebApp?.initData || '');
+          const r = await fetch('/api/admin/full-reset', { method: 'POST', body: fd });
+          const d = await r.json().catch(() => ({}));
+          const msg = r.ok
+            ? 'Готово. Очищено: ' + JSON.stringify(d.summary || {})
+            : d?.error || 'Ошибка';
+          try {
+            window.showAlert?.(msg, r.ok ? 'info' : 'error');
+          } catch (_) {
+            alert(msg);
+          }
+        } finally {
+          btnFullReset.disabled = false;
+          btnFullReset.textContent = 'Сбросить';
+        }
+      });
+    }
   }
   async function renderAdminOrders() {
     const table = document.getElementById('admin-orders-table');
     const updated = document.getElementById('admin-orders-updated');
-    if (!table) {return;} const tbody = table.querySelector('tbody');
+    if (!table) {
+      return;
+    }
+    const tbody = table.querySelector('tbody');
     // Счётчик запросов: учитываем только самый последний ответ
     const mySeq = ++__ordersReqSeq;
     // Чтобы избежать мерцания: показываем лоадер и чистим перед применением свежего результата
     tbody.innerHTML = '';
     const seen = new Set();
     try {
-      const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-      const r = await fetch('/api/admin/orders', { method: 'POST', body: fd }); const data = await r.json();
+      const fd = new FormData();
+      fd.append('initData', window.Telegram?.WebApp?.initData || '');
+      const r = await fetch('/api/admin/orders', { method: 'POST', body: fd });
+      const data = await r.json();
       // Если пришёл устаревший ответ — игнорируем
-      if (mySeq !== __ordersReqSeq) {return;}
-      (data.orders||[]).forEach((o, idx) => {
+      if (mySeq !== __ordersReqSeq) {
+        return;
+      }
+      (data.orders || []).forEach((o, idx) => {
         // Устойчивый ключ дедупликации на случай дублей в ответе
-        const oid = String(
-          (o.id != null ? o.id : (o.order_id != null ? o.order_id : ''))
-        );
-        const composite = oid || [o.user_id||'', o.created_at||'', o.total||'', o.items_preview||''].join('|');
-        if (seen.has(composite)) {return;} seen.add(composite);
+        const oid = String(o.id != null ? o.id : o.order_id != null ? o.order_id : '');
+        const composite =
+          oid ||
+          [o.user_id || '', o.created_at || '', o.total || '', o.items_preview || ''].join('|');
+        if (seen.has(composite)) {
+          return;
+        }
+        seen.add(composite);
         const tr = document.createElement('tr');
         let created = o.created_at || '';
-        try { created = new Date(created).toLocaleDateString('ru-RU'); } catch(_) {}
-        const userLabel = o.username ? ('@' + o.username) : (o.user_id ? ('ID ' + o.user_id) : '—');
-        const tdIdx = document.createElement('td'); tdIdx.textContent = String(idx+1);
+        try {
+          created = new Date(created).toLocaleDateString('ru-RU');
+        } catch (_) {}
+        const userLabel = o.username ? '@' + o.username : o.user_id ? 'ID ' + o.user_id : '—';
+        const tdIdx = document.createElement('td');
+        tdIdx.textContent = String(idx + 1);
         const tdUser = document.createElement('td');
         const link = document.createElement('a');
-        link.href = o.username ? (`https://t.me/${o.username}`) : (`https://t.me/+${o.user_id}`);
+        link.href = o.username ? `https://t.me/${o.username}` : `https://t.me/+${o.user_id}`;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
         link.textContent = userLabel;
-        link.addEventListener('click', (e) => {
+        link.addEventListener('click', e => {
           // Внутри Telegram WebApp попробуем открыть нативно
           try {
-            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink) {
+            if (
+              window.Telegram &&
+              window.Telegram.WebApp &&
+              window.Telegram.WebApp.openTelegramLink
+            ) {
               e.preventDefault();
-              const url = o.username ? (`https://t.me/${o.username}`) : (`https://t.me/+${o.user_id}`);
+              const url = o.username ? `https://t.me/${o.username}` : `https://t.me/+${o.user_id}`;
               window.Telegram.WebApp.openTelegramLink(url);
             }
-          } catch(_) {}
+          } catch (_) {}
         });
         tdUser.appendChild(link);
-        const tdItems = document.createElement('td'); tdItems.textContent = o.items_preview || '';
-        const tdQty = document.createElement('td'); tdQty.textContent = String(o.items_qty || 0);
-        const tdSum = document.createElement('td'); tdSum.textContent = (o.total||0).toLocaleString();
-        const tdCreated = document.createElement('td'); tdCreated.textContent = created;
+        const tdItems = document.createElement('td');
+        tdItems.textContent = o.items_preview || '';
+        const tdQty = document.createElement('td');
+        tdQty.textContent = String(o.items_qty || 0);
+        const tdSum = document.createElement('td');
+        tdSum.textContent = (o.total || 0).toLocaleString();
+        const tdCreated = document.createElement('td');
+        tdCreated.textContent = created;
         const tdStatus = document.createElement('td');
         const sel = document.createElement('select');
         const variants = [
-          { v:'new', l:'новый' },
-          { v:'accepted', l:'принят' },
-          { v:'done', l:'завершен' },
-          { v:'cancelled', l:'отменен' }
+          { v: 'new', l: 'новый' },
+          { v: 'accepted', l: 'принят' },
+          { v: 'done', l: 'завершен' },
+          { v: 'cancelled', l: 'отменен' },
         ];
-        variants.forEach(({v,l}) => { const opt=document.createElement('option'); opt.value=v; opt.textContent=l; sel.appendChild(opt); });
-        sel.value = (o.status||'new');
+        variants.forEach(({ v, l }) => {
+          const opt = document.createElement('option');
+          opt.value = v;
+          opt.textContent = l;
+          sel.appendChild(opt);
+        });
+        sel.value = o.status || 'new';
         sel.addEventListener('change', async () => {
           try {
             sel.disabled = true;
-            const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || '')); fd.append('status', sel.value);
-            const rr = await fetch(`/api/admin/orders/${o.id}/status`, { method: 'POST', body: fd });
-            if (!rr.ok) {throw new Error('status');}
-          } catch(_) { /* revert on error */ sel.value = o.status||'new'; }
-          finally { sel.disabled = false; }
+            const fd = new FormData();
+            fd.append('initData', window.Telegram?.WebApp?.initData || '');
+            fd.append('status', sel.value);
+            const rr = await fetch(`/api/admin/orders/${o.id}/status`, {
+              method: 'POST',
+              body: fd,
+            });
+            if (!rr.ok) {
+              throw new Error('status');
+            }
+          } catch (_) {
+            /* revert on error */ sel.value = o.status || 'new';
+          } finally {
+            sel.disabled = false;
+          }
         });
         tdStatus.appendChild(sel);
         const tdDel = document.createElement('td');
-        const btnDel = document.createElement('button'); btnDel.className='details-btn'; btnDel.textContent='✖';
+        const btnDel = document.createElement('button');
+        btnDel.className = 'details-btn';
+        btnDel.textContent = '✖';
         btnDel.addEventListener('click', async () => {
           // Проверка feature flag для опасной операции
-          if (window.AdminFeatureFlags && !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:order_delete')) {
+          if (
+            window.AdminFeatureFlags &&
+            !window.AdminFeatureFlags.isDangerousOperationAllowed('feature:admin:order_delete')
+          ) {
             const enable = window.AdminFeatureFlags.enableDangerousOperation(
               'feature:admin:order_delete',
               'Удаление заказа (необратимое действие)'
@@ -165,7 +266,7 @@
             if (!enable) {
               try {
                 window.showAlert?.('Операция заблокирована feature flag', 'warning');
-              } catch(_) {
+              } catch (_) {
                 alert('Операция заблокирована feature flag: feature:admin:order_delete');
               }
               return;
@@ -173,119 +274,195 @@
           }
 
           try {
-            if (!confirm('Удалить заказ?')) {return;}
+            if (!confirm('Удалить заказ?')) {
+              return;
+            }
             btnDel.disabled = true;
-            const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-            const rr = await fetch(`/api/admin/orders/${o.id}/delete`, { method: 'POST', body: fd });
-            if (!rr.ok) {throw new Error('delete');}
+            const fd = new FormData();
+            fd.append('initData', window.Telegram?.WebApp?.initData || '');
+            const rr = await fetch(`/api/admin/orders/${o.id}/delete`, {
+              method: 'POST',
+              body: fd,
+            });
+            if (!rr.ok) {
+              throw new Error('delete');
+            }
             tr.remove();
-          } catch(_) { btnDel.disabled = false; }
+          } catch (_) {
+            btnDel.disabled = false;
+          }
         });
         tdDel.appendChild(btnDel);
         tr.append(tdIdx, tdUser, tdItems, tdQty, tdSum, tdCreated, tdStatus, tdDel);
         tbody.appendChild(tr);
       });
-      if (updated && data.updated_at) { try { updated.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {} }
-    } catch(_) { /* ignore */ }
+      if (updated && data.updated_at) {
+        try {
+          updated.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`;
+        } catch (_) {}
+      }
+    } catch (_) {
+      /* ignore */
+    }
   }
   async function initAdminStreams() {
-    const host = document.getElementById('admin-pane-streams'); if (!host) {return;}
-    const list = document.getElementById('admin-streams-list'); const msg = document.getElementById('admin-streams-msg');
-    const winInput = document.getElementById('admin-streams-window'); const refreshBtn = document.getElementById('admin-streams-refresh');
-    if (!list || !msg || !winInput || !refreshBtn) {return;}
+    const host = document.getElementById('admin-pane-streams');
+    if (!host) {
+      return;
+    }
+    const list = document.getElementById('admin-streams-list');
+    const msg = document.getElementById('admin-streams-msg');
+    const winInput = document.getElementById('admin-streams-window');
+    const refreshBtn = document.getElementById('admin-streams-refresh');
+    if (!list || !msg || !winInput || !refreshBtn) {
+      return;
+    }
     list.innerHTML = '';
     try {
-  const winMin = Math.max(60, Math.min(480, Number(winInput.value)||360));
-  const params = new URLSearchParams({ window_min: String(winMin), include_started_min: '30' });
-  const r = await fetch(`/api/streams/upcoming?${params}`);
-  const data = await r.json();
+      const winMin = Math.max(60, Math.min(480, Number(winInput.value) || 360));
+      const params = new URLSearchParams({ window_min: String(winMin), include_started_min: '30' });
+      const r = await fetch(`/api/streams/upcoming?${params}`);
+      const data = await r.json();
       list.innerHTML = '';
       // Получим уже сохранённые подтверждения, чтобы предзаполнить поля
       const saved = {};
       try {
         const rr = await fetch('/api/streams/list');
         const dd = await rr.json();
-        (dd.items||[]).forEach(it => {
-          const key = `${(it.home||'').toLowerCase()}__${(it.away||'').toLowerCase()}__${(it.date||'')}`;
-          saved[key] = { vkVideoId: it.vkVideoId||'', vkPostUrl: it.vkPostUrl||'' };
+        (dd.items || []).forEach(it => {
+          const key = `${(it.home || '').toLowerCase()}__${(it.away || '').toLowerCase()}__${it.date || ''}`;
+          saved[key] = { vkVideoId: it.vkVideoId || '', vkPostUrl: it.vkPostUrl || '' };
         });
-      } catch(_) {}
-      (data.matches||[]).forEach(m => {
-        const card = document.createElement('div'); card.className='store-item';
-        const name = document.createElement('div'); name.className='store-name'; name.textContent = `${m.home||''} — ${m.away||''}`;
-        const when = document.createElement('div'); when.className='store-price'; when.textContent = m.datetime || m.date || '';
-        const input = document.createElement('input'); input.type='text'; input.placeholder = 'Ссылка VK Live';
-        const btnReset = document.createElement('button'); btnReset.className='details-btn'; btnReset.textContent='Сбросить';
-        const btn = document.createElement('button'); btn.className='details-btn confirm'; btn.textContent='Подтвердить'; btn.style.marginLeft = '8px';
-        const hint = document.createElement('div'); hint.className = 'save-hint';
+      } catch (_) {}
+      (data.matches || []).forEach(m => {
+        const card = document.createElement('div');
+        card.className = 'store-item';
+        const name = document.createElement('div');
+        name.className = 'store-name';
+        name.textContent = `${m.home || ''} — ${m.away || ''}`;
+        const when = document.createElement('div');
+        when.className = 'store-price';
+        when.textContent = m.datetime || m.date || '';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'Ссылка VK Live';
+        const btnReset = document.createElement('button');
+        btnReset.className = 'details-btn';
+        btnReset.textContent = 'Сбросить';
+        const btn = document.createElement('button');
+        btn.className = 'details-btn confirm';
+        btn.textContent = 'Подтвердить';
+        btn.style.marginLeft = '8px';
+        const hint = document.createElement('div');
+        hint.className = 'save-hint';
         // Предзаполним, если уже была сохранённая ссылка
         try {
-          const dateKey = (m.datetime||m.date||'').slice(0,10);
-          const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
+          const dateKey = (m.datetime || m.date || '').slice(0, 10);
+          const key = `${(m.home || '').toLowerCase()}__${(m.away || '').toLowerCase()}__${dateKey}`;
           const prev = saved[key];
           if (prev) {
-            const val = prev.vkVideoId ? `https://vk.com/video${prev.vkVideoId}` : (prev.vkPostUrl||'');
-            if (val) { input.value = val; hint.textContent = 'Ранее сохранено'; hint.classList.remove('error'); hint.classList.add('success'); }
+            const val = prev.vkVideoId
+              ? `https://vk.com/video${prev.vkVideoId}`
+              : prev.vkPostUrl || '';
+            if (val) {
+              input.value = val;
+              hint.textContent = 'Ранее сохранено';
+              hint.classList.remove('error');
+              hint.classList.add('success');
+            }
           }
-        } catch(_) {}
+        } catch (_) {}
         btn.addEventListener('click', async () => {
           try {
             const val = (input.value || '').trim();
             if (!val) {
               hint.textContent = 'Введите ссылку';
-              hint.classList.remove('success'); hint.classList.add('error');
+              hint.classList.remove('success');
+              hint.classList.add('error');
               return;
             }
             // Если уже было сохранено и значение меняется — спросим подтверждение
             try {
-              const dateKey = (m.datetime||m.date||'').slice(0,10);
-              const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
+              const dateKey = (m.datetime || m.date || '').slice(0, 10);
+              const key = `${(m.home || '').toLowerCase()}__${(m.away || '').toLowerCase()}__${dateKey}`;
               const prev = saved[key];
-              const prevHuman = prev ? (prev.vkVideoId ? `https://vk.com/video${prev.vkVideoId}` : (prev.vkPostUrl||'')) : '';
+              const prevHuman = prev
+                ? prev.vkVideoId
+                  ? `https://vk.com/video${prev.vkVideoId}`
+                  : prev.vkPostUrl || ''
+                : '';
               if (prevHuman && prevHuman !== val) {
                 const ok = confirm('Ссылка уже сохранена. Перезаписать?');
-                if (!ok) {return;}
+                if (!ok) {
+                  return;
+                }
               }
-            } catch(_) {}
-            btn.disabled = true; const o = btn.textContent; btn.textContent = '...';
+            } catch (_) {}
+            btn.disabled = true;
+            const o = btn.textContent;
+            btn.textContent = '...';
             const fd = new FormData();
-            fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-            fd.append('home', m.home || ''); fd.append('away', m.away || '');
-            fd.append('datetime', m.datetime || ''); fd.append('vk', val);
-            const rr = await fetch('/api/streams/set', { method:'POST', body: fd });
-            const resp = await rr.json().catch(()=>({}));
-            if (!rr.ok) { throw new Error(resp?.error || 'save'); }
+            fd.append('initData', window.Telegram?.WebApp?.initData || '');
+            fd.append('home', m.home || '');
+            fd.append('away', m.away || '');
+            fd.append('datetime', m.datetime || '');
+            fd.append('vk', val);
+            const rr = await fetch('/api/streams/set', { method: 'POST', body: fd });
+            const resp = await rr.json().catch(() => ({}));
+            if (!rr.ok) {
+              throw new Error(resp?.error || 'save');
+            }
             btn.textContent = 'Сохранено';
             hint.textContent = resp?.message || 'Ссылка успешно сохранена';
-            hint.classList.remove('error'); hint.classList.add('success');
+            hint.classList.remove('error');
+            hint.classList.add('success');
             // Обновим локальный saved
             try {
-              const dateKey = (m.datetime||m.date||'').slice(0,10);
-              const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
+              const dateKey = (m.datetime || m.date || '').slice(0, 10);
+              const key = `${(m.home || '').toLowerCase()}__${(m.away || '').toLowerCase()}__${dateKey}`;
               saved[key] = { vkVideoId: resp?.vkVideoId || '', vkPostUrl: resp?.vkPostUrl || '' };
-            } catch(_) {}
-          } catch(_) { btn.disabled=false; btn.textContent='Подтвердить'; }
+            } catch (_) {}
+          } catch (_) {
+            btn.disabled = false;
+            btn.textContent = 'Подтвердить';
+          }
         });
-        const row = document.createElement('div'); row.className='stream-row'; row.append(input, btnReset, btn);
-        card.append(name, when, row, hint); list.appendChild(card);
+        const row = document.createElement('div');
+        row.className = 'stream-row';
+        row.append(input, btnReset, btn);
+        card.append(name, when, row, hint);
+        list.appendChild(card);
 
         btnReset.addEventListener('click', async () => {
           try {
             const ok = confirm('Сбросить ссылку трансляции для этого матча?');
-            if (!ok) {return;}
-            btnReset.disabled = true; const o = btnReset.textContent; btnReset.textContent = '...';
+            if (!ok) {
+              return;
+            }
+            btnReset.disabled = true;
+            const o = btnReset.textContent;
+            btnReset.textContent = '...';
             const fd = new FormData();
-            fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-            fd.append('home', m.home || ''); fd.append('away', m.away || '');
-            const dateKey = (m.datetime||m.date||'').slice(0,10);
+            fd.append('initData', window.Telegram?.WebApp?.initData || '');
+            fd.append('home', m.home || '');
+            fd.append('away', m.away || '');
+            const dateKey = (m.datetime || m.date || '').slice(0, 10);
             fd.append('date', dateKey);
             const rr = await fetch('/api/streams/reset', { method: 'POST', body: fd });
-            const resp = await rr.json().catch(()=>({}));
-            if (!rr.ok) {throw new Error(resp?.error || 'reset');}
-            hint.textContent = 'Ссылка сброшена'; hint.classList.remove('error'); hint.classList.add('success');
+            const resp = await rr.json().catch(() => ({}));
+            if (!rr.ok) {
+              throw new Error(resp?.error || 'reset');
+            }
+            hint.textContent = 'Ссылка сброшена';
+            hint.classList.remove('error');
+            hint.classList.add('success');
             input.value = '';
-          } catch(_){ /* ignore */ }
-          finally { btnReset.disabled = false; btnReset.textContent = 'Сбросить'; }
+          } catch (_) {
+            /* ignore */
+          } finally {
+            btnReset.disabled = false;
+            btnReset.textContent = 'Сбросить';
+          }
         });
       });
       if (!data.matches || data.matches.length === 0) {
@@ -293,40 +470,67 @@
       } else {
         msg.textContent = 'Готово';
       }
-      refreshBtn.onclick = initAdminStreams; winInput.onchange = initAdminStreams; winInput.onkeyup = (e)=>{ if(e.key==='Enter'){ initAdminStreams(); } };
-    } catch (e) { console.error('admin streams load', e); msg.textContent = 'Ошибка загрузки'; }
+      refreshBtn.onclick = initAdminStreams;
+      winInput.onchange = initAdminStreams;
+      winInput.onkeyup = e => {
+        if (e.key === 'Enter') {
+          initAdminStreams();
+        }
+      };
+    } catch (e) {
+      console.error('admin streams load', e);
+      msg.textContent = 'Ошибка загрузки';
+    }
   }
   async function renderAdminStats() {
     const table = document.getElementById('admin-stats-table');
     const updated = document.getElementById('admin-stats-updated');
     const btn = document.getElementById('admin-stats-refresh');
     const lblUsers = document.getElementById('admin-users-stats');
-    if (!table) {return;}
+    if (!table) {
+      return;
+    }
     const tbody = table.querySelector('tbody');
     try {
-      if (btn) { btn.disabled = true; btn.textContent = '...'; }
-      const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '...';
+      }
+      const fd = new FormData();
+      fd.append('initData', window.Telegram?.WebApp?.initData || '');
       const r = await fetch('/api/admin/users-stats', { method: 'POST', body: fd });
       const d = await r.json();
       tbody.innerHTML = '';
       const rows = [
-        ['Активные (1 день)', d.active_1d||0],
-        ['Активные (7 дней)', d.active_7d||0],
-        ['Активные (30 дней)', d.active_30d||0],
-        ['Всего пользователей', d.total_users||0]
+        ['Активные (1 день)', d.active_1d || 0],
+        ['Активные (7 дней)', d.active_7d || 0],
+        ['Активные (30 дней)', d.active_30d || 0],
+        ['Всего пользователей', d.total_users || 0],
       ];
-      rows.forEach(([k,v]) => {
+      rows.forEach(([k, v]) => {
         const tr = document.createElement('tr');
-        const tdK = document.createElement('td'); tdK.textContent = k;
-        const tdV = document.createElement('td'); tdV.textContent = String(v);
-        tr.append(tdK, tdV); tbody.appendChild(tr);
+        const tdK = document.createElement('td');
+        tdK.textContent = k;
+        const tdV = document.createElement('td');
+        tdV.textContent = String(v);
+        tr.append(tdK, tdV);
+        tbody.appendChild(tr);
       });
-      if (updated) { try { updated.textContent = `Обновлено: ${new Date().toLocaleString()}`; } catch(_) {} }
-  if (lblUsers) {lblUsers.textContent = `Активные: ${d.active_1d||0}/${d.active_7d||0}/${d.active_30d||0} • Всего: ${d.total_users||0}`;}
-    } catch(_) {
+      if (updated) {
+        try {
+          updated.textContent = `Обновлено: ${new Date().toLocaleString()}`;
+        } catch (_) {}
+      }
+      if (lblUsers) {
+        lblUsers.textContent = `Активные: ${d.active_1d || 0}/${d.active_7d || 0}/${d.active_30d || 0} • Всего: ${d.total_users || 0}`;
+      }
+    } catch (_) {
       // ignore
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Обновить'; }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Обновить';
+      }
     }
   }
   window.Admin = { ensureAdminInit, renderAdminOrders, initAdminStreams, renderAdminStats };

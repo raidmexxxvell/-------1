@@ -1,32 +1,39 @@
 import type { StoreApi } from './core';
 
 declare global {
-  interface PredictionItem { id: string; matchId: string; market: string; options: any[] }
-  interface MyBet { 
-    id: string; 
-    home: string; 
-    away: string; 
-    datetime?: string; 
-    selection: string; 
-    selection_display?: string; 
-    market_display?: string; 
-    odds: number; 
-    stake: number; 
-    status: 'open' | 'won' | 'lost'; 
-    winnings?: number 
+  interface PredictionItem {
+    id: string;
+    matchId: string;
+    market: string;
+    options: any[];
   }
-  interface MyBetsCache { 
-    bets: MyBet[]; 
-    lastUpdated: number; 
-    ttl: number 
+  interface MyBet {
+    id: string;
+    home: string;
+    away: string;
+    datetime?: string;
+    selection: string;
+    selection_display?: string;
+    market_display?: string;
+    odds: number;
+    stake: number;
+    status: 'open' | 'won' | 'lost';
+    winnings?: number;
   }
-  interface PredictionsState { 
-    items: PredictionItem[]; 
-    myVotes: Record<string, any>; 
-    myBets: MyBetsCache | null; 
-    ttl: number | null 
+  interface MyBetsCache {
+    bets: MyBet[];
+    lastUpdated: number;
+    ttl: number;
   }
-  interface Window { PredictionsStore?: StoreApi<PredictionsState> }
+  interface PredictionsState {
+    items: PredictionItem[];
+    myVotes: Record<string, any>;
+    myBets: MyBetsCache | null;
+    ttl: number | null;
+  }
+  interface Window {
+    PredictionsStore?: StoreApi<PredictionsState>;
+  }
 }
 
 (() => {
@@ -40,7 +47,7 @@ declare global {
     isMyBetsCacheValid(ttlMs: number = 2 * 60 * 1000): boolean {
       const state = predictions.get();
       if (!state.myBets || !state.myBets.lastUpdated) return false;
-      return (Date.now() - state.myBets.lastUpdated) < ttlMs;
+      return Date.now() - state.myBets.lastUpdated < ttlMs;
     },
 
     // Получает myBets из кэша или null если кэш невалидный
@@ -56,7 +63,7 @@ declare global {
         state.myBets = {
           bets: bets,
           lastUpdated: Date.now(),
-          ttl: ttlMs
+          ttl: ttlMs,
         };
       });
     },
@@ -66,11 +73,11 @@ declare global {
       predictions.update(state => {
         state.myBets = null;
       });
-    }
+    },
   };
 
   // Экспортируем хелперы глобально для использования в predictions.js
   try {
     (window as any).PredictionHelpers = PredictionHelpers;
-  } catch(_) {}
+  } catch (_) {}
 })();

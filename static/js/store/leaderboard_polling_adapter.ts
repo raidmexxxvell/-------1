@@ -31,12 +31,12 @@ interface ExtendedLeaderboardStore extends StoreApi<LeaderboardState> {
 
   // Ждём готовности LeaderboardStore
   const waitForStore = () => {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>(resolve => {
       if (window.LeaderboardStore) {
         resolve();
         return;
       }
-      
+
       const check = () => {
         if (window.LeaderboardStore) {
           resolve();
@@ -51,13 +51,13 @@ interface ExtendedLeaderboardStore extends StoreApi<LeaderboardState> {
   // Polling логика
   const setupPolling = async () => {
     await waitForStore();
-    
+
     if (!window.LeaderboardStore) {
       return;
     }
 
     const store = window.LeaderboardStore as ExtendedLeaderboardStore;
-    
+
     const LB_POLL_MS = 60000; // 60 секунд
     const LB_JITTER_MS = 4000; // джиттер
     let pollingTimer: number | null = null;
@@ -84,7 +84,7 @@ interface ExtendedLeaderboardStore extends StoreApi<LeaderboardState> {
     // Запуск polling для активной вкладки
     const startPolling = (activeTab: string) => {
       stopPolling();
-      
+
       if (!['predictors', 'rich', 'server'].includes(activeTab)) {
         return; // Призы не требуют частого обновления
       }
@@ -153,9 +153,9 @@ interface ExtendedLeaderboardStore extends StoreApi<LeaderboardState> {
     };
 
     // Подписываемся на изменения activeTab в сторе
-    store.subscribe((state) => {
+    store.subscribe(state => {
       const activeTab = state.activeTab;
-      
+
       // Перезапускаем polling для новой активной вкладки
       if (['predictors', 'rich', 'server'].includes(activeTab)) {
         startPolling(activeTab);
@@ -167,7 +167,7 @@ interface ExtendedLeaderboardStore extends StoreApi<LeaderboardState> {
     // Обработка изменения видимости страницы
     document.addEventListener('visibilitychange', () => {
       const state = store.get();
-      
+
       if (document.hidden) {
         stopPolling();
       } else {
