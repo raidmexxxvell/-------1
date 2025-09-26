@@ -900,7 +900,7 @@
       d.setAttribute('data-team-name', name || '');
       try {
         const withTeamCount =
-          window.withTeamCount || window.profileWithTeamCount /* fallback stub */;
+          window.withTeamCount || window.profileWithTeamCount; /* fallback stub */
         nm.textContent = withTeamCount ? withTeamCount(name || '') : name || '';
       } catch (_) {
         nm.textContent = name || '';
