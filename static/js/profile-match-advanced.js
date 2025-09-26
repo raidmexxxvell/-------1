@@ -109,17 +109,19 @@
         const d=raw?raw.slice(0,10):'';
   const scheme = (window.__WS_TOPIC_SCHEME__ === 'with_date') ? 'with_date' : 'no_date';
   const baseTopic = `match:${h}__${a}`;
-  const preferredTopic = (scheme === 'with_date' && d) ? `${baseTopic}__${d}:details` : `${baseTopic}__:details`;
-  const datedTopic = d ? `${baseTopic}__${d}:details` : null;
-  const legacyTopic = `${baseTopic}__:details`;
-  const plannedTopics = [];
-  if (preferredTopic) { plannedTopics.push(preferredTopic); }
-  if (datedTopic) { plannedTopics.push(datedTopic); }
-  if (legacyTopic) { plannedTopics.push(legacyTopic); }
-  __topics = Array.from(new Set(plannedTopics.filter(Boolean)));
-  __topic = __topics[0] || null;
+  
+  // BUG-002 FIX: Убираем дублирующие подписки - используем только один топик
+  let __topic;
+  if (scheme === 'with_date' && d) {
+    __topic = `${baseTopic}__${d}:details`;
+  } else {
+    __topic = `${baseTopic}__:details`;
+  }
+  
+  const __topics = [__topic]; // Оставляем только один топик
+  
   try { mdPane.__wsTopics = __topics.slice(); } catch(_){}
-  console.log('[WS Матч] Топики для подписки:', __topics, 'предпочтительная схема:', scheme, 'WS включен:', !!window.__WEBSOCKETS_ENABLED__, 'Топики включены:', !!window.__WS_TOPIC_SUBS__);
+  console.log('[WS Матч] Единственный топик для подписки:', __topic, 'предпочтительная схема:', scheme, 'WS включен:', !!window.__WEBSOCKETS_ENABLED__, 'Топики включены:', !!window.__WS_TOPIC_SUBS__);
         // небольшая задержка чтобы дождаться connect
         setTimeout(()=>{ 
           try { 

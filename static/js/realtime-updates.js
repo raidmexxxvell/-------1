@@ -16,6 +16,11 @@ class RealtimeUpdater {
         this.maxReconnectDelay = 30000; // 30 sec max
         this.jitterFactor = 0.3;        // 30% random jitter
         this.isConnected = false;
+        
+        // Логика повторной инициализации
+        this.initAttempts = 0;
+        this.maxInitAttempts = 3;
+        this.initDelay = 2000; // 2 сек между попытками инициализации
         this.callbacks = new Map();
         this.debug = localStorage.getItem('websocket_debug') === 'true';
                 // Rely on Socket.IO built-in heartbeats; custom ping/pong removed to avoid false disconnects
@@ -85,12 +90,13 @@ class RealtimeUpdater {
                 .then(r => {
                     console.log(`[WS Инициализация] Ответ пробы: статус=${r?.status}, ok=${r?.ok}`);
                     if (!r || !r.ok) {
-                        console.log('[WS Инициализация] Проба неуспешна, отключаем WebSockets');
-                        window.__WEBSOCKETS_ENABLED__ = false;
+                        console.log('[WS Инициализация] Проба неуспешна, планируем повторную попытку');
+                        this.scheduleInitRetry();
                         return null;
                     }
                     // ok → инициализируем соединение
                     console.log('[WS Инициализация] Проба успешна, создаем Socket.IO соединение');
+                    this.initAttempts = 0; // сбрасываем счетчик попыток при успехе
                     this.socket = io({
                         transports: ['websocket','polling'],
                         upgrade: true,
@@ -105,7 +111,7 @@ class RealtimeUpdater {
                 })
                 .catch((err) => { 
                     console.log(`[WS Инициализация] Ошибка пробы: ${err}`);
-                    window.__WEBSOCKETS_ENABLED__ = false; 
+                    this.scheduleInitRetry();
                 });
         } catch (error) {
             console.log(`[WS Инициализация] Критическая ошибка: ${error}`);
@@ -537,8 +543,17 @@ class RealtimeUpdater {
 
     scheduleReconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.warn(`🔌 Max reconnect attempts (${this.maxReconnectAttempts}) reached`);
+            console.warn(`🔌 Max reconnect attempts (${this.maxReconnectAttempts}) reached, попробуем полную реинициализацию`);
             __wsEmit('ws:max_reconnects_reached', { attempts: this.reconnectAttempts });
+            
+            // Если у нас еще остались попытки инициализации, попробуем полностью переинициализировать
+            if (this.initAttempts < this.maxInitAttempts) {
+                console.log('🔄 Попытка полной реинициализации WebSocket');
+                this.socket?.disconnect();
+                this.socket = null;
+                this.reconnectAttempts = 0; // сбрасываем счетчик reconnect для новой инициализации
+                this.scheduleInitRetry();
+            }
             return;
         }
         
@@ -567,6 +582,26 @@ class RealtimeUpdater {
             if (!this.isConnected) {
                 this.socket?.connect();
             }
+        }, delay);
+    }
+    
+    scheduleInitRetry() {
+        this.initAttempts++;
+        
+        if (this.initAttempts >= this.maxInitAttempts) {
+            console.warn(`🔌 Max init attempts (${this.maxInitAttempts}) reached, отключаем WebSockets`);
+            window.__WEBSOCKETS_ENABLED__ = false;
+            __wsEmit('ws:init_failed', { attempts: this.initAttempts });
+            return;
+        }
+        
+        const delay = this.initDelay * this.initAttempts; // линейное увеличение задержки
+        console.log(`🔄 Повторная инициализация WebSocket через ${delay/1000}с (попытка ${this.initAttempts}/${this.maxInitAttempts})`);
+        __wsEmit('ws:init_retry_scheduled', { attempt: this.initAttempts, delay });
+        
+        setTimeout(() => {
+            console.log(`🔄 Запуск повторной инициализации WebSocket (попытка ${this.initAttempts})`);
+            this.initSocket();
         }, delay);
     }
     
@@ -978,13 +1013,65 @@ class RealtimeUpdater {
         return {
             connected: this.isConnected,
             reconnectAttempts: this.reconnectAttempts,
+            initAttempts: this.initAttempts,
             socket: !!this.socket
         };
+    }
+    
+    // Ручная попытка переподключения
+    forceReconnect() {
+        console.log('🔄 Принудительное переподключение WebSocket');
+        if (this.socket) {
+            this.socket.disconnect();
+            this.socket.connect();
+        } else {
+            this.initAttempts = 0; // сбрасываем счетчик для новой попытки
+            this.initSocket();
+        }
+    }
+    
+    // Полная реинициализация
+    forceReinit() {
+        console.log('🔄 Принудительная реинициализация WebSocket');
+        this.socket?.disconnect();
+        this.socket = null;
+        this.reconnectAttempts = 0;
+        this.initAttempts = 0;
+        window.__WEBSOCKETS_ENABLED__ = true; // восстанавливаем флаг
+        this.initSocket();
     }
 }
 
 // Глобальная инициализация
 window.realtimeUpdater = null;
+
+// Глобальные функции для отладки и ручного управления
+window.__wsReconnect = () => {
+    if (window.realtimeUpdater) {
+        window.realtimeUpdater.forceReconnect();
+    } else {
+        console.log('WebSocket не инициализирован');
+    }
+};
+
+window.__wsReinit = () => {
+    if (window.realtimeUpdater) {
+        window.realtimeUpdater.forceReinit();
+    } else {
+        console.log('WebSocket не инициализирован');
+    }
+};
+
+window.__wsStatus = () => {
+    if (window.realtimeUpdater) {
+        const status = window.realtimeUpdater.getConnectionStatus();
+        console.log('WebSocket статус:', status);
+        return status;
+    } else {
+        console.log('WebSocket не инициализирован');
+        return null;
+    }
+};
 
 // Инициализируем после загрузки DOM
 document.addEventListener('DOMContentLoaded', () => {

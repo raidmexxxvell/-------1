@@ -2,7 +2,23 @@
 // --- Global fetch rate limiter: <= 20 req/sec, limited concurrency ---
 (() => {
     try {
-        const originalFetch = window.fetch.bind(window);
+        // Проверяем, не был ли уже установлен rate limiter
+        if (window.__PROFILE_FETCH_LIMITED__) {return;}
+        window.__PROFILE_FETCH_LIMITED__ = true;
+        
+        // Получаем оригинальную функцию fetch
+        let originalFetch;
+        
+        // Если админ уже перехватил fetch, сохраняем его как fallback, но используем прямую ссылку на fetch
+        if (window.__ADMIN_FETCH_INTERCEPTED__) {
+            // Сохраняем текущий (админский) fetch как fallback
+            const adminFetch = window.fetch;
+            // Получаем прямую ссылку на нативный fetch через дескриптор
+            originalFetch = Object.getPrototypeOf(window).fetch || adminFetch;
+        } else {
+            originalFetch = window.fetch;
+        }
+        
         const cfg = Object.assign({ tokensPerSec: 20, bucketCapacity: 20, maxConcurrent: 6 }, window.__FETCH_LIMITS__ || {});
         let tokens = cfg.bucketCapacity;
         let inFlight = 0;
@@ -17,7 +33,20 @@
             }
         };
         setInterval(() => { tokens = Math.min(cfg.bucketCapacity, tokens + cfg.tokensPerSec); schedule(); }, 1000);
-        window.fetch = (input, init) => new Promise((resolve, reject) => { q.push({ run: () => originalFetch(input, init).then(resolve, reject) }); schedule(); });
+        
+        // Сохраняем текущий fetch (может быть админский) как fallback
+        const currentFetch = window.fetch;
+        window.fetch = (input, init) => {
+            return new Promise((resolve, reject) => { 
+                q.push({ 
+                    run: () => {
+                        // Всегда используем originalFetch, чтобы избежать рекурсии
+                        return originalFetch.call(window, input, init).then(resolve, reject);
+                    }
+                }); 
+                schedule(); 
+            });
+        };
     } catch(_) {}
 
     // Legacy achievements полностью вынесены во внешний модуль (profile-achievements.js) или отключены.
@@ -56,6 +85,24 @@
             item.addEventListener('click', () => {
                 try { console.log('[nav-click]', tab); } catch(_) {}
                 const tab = item.getAttribute('data-tab');
+                
+                // BUG-002 FIX: Отписка от неглобальных WebSocket топиков при навигации
+                try {
+                    const ru = window.realtimeUpdater;
+                    if (ru && typeof ru.unsubscribeTopic === 'function') {
+                        // Получаем все текущие подписки и отписываемся от неглобальных
+                        const currentTopics = ru.subscribedTopics || new Set();
+                        currentTopics.forEach(topic => {
+                            if (topic !== 'global') {
+                                console.log('[Navigation Cleanup] Отписка от топика:', topic);
+                                ru.unsubscribeTopic(topic);
+                            }
+                        });
+                    }
+                } catch(e) {
+                    console.warn('[Navigation Cleanup] Ошибка отписки от топиков:', e);
+                }
+                
                 // Если открыт экран деталей матча — закрываем его при любом переходе по нижнему меню
                 try {
                     const mdPane = document.getElementById('ufo-match-details');

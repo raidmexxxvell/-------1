@@ -9,29 +9,20 @@
     let slides = Array.isArray(window.__HOME_ADS__) ? window.__HOME_ADS__.slice() : null;
     if (!slides || slides.length === 0) {
       slides = [
-        { img: '/static/img/ligareklama.jpg', fallback: '/static/img/ligareklama.webp', title: 'Здесь может быть ваша лига — нажми', action: 'BLB' },
-        { img: '/static/img/reklama.jpg', fallback: '/static/img/reklama.webp', title: '', action: '' },
-        { img: '/static/img/reklama.jpg', fallback: '/static/img/reklama.webp', title: '', action: '' }
+        { img: '/static/img/ligareklama.jpg', title: 'Здесь может быть ваша лига — нажми', action: 'BLB' },
+        { img: '/static/img/reklama.jpg', title: '', action: '' },
+        { img: '/static/img/reklama.jpg', title: '', action: '' }
       ];
     }
     track.innerHTML=''; dots.innerHTML='';
     slides.forEach((s, idx) => {
       const slide = document.createElement('div');
       slide.className = 'ads-slide';
-      const primary = s.img;
-      const fallback = s.fallback || null;
       const imgEl = document.createElement('img');
-      imgEl.src = primary;
+      imgEl.src = s.img;
       imgEl.alt = '';
       imgEl.className = 'ads-img';
       imgEl.loading = 'lazy';
-      if (fallback) {
-        imgEl.onerror = () => {
-          if (imgEl.dataset._triedFallback) {return;}
-          imgEl.dataset._triedFallback = '1';
-          imgEl.src = fallback;
-        };
-      }
       const titleDiv = document.createElement('div'); titleDiv.className='ads-title'; titleDiv.textContent = s.title || '';
       slide.append(imgEl, titleDiv);
       if (s.action) {
