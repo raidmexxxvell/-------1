@@ -3,7 +3,21 @@ Database models and operations for Liga Obninska
 Using PostgreSQL database schema
 """
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, Date, BigInteger, ForeignKey, UniqueConstraint, CheckConstraint, text
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Integer,
+    String,
+    DateTime,
+    Boolean,
+    Text,
+    Date,
+    BigInteger,
+    ForeignKey,
+    UniqueConstraint,
+    CheckConstraint,
+    text,
+)
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -46,6 +60,11 @@ class Team(Base):
     away_matches = relationship("Match", foreign_keys="Match.away_team_id", back_populates="away_team")
     team_compositions = relationship("TeamComposition", back_populates="team")
     match_events = relationship("MatchEvent", back_populates="team")
+    roster_entries = relationship(
+        "TeamPlayer",
+        back_populates="team",
+        cascade="all, delete-orphan",
+    )
 
 class Player(Base):
     __tablename__ = 'players'
@@ -77,6 +96,49 @@ class Player(Base):
         foreign_keys="MatchEvent.assisted_by_player_id",
         back_populates="assisted_by"
     )
+    team_links = relationship(
+        "TeamPlayer",
+        back_populates="player",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def full_name(self) -> str:
+        parts = [self.first_name or '', self.last_name or '']
+        return " ".join([p for p in parts if p]).strip()
+
+    def to_dict_basic(self) -> dict:
+        return {
+            'id': self.id,
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+            'username': self.username,
+            'position': self.position,
+            'full_name': self.full_name,
+        }
+
+
+class TeamPlayer(Base):
+    __tablename__ = 'team_players'
+
+    id = Column(Integer, primary_key=True)
+    team_id = Column(Integer, ForeignKey('teams.id', ondelete='CASCADE'), nullable=False)
+    player_id = Column(Integer, ForeignKey('players.id', ondelete='CASCADE'), nullable=False)
+    jersey_number = Column(Integer)
+    position = Column(String(50))
+    status = Column(String(20), default='active')  # active, injured, suspended, archived
+    is_captain = Column(Boolean, default=False)
+    joined_at = Column(DateTime, default=func.current_timestamp())
+    left_at = Column(DateTime)
+    created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.current_timestamp(), onupdate=func.current_timestamp())
+
+    __table_args__ = (
+        UniqueConstraint('team_id', 'player_id', name='uq_team_player_unique'),
+    )
+
+    team = relationship("Team", back_populates="roster_entries")
+    player = relationship("Player", back_populates="team_links")
 
 class TeamRoster(Base):
     """Упрощённая модель существующей таблицы team_roster (исторический список участников матчей).
@@ -434,6 +496,6 @@ db_ops = DatabaseOperations(db_manager)
 
 # Export for use in main app
 __all__ = [
-    'Tournament', 'Team', 'Player', 'Match', 'TeamComposition', 'MatchEvent', 'PlayerStatistics', 'AdminLog', 'News',
+    'Tournament', 'Team', 'Player', 'TeamPlayer', 'Match', 'TeamComposition', 'MatchEvent', 'PlayerStatistics', 'AdminLog', 'News',
     'DatabaseManager', 'DatabaseOperations', 'db_manager', 'db_ops', 'Base'
 ]

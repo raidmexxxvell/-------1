@@ -11,6 +11,7 @@
 - Текущая реализация хранит составы матчей в таблице `match_lineups` (ORM-модель `MatchLineupPlayer`) — записи содержат текстовое поле `player` (имя), `jersey_number`, `position` и флаг `is_captain`.
 - Есть агрегирующая/статистическая таблица `team_player_stats` (модель `TeamPlayerStats`) с полями просмотров/голов/пасов и т.д. — она использовалась для быстрых статистик.
 - Backend предоставляет API для CRUD составов и массового импорта: `/api/lineup/add`, `/api/lineup/remove`, `/api/lineup/list`, `/api/lineup/bulk_set`.
+- 27.09.2025: включён dual-read/double-write режим из нормализованных `team_players` в legacy `team_roster` под фича-флагом `feature:team_roster_store`; добавлена Alembic-миграция `20250927_add_team_players` (таблицы `team_players`, `legacy_player_mapping`, `player_migration_log`).
 - Фронтенд (админ) использует `templates/admin_dashboard.html` и `static/js/admin-enhanced.js` для управления командами и для открытия модального окна «Состав команды» (`openTeamRoster`) и Match Details (bulk-lineup textarea).
 - Клиентский рендер состава и управление событиями матча реализованы в `static/js/profile-match-roster-events.js` (рендер таблицы roster + управление событиями гол/пас/карта) и `static/js/profile-team.js` (страница команды, lazy-load roster через `/api/team/roster`).
 - Механика управления защищена: эндпоинты записи используют проверку Telegram `initData` и сравнение user id с `ADMIN_USER_ID` (админ имеет права).
@@ -284,3 +285,20 @@ Backend (Flask `app.py`):
   Если хотите — могу начать прямо с реализации Шага 1: напишу миграционный скрипт (в `scripts/`), unit-tests и запуск smoke на staging-копии БД. Напишите, приступать ли.
 
   ```
+
+  ---
+
+  ## Обновление 27.09.2025 — реализация бэкенд-API для нормализованных ростеров
+
+  - Добавлен новый ORM `TeamPlayer` и таблица `team_players`, фиксирующая связь игрока с командой, номер, позицию, статус и даты присоединения/ухода.
+  - Эндпоинт `/api/admin/teams/<id>/roster` теперь работает поверх `team_players` + `players` + `player_statistics` и возвращает единый payload:
+    - `players[].stats` строится на основе активного или запрошенного турнира.
+    - Поддерживается выбор турнира через `?tournament_id=<id>`.
+  - Реализованы CRUD-операции для работы с ростером напрямую:
+    - `POST /api/admin/teams/<team_id>/players` — создание или привязка игрока к команде.
+    - `PATCH /api/admin/teams/<team_id>/players/<entry_id>` — обновление позиции, номера, статуса, капитанства и базовых данных игрока.
+    - `DELETE /api/admin/teams/<team_id>/players/<entry_id>` — мягкое удаление (статус `archived`).
+    - `POST /api/admin/players/transfer` теперь переносит запись `team_players` между командами без обращения к legacy-таблицам.
+  - Публичный эндпоинт `/api/team/roster` использует те же нормализованные данные и кешируется по ключу `team-roster:(id|name):tournament`.
+  - Документация и schema-файл обновлены: новое представление `team_players`, индексы для быстрых выборок, логика кэширования.
+  - Следующий шаг: адаптировать фронтенд (Nano Store + админский UI) к новым payload и включить двустороннюю синхронизацию по WS после стабилизации API.

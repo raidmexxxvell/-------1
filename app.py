@@ -5,6 +5,7 @@ import json
 import time
 import hashlib
 import hmac
+import re
 from datetime import datetime, date, timezone
 from datetime import timedelta
 import gzip
@@ -149,7 +150,17 @@ check_required_environment_variables()
 
 # Импорты для новой системы БД
 try:
-    from database.database_models import db_manager, db_ops, Base, News, Match, Team
+    from database.database_models import (
+        db_manager,
+        db_ops,
+        Base,
+        News,
+        Match,
+        Team,
+        Player,
+        PlayerStatistics,
+        TeamPlayer,
+    )
     from database.database_api import db_api
     DATABASE_SYSTEM_AVAILABLE = True
     print("[INFO] New database system initialized")
@@ -7455,309 +7466,782 @@ def _fetch_team_stats(team_id: int, session):
         })
     return players
 
+def _load_team_or_404(db: Session, team_id: int):
+    from database.database_models import Team
+
+    team = (
+        db.query(Team)
+        .filter(Team.id == team_id, Team.is_active == True)  # noqa: E712 - SQLAlchemy pattern
+        .first()
+    )
+    if not team:
+        raise ValueError('Team not found')
+    return team
+
+
+def _resolve_tournament_id(db: Session, requested_id: int | None) -> tuple[int | None, dict | None]:
+    """Возвращает идентификатор турнира и краткую информацию, приоритетно используя запрошенный ID."""
+    from database.database_models import Tournament
+
+    tournament_info = None
+    if requested_id:
+        tournament = db.query(Tournament).filter(Tournament.id == requested_id).first()
+    else:
+        tournament = (
+            db.query(Tournament)
+            .filter(Tournament.status == 'active')
+            .order_by(Tournament.created_at.desc())
+            .first()
+        )
+    if tournament:
+        tournament_info = {
+            'id': tournament.id,
+            'name': tournament.name,
+            'season': tournament.season,
+            'status': tournament.status,
+        }
+        return tournament.id, tournament_info
+    return None, None
+
+
+def _serialize_roster_entries(entries, stats_map, tournament_id):
+    serialized = []
+    for entry in entries:
+        player = entry.player
+        stat = stats_map.get(entry.player_id)
+        serialized.append({
+            'id': entry.id,
+            'player_id': entry.player_id,
+            'team_id': entry.team_id,
+            'first_name': player.first_name,
+            'last_name': player.last_name,
+            'full_name': player.full_name,
+            'username': player.username,
+            'position': entry.position or player.position,
+            'primary_position': player.position,
+            'jersey_number': entry.jersey_number,
+            'status': entry.status,
+            'is_captain': entry.is_captain,
+            'joined_at': entry.joined_at.isoformat() if entry.joined_at else None,
+            'updated_at': entry.updated_at.isoformat() if entry.updated_at else None,
+            'stats': None if tournament_id is None else {
+                'tournament_id': tournament_id,
+                'matches_played': stat.matches_played if stat else 0,
+                'goals': stat.goals_scored if stat else 0,
+                'assists': stat.assists if stat else 0,
+                'goal_actions': (stat.goals_scored if stat else 0) + (stat.assists if stat else 0),
+                'yellow_cards': stat.yellow_cards if stat else 0,
+                'red_cards': stat.red_cards if stat else 0,
+            }
+        })
+    return serialized
+
+
+def _collect_roster_stats(db: Session, player_ids: list[int], tournament_id: int | None):
+    if not player_ids or tournament_id is None:
+        return {}
+    stats = (
+        db.query(PlayerStatistics)
+        .filter(
+            PlayerStatistics.player_id.in_(player_ids),
+            PlayerStatistics.tournament_id == tournament_id,
+        )
+        .all()
+    )
+    return {stat.player_id: stat for stat in stats}
+
+
+ROSTER_STORE_FLAG_ENV = 'FEATURE_TEAM_ROSTER_STORE'
+_LEGACY_ROSTER_SETUP_SQL = """
+CREATE TABLE IF NOT EXISTS team_roster (
+    id SERIAL PRIMARY KEY,
+    team TEXT NOT NULL,
+    player TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC')
+);
+CREATE INDEX IF NOT EXISTS ix_team_roster_team ON team_roster(team);
+"""
+_LEGACY_JERSEY_RE = re.compile(r'^\s*(?:#|№|no\.?|num\.?|n°)?\s*(\d{1,3})[\.-:]?\s+(.*)$', re.IGNORECASE)
+_LEGACY_SPACE_RE = re.compile(r'\s+')
+
+
+def _team_roster_store_enabled() -> bool:
+    return _is_feature_enabled(ROSTER_STORE_FLAG_ENV)
+
+
+def _ensure_legacy_team_roster_table(db: Session | None) -> None:
+    if db is None:
+        return
+    try:
+        db.execute(text(_LEGACY_ROSTER_SETUP_SQL))
+    except Exception as exc:  # noqa: BLE001
+        try:
+            app.logger.warning(f"Legacy team_roster ensure failed: {exc}")
+        except Exception:
+            pass
+
+
+def _legacy_player_name_key(name: str) -> str:
+    return _LEGACY_SPACE_RE.sub(' ', (name or '').strip()).lower()
+
+
+def _compose_player_full_name(player: Player | None) -> str:
+    if not player:
+        return ''
+    parts = []
+    first = (player.first_name or '').strip()
+    last = (player.last_name or '').strip()
+    if first:
+        parts.append(first)
+    if last:
+        parts.append(last)
+    full = ' '.join(parts).strip()
+    if not full:
+        username = (player.username or '').strip()
+        if username:
+            full = username
+    return _LEGACY_SPACE_RE.sub(' ', full).strip()
+
+
+def _parse_legacy_player_name(raw: str | None) -> tuple[str, str, str, int | None]:
+    text_value = _LEGACY_SPACE_RE.sub(' ', (raw or '').strip())
+    jersey_number: int | None = None
+    if not text_value:
+        return '', '', '', None
+    match = _LEGACY_JERSEY_RE.match(text_value)
+    if match:
+        candidate = match.group(1)
+        try:
+            jersey_number = int(candidate)
+        except Exception:
+            jersey_number = None
+        text_value = match.group(2).strip()
+        text_value = _LEGACY_SPACE_RE.sub(' ', text_value)
+    if not text_value:
+        return '', '', '', jersey_number
+    parts = text_value.split(' ', 1)
+    first = parts[0]
+    last = parts[1] if len(parts) > 1 else ''
+    return first, last, text_value, jersey_number
+
+
+def _fetch_legacy_roster_rows(db: Session, team_name: str) -> list[dict]:
+    if not team_name:
+        return []
+    try:
+        _ensure_legacy_team_roster_table(db)
+        rows = (
+            db.execute(
+                text("SELECT id, player, created_at FROM team_roster WHERE team=:team ORDER BY id ASC"),
+                {'team': team_name},
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(row) for row in rows]
+    except Exception as exc:  # noqa: BLE001
+        try:
+            app.logger.warning(f"Legacy roster fetch failed for team '{team_name}': {exc}")
+        except Exception:
+            pass
+        return []
+
+
+def _serialize_legacy_roster_rows(team: Team, legacy_rows: list[dict]) -> list[dict]:
+    payload: list[dict] = []
+    for row in legacy_rows:
+        first, last, full_name, jersey = _parse_legacy_player_name(row.get('player'))
+        normalized_full_name = full_name or (first or last or '')
+        payload.append({
+            'id': None,
+            'player_id': None,
+            'team_id': getattr(team, 'id', None),
+            'first_name': first or normalized_full_name,
+            'last_name': last or None,
+            'full_name': normalized_full_name,
+            'username': None,
+            'position': None,
+            'primary_position': None,
+            'jersey_number': jersey,
+            'status': 'legacy',
+            'is_captain': False,
+            'joined_at': row.get('created_at').isoformat() if row.get('created_at') else None,
+            'updated_at': row.get('created_at').isoformat() if row.get('created_at') else None,
+            'stats': None,
+            'legacy': {
+                'row_id': row.get('id'),
+                'source': 'team_roster',
+            },
+        })
+    return payload
+
+
+def _sync_legacy_roster_from_entries(db: Session, team: Team, roster_entries: list[TeamPlayer] | None = None) -> None:
+    if not _team_roster_store_enabled():
+        return
+    if not team or not getattr(team, 'name', None):
+        return
+    try:
+        _ensure_legacy_team_roster_table(db)
+        if roster_entries is None:
+            roster_entries = (
+                db.query(TeamPlayer)
+                .join(Player)
+                .filter(TeamPlayer.team_id == team.id, TeamPlayer.status != 'archived')
+                .order_by(
+                    func.coalesce(TeamPlayer.jersey_number, 999),
+                    func.lower(Player.last_name),
+                    func.lower(Player.first_name),
+                )
+                .all()
+            )
+        desired_names: list[str] = []
+        seen_keys: set[str] = set()
+        for entry in roster_entries:
+            if entry.status == 'archived':
+                continue
+            full_name = _compose_player_full_name(entry.player)
+            if not full_name:
+                continue
+            key = _legacy_player_name_key(full_name)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            desired_names.append(full_name)
+
+        existing_rows = (
+            db.execute(
+                text("SELECT id, player FROM team_roster WHERE team=:team"),
+                {'team': team.name},
+            )
+            .mappings()
+            .all()
+        )
+        existing_by_key = {_legacy_player_name_key(row['player']): row for row in existing_rows}
+        kept_ids: set[int] = set()
+
+        for full_name in desired_names:
+            key = _legacy_player_name_key(full_name)
+            row = existing_by_key.get(key)
+            if row:
+                kept_ids.add(row['id'])
+                if row['player'] != full_name:
+                    db.execute(
+                        text("UPDATE team_roster SET player=:player WHERE id=:id"),
+                        {'player': full_name, 'id': row['id']},
+                    )
+            else:
+                db.execute(
+                    text("INSERT INTO team_roster (team, player) VALUES (:team, :player)"),
+                    {'team': team.name, 'player': full_name},
+                )
+
+        for row in existing_rows:
+            if row['id'] not in kept_ids:
+                db.execute(text("DELETE FROM team_roster WHERE id=:id"), {'id': row['id']})
+    except Exception as exc:  # noqa: BLE001
+        try:
+            app.logger.warning(f"Legacy roster sync failed for team_id={getattr(team, 'id', None)}: {exc}")
+        except Exception:
+            pass
+
+
 @app.route('/api/admin/teams/<int:team_id>/roster', methods=['GET'])
 @require_admin()
 def api_admin_team_roster(team_id):
-    """Возвращает список игроков команды с накопленной статистикой из динамической таблицы team_stats_<team_id>.
-    Ленивая инициализация: при первом запросе создаётся таблица и заполняется из team_roster (все значения = 0).
-    Формат ответа: first_name, last_name, matches_played, goals, assists, goal_actions, yellow_cards, red_cards, last_updated."""
+    """Новый список игроков команды с данными из нормализованных таблиц."""
     if SessionLocal is None:
         return jsonify({'error': 'Database not available'}), 500
 
+    requested_tournament_id = request.args.get('tournament_id', type=int)
+
     db = get_db()
     try:
-        from database.database_models import Team
-        team = db.query(Team).filter(Team.id == team_id, Team.is_active == True).first()
-        if not team:
-            return jsonify({'error': 'Team not found'}), 404
-        # ensure table + init if empty
         try:
-            _ensure_team_stats_table(team.id, db.get_bind())
-            _init_team_stats_if_empty(team.id, team.name, db)
-        except Exception as e:
-            app.logger.error(f"Ensure/init team stats failed team_id={team.id}: {e}")
-            return jsonify({'error': 'Failed to init team stats'}), 500
+            team = _load_team_or_404(db, team_id)
+        except ValueError:
+            return jsonify({'error': 'Team not found'}), 404
 
-        players = _fetch_team_stats(team.id, db)
+        tournament_id, tournament_info = _resolve_tournament_id(db, requested_tournament_id)
+
+        roster_entries = (
+            db.query(TeamPlayer)
+            .join(Player)
+            .filter(
+                TeamPlayer.team_id == team.id,
+                TeamPlayer.status != 'archived',
+            )
+            .order_by(
+                func.coalesce(TeamPlayer.jersey_number, 999),
+                func.lower(Player.last_name),
+                func.lower(Player.first_name),
+            )
+            .all()
+        )
+
+        data_source = 'normalized'
+        players_payload: list[dict] = []
+        if roster_entries:
+            stats_map = _collect_roster_stats(db, [r.player_id for r in roster_entries], tournament_id)
+            players_payload = _serialize_roster_entries(roster_entries, stats_map, tournament_id)
+
+        if not players_payload:
+            legacy_rows = _fetch_legacy_roster_rows(db, team.name)
+            if legacy_rows:
+                data_source = 'legacy'
+                players_payload = _serialize_legacy_roster_rows(team, legacy_rows)
 
         return jsonify({
             'status': 'success',
-            'team': {
-                'id': team.id,
-                'name': team.name
-            },
-            'players': players,
-            'total': len(players)
+            'team': {'id': team.id, 'name': team.name},
+            'tournament': tournament_info,
+            'players': players_payload,
+            'total': len(players_payload),
+            'source': data_source,
         })
-    except Exception as e:
-        app.logger.error(f"Get team roster failed: {e}")
-        return jsonify({'error': str(e)}), 500
+    except Exception as exc:  # noqa: BLE001
+        app.logger.error(f"Get normalized team roster failed: {exc}")
+        return jsonify({'error': 'Failed to load roster'}), 500
     finally:
         db.close()
 
-# ---------------- Public Team Roster (aggregated stats) -----------------
+
+def _public_roster_response(team, tournament_info, players_payload, source: str = 'normalized'):
+    updated_at = None
+    for player in players_payload:
+        updated = player.get('updated_at') or player.get('joined_at')
+        if updated and (not updated_at or updated > updated_at):
+            updated_at = updated
+    return {
+        'team': {'id': team.id, 'name': team.name},
+        'tournament': tournament_info,
+        'players': players_payload,
+        'total': len(players_payload),
+        'updated_at': updated_at,
+        'source': source,
+    }
+
+
 @app.route('/api/team/roster', methods=['GET'])
 def api_team_roster_public():
-    """Публичный состав команды с накопленной статистикой (аналог admin roster, но без авторизации).
-    Query params: ?id=123 | ?name=Команда
-    Ответ кэшируется через etag_json: ключ "team-roster:{id|name_lower}".
-    Поля players: first_name,last_name,goals,assists,yellow_cards,red_cards,matches_played,goal_actions,last_updated.
-    Если БД недоступна (SessionLocal is None) возвращаем 503.
-    """
+    """Публичный состав команды на основе нормализованных данных."""
     if SessionLocal is None:
         return jsonify({'error': 'Database not available'}), 503
 
     raw_id = (request.args.get('id') or '').strip()
     raw_name = (request.args.get('name') or '').strip()
+    requested_tournament_id = request.args.get('tournament_id', type=int)
 
     def _build():
         db = get_db()
         try:
             from database.database_models import Team
+
+            team_query = db.query(Team).filter(Team.is_active == True)  # noqa: E712
             team = None
             if raw_id and raw_id.isdigit():
-                team = db.query(Team).filter(Team.id==int(raw_id), Team.is_active==True).first()
+                team = team_query.filter(Team.id == int(raw_id)).first()
             if not team and raw_name:
-                team = db.query(Team).filter(func.lower(Team.name)==func.lower(raw_name), Team.is_active==True).first()
+                team = team_query.filter(func.lower(Team.name) == func.lower(raw_name)).first()
             if not team:
-                return {'error':'Team not found'}
-            # ensure dynamic stats table exists + init
+                return {'error': 'Team not found'}
+
+            tournament_id, tournament_info = _resolve_tournament_id(db, requested_tournament_id)
+
+            roster_entries = (
+                db.query(TeamPlayer)
+                .join(Player)
+                .filter(
+                    TeamPlayer.team_id == team.id,
+                    TeamPlayer.status != 'archived',
+                )
+                .order_by(
+                    func.coalesce(TeamPlayer.jersey_number, 999),
+                    func.lower(Player.last_name),
+                    func.lower(Player.first_name),
+                )
+                .all()
+            )
+            data_source = 'normalized'
+            players_payload: list[dict] = []
+            if roster_entries:
+                stats_map = _collect_roster_stats(db, [r.player_id for r in roster_entries], tournament_id)
+                players_payload = _serialize_roster_entries(roster_entries, stats_map, tournament_id)
+
+            if not players_payload:
+                legacy_rows = _fetch_legacy_roster_rows(db, team.name)
+                if legacy_rows:
+                    data_source = 'legacy'
+                    players_payload = _serialize_legacy_roster_rows(team, legacy_rows)
+
+            return _public_roster_response(team, tournament_info, players_payload, data_source)
+        finally:
             try:
-                _ensure_team_stats_table(team.id, db.get_bind())
-                _init_team_stats_if_empty(team.id, team.name, db)
-            except Exception as e:
-                app.logger.error(f"Public roster ensure/init failed team_id={team.id}: {e}")
-                return {'error':'Failed to init team stats'}
-            players = _fetch_team_stats(team.id, db)
-            # updated_at для etag: берем максимальный last_updated игроков
-            upd = None
-            try:
-                for p in players:
-                    lu = p.get('last_updated')
-                    if lu and (not upd or str(lu) > str(upd)):
-                        upd = lu
+                db.close()
             except Exception:
                 pass
-            return {
-                'team': {'id': team.id, 'name': team.name},
-                'players': players,
-                'total': len(players),
-                'updated_at': upd
-            }
-        finally:
-            try: db.close()
-            except Exception: pass
 
-    # core_filter исключает updated_at чтобы ETag зависел только от набора игроков и их статистики
     def _core_filter(payload):
         if not payload or 'players' not in payload:
             return payload
         try:
+            filtered_players = []
+            for player in payload.get('players', []):
+                filtered_players.append({
+                    'id': player.get('id'),
+                    'player_id': player.get('player_id'),
+                    'first_name': player.get('first_name'),
+                    'last_name': player.get('last_name'),
+                    'full_name': player.get('full_name'),
+                    'position': player.get('position'),
+                    'jersey_number': player.get('jersey_number'),
+                    'status': player.get('status'),
+                    'stats': player.get('stats'),
+                })
             return {
                 'team': payload.get('team'),
-                'players': [
-                    {
-                        'id': p.get('id'),
-                        'first_name': p.get('first_name'),
-                        'last_name': p.get('last_name'),
-                        'goals': p.get('goals'),
-                        'assists': p.get('assists'),
-                        'yellow_cards': p.get('yellow_cards'),
-                        'red_cards': p.get('red_cards'),
-                        'matches_played': p.get('matches_played'),
-                        'goal_actions': p.get('goal_actions')
-                    } for p in (payload.get('players') or [])
-                ],
-                'total': payload.get('total')
+                'tournament': payload.get('tournament'),
+                'players': filtered_players,
+                'total': payload.get('total'),
+                'source': payload.get('source'),
             }
         except Exception:
             return payload
 
-    # Определяем ключ (если нет id, используем нормализованное имя)
-    cache_key = None
     if raw_id and raw_id.isdigit():
-        cache_key = f"team-roster:id:{raw_id}"
+        cache_key = f"team-roster:id:{raw_id}:tournament:{requested_tournament_id or 'auto'}"
     elif raw_name:
-        cache_key = f"team-roster:name:{raw_name.lower()}"
+        cache_key = f"team-roster:name:{raw_name.lower()}:tournament:{requested_tournament_id or 'auto'}"
     else:
-        return jsonify({'error':'Missing id or name'}), 400
+        return jsonify({'error': 'Missing id or name'}), 400
 
-    return etag_json(cache_key, _build, cache_ttl=120, max_age=120, swr=300, core_filter=_core_filter, cache_visibility='public')
+    return etag_json(
+        cache_key,
+        _build,
+        cache_ttl=120,
+        max_age=120,
+        swr=300,
+        core_filter=_core_filter,
+        cache_visibility='public',
+    )
+
+
+def _get_or_create_player(db: Session, payload: dict[str, object]) -> Player:
+    player_id = payload.get('player_id')
+    if player_id:
+        player = db.query(Player).filter(Player.id == int(player_id)).first()
+        if not player:
+            raise ValueError('Player not found')
+    else:
+        first_name = (payload.get('first_name') or '').strip()
+        last_name = (payload.get('last_name') or '').strip()
+        if not first_name:
+            raise ValueError('first_name is required')
+        player = Player(
+            first_name=first_name,
+            last_name=last_name or None,
+            position=(payload.get('primary_position') or payload.get('position') or '').strip() or None,
+            username=(payload.get('username') or '').strip() or None,
+        )
+        db.add(player)
+        db.flush()
+    # Обновляем базовые поля, если переданы
+    if 'first_name' in payload:
+        value = (payload.get('first_name') or '').strip()
+        if value:
+            player.first_name = value
+    if 'last_name' in payload:
+        player.last_name = (payload.get('last_name') or '').strip() or None
+    if 'primary_position' in payload or 'position' in payload:
+        position = (
+            (payload.get('primary_position') or '')
+            or (payload.get('position') or '')
+        ).strip()
+        player.position = position or player.position
+    if 'username' in payload:
+        player.username = (payload.get('username') or '').strip() or None
+    return player
+
+
+def _build_team_player_payload(entry: TeamPlayer) -> dict:
+    player = entry.player
+    return {
+        'id': entry.id,
+        'player_id': entry.player_id,
+        'team_id': entry.team_id,
+        'first_name': player.first_name,
+        'last_name': player.last_name,
+        'full_name': player.full_name,
+        'username': player.username,
+        'position': entry.position or player.position,
+        'primary_position': player.position,
+        'jersey_number': entry.jersey_number,
+        'status': entry.status,
+        'is_captain': entry.is_captain,
+        'joined_at': entry.joined_at.isoformat() if entry.joined_at else None,
+        'updated_at': entry.updated_at.isoformat() if entry.updated_at else None,
+    }
+
+
+@app.route('/api/admin/teams/<int:team_id>/players', methods=['POST'])
+@require_admin()
+def api_admin_team_player_create(team_id: int):
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+
+    payload = request.get_json(silent=True) or {}
+    db = get_db()
+    try:
+        try:
+            team = _load_team_or_404(db, team_id)
+        except ValueError:
+            return jsonify({'error': 'Team not found'}), 404
+
+        player = _get_or_create_player(db, payload)
+
+        existing = (
+            db.query(TeamPlayer)
+            .filter(TeamPlayer.team_id == team.id, TeamPlayer.player_id == player.id)
+            .first()
+        )
+        if existing and existing.status != 'archived':
+            return jsonify({'error': 'Player already assigned to this team'}), 400
+
+        if existing and existing.status == 'archived':
+            entry = existing
+            entry.status = 'active'
+            entry.left_at = None
+            entry.joined_at = datetime.utcnow()
+        else:
+            entry = TeamPlayer(team_id=team.id, player_id=player.id)
+            db.add(entry)
+
+        entry.jersey_number = payload.get('jersey_number')
+        entry.position = (payload.get('position') or '').strip() or entry.position
+        status_value = payload.get('status')
+        if status_value is not None:
+            entry.status = str(status_value).strip() or 'active'
+        elif not entry.status:
+            entry.status = 'active'
+        entry.is_captain = bool(payload.get('is_captain') or False)
+
+        db.flush()
+        _sync_legacy_roster_from_entries(db, team)
+        db.commit()
+        db.refresh(entry)
+
+        manual_log(
+            action='team_player_create',
+            description=f"Добавлен игрок {entry.player.full_name} в команду {team.name}",
+            affected_data={'team_id': team.id, 'player_id': entry.player_id, 'entry_id': entry.id},
+        )
+        return jsonify({'status': 'success', 'player': _build_team_player_payload(entry)})
+    except ValueError as ve:
+        db.rollback()
+        return jsonify({'error': str(ve)}), 400
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        app.logger.error(f"Failed to create team player: {exc}")
+        return jsonify({'error': 'Failed to create player'}), 500
+    finally:
+        db.close()
+
+
+@app.route('/api/admin/teams/<int:team_id>/players/<int:entry_id>', methods=['PATCH'])
+@require_admin()
+def api_admin_team_player_update(team_id: int, entry_id: int):
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+
+    payload = request.get_json(silent=True) or {}
+    db = get_db()
+    try:
+        try:
+            team = _load_team_or_404(db, team_id)
+        except ValueError:
+            return jsonify({'error': 'Team not found'}), 404
+
+        entry = (
+            db.query(TeamPlayer)
+            .filter(TeamPlayer.id == entry_id, TeamPlayer.team_id == team_id)
+            .first()
+        )
+        if not entry:
+            return jsonify({'error': 'Roster entry not found'}), 404
+
+        if payload.get('player_id') and int(payload['player_id']) != entry.player_id:
+            target_player = _get_or_create_player(db, payload)
+            entry.player = target_player
+
+        if 'jersey_number' in payload:
+            entry.jersey_number = payload.get('jersey_number')
+        if 'position' in payload:
+            entry.position = (payload.get('position') or '').strip() or None
+        if 'status' in payload:
+            new_status = str(payload.get('status') or '').strip()
+            if new_status:
+                entry.status = new_status
+            if entry.status == 'archived':
+                if not entry.left_at:
+                    entry.left_at = datetime.utcnow()
+            else:
+                entry.left_at = None
+        if 'is_captain' in payload:
+            entry.is_captain = bool(payload.get('is_captain'))
+
+        db.flush()
+        _sync_legacy_roster_from_entries(db, team)
+        db.commit()
+        db.refresh(entry)
+
+        manual_log(
+            action='team_player_update',
+            description=f"Обновлена запись игрока {entry.player.full_name} в команде {entry.team_id}",
+            affected_data={'team_id': entry.team_id, 'player_id': entry.player_id, 'entry_id': entry.id},
+        )
+        return jsonify({'status': 'success', 'player': _build_team_player_payload(entry)})
+    except ValueError as ve:
+        db.rollback()
+        return jsonify({'error': str(ve)}), 400
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        app.logger.error(f"Failed to update team player: {exc}")
+        return jsonify({'error': 'Failed to update player'}), 500
+    finally:
+        db.close()
+
+
+@app.route('/api/admin/teams/<int:team_id>/players/<int:entry_id>', methods=['DELETE'])
+@require_admin()
+def api_admin_team_player_delete(team_id: int, entry_id: int):
+    if SessionLocal is None:
+        return jsonify({'error': 'Database not available'}), 500
+
+    db = get_db()
+    try:
+        try:
+            team = _load_team_or_404(db, team_id)
+        except ValueError:
+            return jsonify({'error': 'Team not found'}), 404
+
+        entry = (
+            db.query(TeamPlayer)
+            .filter(TeamPlayer.id == entry_id, TeamPlayer.team_id == team_id)
+            .first()
+        )
+        if not entry:
+            return jsonify({'error': 'Roster entry not found'}), 404
+
+        entry.status = 'archived'
+        entry.left_at = datetime.utcnow()
+
+        db.flush()
+        _sync_legacy_roster_from_entries(db, team)
+        db.commit()
+        manual_log(
+            action='team_player_delete',
+            description=f"Игрок {entry.player.full_name} помечен как удалён из команды {entry.team_id}",
+            affected_data={'team_id': entry.team_id, 'player_id': entry.player_id, 'entry_id': entry.id},
+        )
+        return jsonify({'status': 'success'})
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        app.logger.error(f"Failed to archive team player: {exc}")
+        return jsonify({'error': 'Failed to remove player'}), 500
+    finally:
+        db.close()
+
 
 # ---------------- Player Transfer Management -----------------
 @app.route('/api/admin/players/transfer', methods=['POST'])
 @require_admin()
 def api_admin_player_transfer():
-    """Перевод игрока между командами в системе трансферов.
-    POST data: player_name, from_team, to_team
-    Обновляет team_roster и динамические таблицы team_stats_<id>.
-    """
+    """Перевод игрока между командами в нормализованной модели."""
     if SessionLocal is None:
         return jsonify({'error': 'Database not available'}), 500
 
+    payload = request.get_json(silent=True) or {}
+    db = get_db()
     try:
-        data = request.get_json() or {}
-        player_name = (data.get('player_name') or '').strip()
-        from_team = (data.get('from_team') or '').strip()
-        to_team = (data.get('to_team') or '').strip()
+        entry_id = payload.get('team_player_id') or payload.get('entry_id')
+        player_id = payload.get('player_id')
+        to_team_id = payload.get('to_team_id') or payload.get('team_id')
 
-        if not all([player_name, from_team, to_team]):
-            return jsonify({'error': 'Missing required fields: player_name, from_team, to_team'}), 400
+        if not to_team_id:
+            return jsonify({'error': 'to_team_id is required'}), 400
 
-        if from_team == to_team:
-            return jsonify({'error': 'Cannot transfer player to the same team'}), 400
-
-        db = get_db()
         try:
-            from database.database_models import Team
-            
-            # Проверяем существование команд
-            from_team_obj = db.query(Team).filter(
-                func.lower(Team.name) == func.lower(from_team), 
-                Team.is_active == True
-            ).first()
-            to_team_obj = db.query(Team).filter(
-                func.lower(Team.name) == func.lower(to_team), 
-                Team.is_active == True
-            ).first()
+            destination_team = _load_team_or_404(db, int(to_team_id))
+        except ValueError:
+            return jsonify({'error': 'Destination team not found'}), 404
 
-            if not from_team_obj:
-                return jsonify({'error': f'Source team "{from_team}" not found'}), 404
-            if not to_team_obj:
-                return jsonify({'error': f'Destination team "{to_team}" not found'}), 404
+        if entry_id:
+            entry = (
+                db.query(TeamPlayer)
+                .filter(TeamPlayer.id == int(entry_id))
+                .first()
+            )
+        elif player_id:
+            entry = (
+                db.query(TeamPlayer)
+                .filter(TeamPlayer.player_id == int(player_id), TeamPlayer.status != 'archived')
+                .first()
+            )
+        else:
+            return jsonify({'error': 'team_player_id or player_id is required'}), 400
 
-            # Проверяем существование игрока в исходной команде
-            from sqlalchemy import text
-            check_query = text("SELECT id FROM team_roster WHERE team = :team AND player = :player")
-            result = db.execute(check_query, {
-                'team': from_team_obj.name,
-                'player': player_name
-            }).fetchone()
+        if not entry:
+            return jsonify({'error': 'Player assignment not found'}), 404
 
-            if not result:
-                return jsonify({'error': f'Player "{player_name}" not found in team "{from_team}"'}), 404
+        if entry.team_id == destination_team.id:
+            return jsonify({'error': 'Player already belongs to target team'}), 400
 
-            # Проверяем, что игрока еще не в целевой команде
-            existing_query = text("SELECT id FROM team_roster WHERE team = :team AND player = :player")
-            existing_result = db.execute(existing_query, {
-                'team': to_team_obj.name,
-                'player': player_name
-            }).fetchone()
-
-            if existing_result:
-                return jsonify({'error': f'Player "{player_name}" already exists in team "{to_team}"'}), 400
-
-            # 1. Обновляем team_roster
-            # Удаляем из старой команды
-            delete_query = text("DELETE FROM team_roster WHERE team = :team AND player = :player")
-            db.execute(delete_query, {
-                'team': from_team_obj.name,
-                'player': player_name
-            })
-
-            # Добавляем в новую команду и получаем новый id записи состава (используется как player_id в team_stats)
-            insert_query = text("""
-                INSERT INTO team_roster (team, player, created_at) 
-                VALUES (:team, :player, NOW()) 
-                RETURNING id
-            """)
-            new_roster_row = db.execute(insert_query, {
-                'team': to_team_obj.name,
-                'player': player_name
-            }).fetchone()
-            new_player_id = int(new_roster_row[0]) if new_roster_row and new_roster_row[0] is not None else None
-
-            # 2. Обрабатываем динамические таблицы team_stats
+        source_team_id = entry.team_id
+        source_team = entry.team
+        if source_team is None and source_team_id is not None:
             try:
-                # Инициализируем таблицы статистики, если они не существуют
-                _ensure_team_stats_table(from_team_obj.id, db.get_bind())
-                _ensure_team_stats_table(to_team_obj.id, db.get_bind())
-                _init_team_stats_if_empty(from_team_obj.id, from_team_obj.name, db)
-                _init_team_stats_if_empty(to_team_obj.id, to_team_obj.name, db)
+                source_team = _load_team_or_404(db, int(source_team_id))
+            except ValueError:
+                source_team = None
+        existing = (
+            db.query(TeamPlayer)
+            .filter(
+                TeamPlayer.team_id == destination_team.id,
+                TeamPlayer.player_id == entry.player_id,
+                TeamPlayer.status != 'archived',
+            )
+            .first()
+        )
+        if existing:
+            return jsonify({'error': 'Player already assigned to target team'}), 400
 
-                # Получаем статистику игрока из старой команды
-                from_stats_table = f"team_stats_{from_team_obj.id}"
-                get_stats_query = text(f"""
-                    SELECT first_name, last_name, matches_played, goals, assists, 
-                           yellow_cards, red_cards, last_updated
-                    FROM {from_stats_table} 
-                    WHERE first_name || ' ' || last_name = :player_name
-                """)
-                player_stats = db.execute(get_stats_query, {'player_name': player_name}).fetchone()
+        entry.team_id = destination_team.id
+        entry.joined_at = datetime.utcnow()
+        entry.left_at = None
+        if 'status' in payload:
+            status_value = str(payload.get('status') or '').strip()
+            if status_value:
+                entry.status = status_value
 
-                # Разделяем имя игрока на имя и фамилию (для вставки/инициализации)
-                name_parts = player_name.strip().split(' ', 1)
-                first_name = name_parts[0] if name_parts else ''
-                last_name = name_parts[1] if len(name_parts) > 1 else ''
+        db.flush()
+        if source_team and getattr(source_team, 'id', None) != destination_team.id:
+            _sync_legacy_roster_from_entries(db, source_team)
+        _sync_legacy_roster_from_entries(db, destination_team)
+        db.commit()
+        db.refresh(entry)
 
-                to_stats_table = f"team_stats_{to_team_obj.id}"
-
-                # Готовим запрос вставки в статистику ЦЕЛЕВОЙ команды с обязательным player_id
-                insert_stats_query = text(f"""
-                    INSERT INTO {to_stats_table} 
-                    (player_id, first_name, last_name, matches_played, goals, assists, yellow_cards, red_cards, last_updated)
-                    VALUES (:player_id, :first_name, :last_name, :matches_played, :goals, :assists, :yellow_cards, :red_cards, NOW())
-                """)
-
-                if player_stats:
-                    # Используем существующие значения статистики из исходной команды
-                    db.execute(insert_stats_query, {
-                        'player_id': new_player_id,
-                        'first_name': first_name,
-                        'last_name': last_name,
-                        'matches_played': player_stats[2] or 0,
-                        'goals': player_stats[3] or 0,
-                        'assists': player_stats[4] or 0,
-                        'yellow_cards': player_stats[5] or 0,
-                        'red_cards': player_stats[6] or 0
-                    })
-
-                    # Удаляем запись статистики из исходной команды
-                    delete_stats_query = text(f"""
-                        DELETE FROM {from_stats_table} 
-                        WHERE first_name || ' ' || last_name = :player_name
-                    """)
-                    db.execute(delete_stats_query, {'player_name': player_name})
-                else:
-                    # Если в исходной команде статистика не найдена — создаём нулевую запись в целевой
-                    db.execute(insert_stats_query, {
-                        'player_id': new_player_id,
-                        'first_name': first_name,
-                        'last_name': last_name,
-                        'matches_played': 0,
-                        'goals': 0,
-                        'assists': 0,
-                        'yellow_cards': 0,
-                        'red_cards': 0
-                    })
-
-            except Exception as stats_error:
-                app.logger.warning(f"Stats transfer failed for {player_name}: {stats_error}")
-                # Продолжаем выполнение, так как основной перевод в team_roster уже сделан
-
-            db.commit()
-
-            app.logger.info(f"Player transfer completed: {player_name} from {from_team} to {to_team}")
-            
-            return jsonify({
-                'status': 'success',
-                'message': f'Player "{player_name}" transferred from "{from_team}" to "{to_team}"',
-                'transfer': {
-                    'player_name': player_name,
-                    'from_team': from_team_obj.name,
-                    'to_team': to_team_obj.name,
-                    'timestamp': datetime.now().isoformat()
-                }
-            })
-
-        except Exception as e:
-            db.rollback()
-            app.logger.error(f"Player transfer failed: {e}")
-            return jsonify({'error': str(e)}), 500
-        finally:
-            db.close()
-
-    except Exception as e:
+        manual_log(
+            action='team_player_transfer',
+            description=f"Игрок {entry.player.full_name} переведён в команду {destination_team.name}",
+            affected_data={'team_id': destination_team.id, 'player_id': entry.player_id, 'entry_id': entry.id},
+        )
+        return jsonify({'status': 'success', 'player': _build_team_player_payload(entry)})
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        app.logger.error(f"Failed to transfer player: {exc}")
+        return jsonify({'error': 'Failed to transfer player'}), 500
+    finally:
+        db.close()
         app.logger.error(f"Transfer API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 

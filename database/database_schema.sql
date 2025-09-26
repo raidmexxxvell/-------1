@@ -52,6 +52,22 @@ CREATE TABLE players (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 3b. Team player assignments (active roster per team)
+CREATE TABLE team_players (
+    id SERIAL PRIMARY KEY,
+    team_id INTEGER REFERENCES teams(id) ON DELETE CASCADE,
+    player_id INTEGER REFERENCES players(id) ON DELETE CASCADE,
+    jersey_number INTEGER,
+    position VARCHAR(50),
+    status VARCHAR(20) DEFAULT 'active',
+    is_captain BOOLEAN DEFAULT false,
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    left_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(team_id, player_id)
+);
+
 -- 4. Matches table
 CREATE TABLE matches (
     id SERIAL PRIMARY KEY,
@@ -142,6 +158,8 @@ CREATE INDEX idx_matches_status ON matches(status);
 CREATE INDEX idx_team_compositions_match ON team_compositions(match_id);
 CREATE INDEX idx_team_compositions_team ON team_compositions(team_id);
 CREATE INDEX idx_team_compositions_player ON team_compositions(player_id);
+CREATE INDEX idx_team_players_team ON team_players(team_id);
+CREATE INDEX idx_team_players_player ON team_players(player_id);
 CREATE INDEX idx_match_events_match ON match_events(match_id);
 CREATE INDEX idx_match_events_player ON match_events(player_id);
 CREATE INDEX idx_match_events_type ON match_events(event_type);
