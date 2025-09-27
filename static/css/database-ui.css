@@ -2611,12 +2611,14 @@ body:not(.dark-theme) #team-roster-modal table.admin-table tbody tr:hover {
 
 /* Main Layout */
 .transfer-layout {
+    /* Mobile-first: single column by default */
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 360px; /* правая колонка фикс ширины */
+    grid-template-columns: 1fr;
     gap: 20px;
     margin-top: 15px;
-    height: calc(100vh - 220px);
-    max-height: 720px;
+    /* allow layout to grow naturally on small screens */
+    height: auto;
+    max-height: none;
     align-items: stretch;
 }
 
@@ -3052,9 +3054,30 @@ body:not(.dark-theme) #team-roster-modal table.admin-table tbody tr:hover {
 }
 
 /* Responsive Design */
-@media (max-width: 1200px) {
+/* Desktop layout: two columns with right-side transfer queue */
+@media (min-width: 900px) {
+    .transfer-layout {
+        grid-template-columns: minmax(0, 1fr) 360px; /* правая колонка фикс ширины */
+        height: calc(100vh - 220px);
+        max-height: 720px;
+    }
+
+    .transfer-right-column {
+        /* keep the transfer panel visible while scrolling */
+        position: sticky;
+        top: 84px; /* adjust to header height */
+        align-self: start;
+        height: auto;
+        min-width: 320px;
+    }
+}
+
+/* Slightly narrower desktops/tablets */
+@media (min-width: 720px) and (max-width: 899px) {
     .transfer-layout {
         grid-template-columns: minmax(0, 1fr) 320px;
+        height: calc(100vh - 200px);
+        max-height: 720px;
     }
 }
 
@@ -3066,8 +3089,9 @@ body:not(.dark-theme) #team-roster-modal table.admin-table tbody tr:hover {
         height: auto;
     }
 
+    /* На мобильных хотим показать очередь после списка игроков */
     .transfer-right-column {
-        order: -1;
+        order: 2;
         height: 300px;
     }
     
@@ -3081,5 +3105,6 @@ body:not(.dark-theme) #team-roster-modal table.admin-table tbody tr:hover {
         flex-direction: row;
     }
 }
-/* Удаляем лишнюю закрывающую скобку, ломавшую CSS парсинг */
+
+/* Ensure overall file has balanced braces */
 }
