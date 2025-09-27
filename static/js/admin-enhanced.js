@@ -1352,12 +1352,15 @@
               item.classList.add('roster-pool-item--status');
             }
             const jerseyLabel =
-              rosterPlayer.jersey_number !== null && rosterPlayer.jersey_number !== undefined && rosterPlayer.jersey_number !== ''
+              rosterPlayer.jersey_number !== null &&
+              rosterPlayer.jersey_number !== undefined &&
+              rosterPlayer.jersey_number !== ''
                 ? `#${rosterPlayer.jersey_number}`
                 : '';
-            const statusLabel = rosterPlayer.status && rosterPlayer.status !== 'active'
-              ? mapPlayerStatus(rosterPlayer.status)
-              : '';
+            const statusLabel =
+              rosterPlayer.status && rosterPlayer.status !== 'active'
+                ? mapPlayerStatus(rosterPlayer.status)
+                : '';
 
             item.innerHTML = `
               <span class="roster-pool-name">${displayName}</span>
