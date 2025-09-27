@@ -589,7 +589,7 @@
       const nameEl = document.createElement('span');
       nameEl.className = 'lineup-player-name';
       let displayName = entry.fullName;
-      
+
       // Add status indicators to name
       if (entry.missing) {
         displayName += ' (нет в заявке)';
@@ -602,7 +602,7 @@
         displayName += ` (${mapPlayerStatus(entry.status)})`;
         nameEl.classList.add('lineup-player-name--disabled');
       }
-      
+
       nameEl.textContent = displayName;
       item.appendChild(nameEl);
 
@@ -742,28 +742,28 @@
     if (!state) {
       return null;
     }
-    
+
     // Конвертируем данные в формат, который ожидает API
     const mainPlayers = [];
     const subPlayers = [];
-    
+
     state.players.forEach(entry => {
       if (!entry.selected) {
         return; // Пропускаем неотмеченных игроков
       }
-      
+
       const playerData = {
         name: entry.fullName,
         number: parseNumberOrNull(entry.jerseyNumber),
-        position: 'starting_eleven' // По умолчанию все игроки в основном составе
+        position: 'starting_eleven', // По умолчанию все игроки в основном составе
       };
-      
+
       mainPlayers.push(playerData);
     });
-    
+
     return {
       main: mainPlayers,
-      sub: subPlayers
+      sub: subPlayers,
     };
   }
 
@@ -820,10 +820,10 @@
 
     // Формируем полный payload с данными обеих команд
     const fullPayload = {};
-    
+
     // Добавляем данные сохраняемой команды
     fullPayload[team] = payload;
-    
+
     // Добавляем данные другой команды (если есть)
     const otherTeam = team === 'home' ? 'away' : 'home';
     const otherPayload = buildTeamPayload(otherTeam);
@@ -1845,7 +1845,7 @@
   function initializeTeamSaveButtons() {
     const homeSaveBtn = document.getElementById('save-home-lineup-btn');
     const awaySaveBtn = document.getElementById('save-away-lineup-btn');
-    
+
     if (homeSaveBtn) {
       homeSaveBtn.addEventListener('click', () => saveLineupForTeam('home'));
     }

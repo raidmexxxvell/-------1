@@ -910,26 +910,26 @@ class RealtimeUpdater {
   handleLineupsUpdated(data) {
     try {
       console.log('[RealtimeUpdates] Received lineups_updated event:', data);
-      
+
       if (!data) {
         console.log('[RealtimeUpdates] No data in lineups_updated event');
         return;
       }
-      
+
       // Проверяем, есть ли на странице что-то связанное с матчем (ростер или карточка матча)
       const selectorMatchCard = `[data-match-home="${data.home}"][data-match-away="${data.away}"]`;
       const rosterPresent =
         document.querySelector('.roster-table') ||
         document.querySelector('.team-roster-table') ||
         document.querySelector(selectorMatchCard);
-        
+
       console.log('[RealtimeUpdates] Checking for relevant page elements:', {
         rosterTable: !!document.querySelector('.roster-table'),
         teamRosterTable: !!document.querySelector('.team-roster-table'),
         matchCard: !!document.querySelector(selectorMatchCard),
-        rosterPresent: !!rosterPresent
+        rosterPresent: !!rosterPresent,
       });
-        
+
       if (!rosterPresent) {
         // Ничего подходящего – пропускаем тихо
         console.log('[RealtimeUpdates] No relevant elements found on page, skipping lineup update');
@@ -946,7 +946,12 @@ class RealtimeUpdater {
           .then(details => {
             this.refreshMatchDetails(details);
             this.showNotification(`Обновлены составы: ${data.home} vs ${data.away}`);
-            console.log('[RealtimeUpdates] Lineups updated successfully:', data.home, 'vs', data.away);
+            console.log(
+              '[RealtimeUpdates] Lineups updated successfully:',
+              data.home,
+              'vs',
+              data.away
+            );
           })
           .catch(error => {
             console.error('[RealtimeUpdates] Failed to update lineups:', error);
