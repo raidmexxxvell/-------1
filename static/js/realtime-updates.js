@@ -909,44 +909,47 @@ class RealtimeUpdater {
 
   handleLineupsUpdated(data) {
     try {
+      console.log('[RealtimeUpdates] Received lineups_updated event:', data);
+      
       if (!data) {
+        console.log('[RealtimeUpdates] No data in lineups_updated event');
         return;
       }
+      
       // Проверяем, есть ли на странице что-то связанное с матчем (ростер или карточка матча)
       const selectorMatchCard = `[data-match-home="${data.home}"][data-match-away="${data.away}"]`;
       const rosterPresent =
         document.querySelector('.roster-table') ||
         document.querySelector('.team-roster-table') ||
         document.querySelector(selectorMatchCard);
+        
+      console.log('[RealtimeUpdates] Checking for relevant page elements:', {
+        rosterTable: !!document.querySelector('.roster-table'),
+        teamRosterTable: !!document.querySelector('.team-roster-table'),
+        matchCard: !!document.querySelector(selectorMatchCard),
+        rosterPresent: !!rosterPresent
+      });
+        
       if (!rosterPresent) {
         // Ничего подходящего – пропускаем тихо
+        console.log('[RealtimeUpdates] No relevant elements found on page, skipping lineup update');
         return;
       }
       // Фетчим свежие детали матча, чтобы получить обновлённые составы
       if (data.home && data.away) {
         const params = new URLSearchParams({ home: data.home, away: data.away });
-        // сначала пробуем новый компактный эндпоинт из БД
-        fetch(`/api/match/lineups?${params.toString()}`, {
+        // Используем правильный endpoint для получения составов матча
+        fetch(`/api/match-details?${params.toString()}`, {
           headers: { 'Cache-Control': 'no-store' },
         })
           .then(r => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
-          .then(dbPayload => {
-            // Трансформируем в формат match-details (минимум, чтобы слушатели отработали)
-            const details = { rosters: dbPayload.rosters || { home: [], away: [] }, source: 'db' };
+          .then(details => {
             this.refreshMatchDetails(details);
             this.showNotification(`Обновлены составы: ${data.home} vs ${data.away}`);
+            console.log('[RealtimeUpdates] Lineups updated successfully:', data.home, 'vs', data.away);
           })
-          .catch(_ => {
-            // fallback на старый эндпоинт, если ошибка
-            fetch(`/api/match-details?${params.toString()}`, {
-              headers: { 'Cache-Control': 'no-store' },
-            })
-              .then(r => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
-              .then(details => {
-                this.refreshMatchDetails(details);
-                this.showNotification(`Обновлены составы: ${data.home} vs ${data.away}`);
-              })
-              .catch(() => {});
+          .catch(error => {
+            console.error('[RealtimeUpdates] Failed to update lineups:', error);
           });
       }
     } catch (_) {}

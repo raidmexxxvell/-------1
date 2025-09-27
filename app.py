@@ -3755,12 +3755,16 @@ def api_admin_save_lineups(match_id: str):
             # WebSocket уведомление о обновлении составов
             try:
                 if 'websocket_manager' in app.config and app.config['websocket_manager']:
-                    app.config['websocket_manager'].notify_data_change('lineups_updated', {
+                    notification_data = {
                         'match_id': match_id,
                         'home': home,
                         'away': away,
                         'updated_at': datetime.utcnow().isoformat()
-                    })
+                    }
+                    app.config['websocket_manager'].notify_data_change('lineups_updated', notification_data)
+                    app.logger.info(f"[WebSocket] Sent lineups_updated notification: {home} vs {away}")
+                else:
+                    app.logger.warning("[WebSocket] WebSocket manager not available for lineup notifications")
             except Exception as _ws_e:
                 app.logger.warning(f"websocket lineup notify failed: {_ws_e}")
             

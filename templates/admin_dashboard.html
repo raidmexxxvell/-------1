@@ -54,43 +54,55 @@
                             <div class="teams-container">
                                 <!-- Home Team -->
                                 <div class="team-section">
-                                    <h4 id="home-team-name">Команда 1</h4>
+                                    <div class="lineup-team-header">
+                                        <div class="lineup-team-title">
+                                            <h4 id="home-team-name">Команда 1</h4>
+                                            <span id="home-roster-source" class="lineup-roster-source"></span>
+                                        </div>
+                                        <div class="lineup-team-controls">
+                                            <span id="home-selected-counter" class="lineup-selected-counter">Выбрано 0 игроков</span>
+                                            <button id="save-home-lineup-btn" class="action-btn action-btn--team">Сохранить состав</button>
+                                        </div>
+                                    </div>
+                                    <p class="lineup-roster-hint">Отметьте игроков для матча и при необходимости скорректируйте номера. Изменения применяются только после сохранения.</p>
                                     <div class="lineup-section">
                                         <h5>Основной состав</h5>
-                                        <div id="home-main-lineup" class="lineup-list">
+                                        <div id="home-main-lineup" class="lineup-list lineup-roster-grid">
                                             <!-- Основной состав команды хозяев -->
                                         </div>
                                     </div>
-                                    <div class="lineup-roster">
-                                        <h5>Заявка команды</h5>
-                                        <p class="lineup-roster-hint">Игроки, которые доступны в заявке команды. Нажмите по имени, чтобы добавить его в состав на матч.</p>
-                                        <div id="home-available-roster" class="lineup-roster-list">
-                                            <!-- Доступные игроки команды хозяев -->
-                                        </div>
+                                    <div id="home-roster-empty" class="lineup-roster-empty" style="display:none;">
+                                        Заявка команды пуста. Добавьте игроков во вкладке «Команды → Составы».
                                     </div>
                                 </div>
 
                                 <!-- Away Team -->
                                 <div class="team-section">
-                                    <h4 id="away-team-name">Команда 2</h4>
+                                    <div class="lineup-team-header">
+                                        <div class="lineup-team-title">
+                                            <h4 id="away-team-name">Команда 2</h4>
+                                            <span id="away-roster-source" class="lineup-roster-source"></span>
+                                        </div>
+                                        <div class="lineup-team-controls">
+                                            <span id="away-selected-counter" class="lineup-selected-counter">Выбрано 0 игроков</span>
+                                            <button id="save-away-lineup-btn" class="action-btn action-btn--team">Сохранить состав</button>
+                                        </div>
+                                    </div>
+                                    <p class="lineup-roster-hint">Отметьте игроков для матча и при необходимости скорректируйте номера. Изменения применяются только после сохранения.</p>
                                     <div class="lineup-section">
                                         <h5>Основной состав</h5>
-                                        <div id="away-main-lineup" class="lineup-list">
+                                        <div id="away-main-lineup" class="lineup-list lineup-roster-grid">
                                             <!-- Основной состав команды гостей -->
                                         </div>
                                     </div>
-                                    <div class="lineup-roster">
-                                        <h5>Заявка команды</h5>
-                                        <p class="lineup-roster-hint">Список игроков из раздела «Команды → Составы». Добавление в матч возможно только для заявленных игроков.</p>
-                                        <div id="away-available-roster" class="lineup-roster-list">
-                                            <!-- Доступные игроки команды гостей -->
-                                        </div>
+                                    </div>
+                                    <div id="away-roster-empty" class="lineup-roster-empty" style="display:none;">
+                                        Заявка команды пуста. Добавьте игроков во вкладке «Команды → Составы».
                                     </div>
                                 </div>
                             </div>
                             
                             <div class="modal-actions">
-                                <button id="save-lineups-btn" class="action-btn">Сохранить составы</button>
                                 <button class="cancel-btn" onclick="closeMatchModal()">Отмена</button>
                             </div>
                         </div>
