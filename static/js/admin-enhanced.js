@@ -23,6 +23,316 @@
   // Teams management functions
   let currentTeamId = null;
   let allTeams = [];
+  const ROSTER_CACHE_TTL = 60 * 1000;
+  let currentRosterContext = { teamId: null, teamName: '' };
+  let rosterRequestToken = null;
+
+  function getRosterStoreBridge() {
+    return window.AdminTeamRosterStore || null;
+  }
+
+  function isRosterStoreEnabled() {
+    try {
+      if ((localStorage.getItem('feature:team_roster_store') || '') !== '1') {
+        return false;
+      }
+    } catch (error) {
+      console.warn('[Admin] feature flag read failed', error);
+      return false;
+    }
+    const store = getRosterStoreBridge();
+    return Boolean(store && typeof store.setTeamRoster === 'function');
+  }
+
+  function parseIsoTimestamp(value) {
+    if (!value) {
+      return Number.NaN;
+    }
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? Number.NaN : parsed;
+  }
+
+  function rosterSnapshotFromResponse(data) {
+    const players = Array.isArray(data?.players)
+      ? data.players
+      : Array.isArray(data?.roster)
+        ? data.roster
+        : [];
+    const fetchedAt = data?.fetched_at || new Date().toISOString();
+    return {
+      players,
+      source: data?.source === 'legacy' ? 'legacy' : 'normalized',
+      tournament: data?.tournament || null,
+      tournamentId: data?.tournament?.id ?? null,
+      fetchedAt,
+    };
+  }
+
+  async function fetchTeamRosterFromApi(teamId) {
+    const res = await fetch(`/api/admin/teams/${teamId}/roster`);
+    const data = await res.json();
+    if (!res.ok || data?.error) {
+      throw new Error(data?.error || 'Ошибка загрузки состава');
+    }
+    return rosterSnapshotFromResponse(data);
+  }
+
+  function isRosterSnapshotFresh(snapshot) {
+    if (!snapshot) {
+      return false;
+    }
+    const parsed = parseIsoTimestamp(snapshot.fetchedAt);
+    if (Number.isNaN(parsed)) {
+      return false;
+    }
+    return Date.now() - parsed < ROSTER_CACHE_TTL;
+  }
+
+  async function ensureTeamRoster(teamId, options = {}) {
+    const { force = false } = options || {};
+    const storeEnabled = isRosterStoreEnabled();
+    const store = getRosterStoreBridge();
+    const cached = storeEnabled && store?.getTeamRoster ? store.getTeamRoster(teamId) : undefined;
+    if (!force && cached && isRosterSnapshotFresh(cached)) {
+      return cached;
+    }
+    const snapshot = await fetchTeamRosterFromApi(teamId);
+    if (storeEnabled && store?.setTeamRoster) {
+      store.setTeamRoster(teamId, snapshot.players, {
+        source: snapshot.source,
+        tournamentId: snapshot.tournamentId ?? (snapshot.tournament?.id ?? null),
+        fetchedAt: snapshot.fetchedAt,
+      });
+      const refreshed = store.getTeamRoster?.(teamId);
+      if (refreshed) {
+        return refreshed;
+      }
+    }
+    return {
+      players: snapshot.players,
+      source: snapshot.source,
+      tournamentId: snapshot.tournamentId ?? (snapshot.tournament?.id ?? null),
+      fetchedAt: snapshot.fetchedAt,
+      tournament: snapshot.tournament || null,
+    };
+  }
+
+  function formatRosterStatus(snapshot, fallbackTeamName) {
+    if (!snapshot) {
+      return 'Состав недоступен';
+    }
+    const total = snapshot.players?.length ?? 0;
+    const sourceLabel = snapshot.source === 'legacy' ? 'Legacy таблица' : 'Нормализованные данные';
+    const updated = (() => {
+      const parsed = parseIsoTimestamp(snapshot.fetchedAt);
+      if (Number.isNaN(parsed)) {
+        return 'только что';
+      }
+      try {
+        return new Date(parsed).toLocaleString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      } catch (error) {
+        return 'только что';
+      }
+    })();
+    const parts = [];
+    if (fallbackTeamName) {
+      parts.push(fallbackTeamName);
+    }
+    parts.push(total === 1 ? '1 игрок' : `${total} игроков`);
+    parts.push(`Источник: ${sourceLabel}`);
+    if (snapshot.tournament?.name) {
+      parts.push(`Турнир: ${snapshot.tournament.name}`);
+    } else if (snapshot.tournamentId) {
+      parts.push(`Турнир #${snapshot.tournamentId}`);
+    }
+    parts.push(`Обновлено: ${updated}`);
+    return parts.join(' • ');
+  }
+
+  function mapPlayerStatus(value) {
+    if (!value) {
+      return '—';
+    }
+    const normalized = String(value).toLowerCase();
+    const dictionary = {
+      active: 'В заявке',
+      bench: 'Запас',
+      injured: 'Травма',
+      suspended: 'Дисквалификация',
+      legacy: 'Legacy',
+    };
+    return dictionary[normalized] || value;
+  }
+
+  function extractStat(player, key) {
+    if (!player) {
+      return 0;
+    }
+    if (player.stats && typeof player.stats === 'object' && key in player.stats) {
+      const value = player.stats[key];
+      return value ?? 0;
+    }
+    return player[key] ?? 0;
+  }
+
+  function buildRosterRow(player) {
+    const tr = document.createElement('tr');
+    if (player?.legacy && player.legacy.row_id) {
+      tr.classList.add('roster-legacy-row');
+    }
+    const cells = [];
+    const jersey = player?.jersey_number;
+    cells.push(jersey === null || jersey === undefined || jersey === '' ? '—' : jersey);
+
+    const nameCell = document.createElement('td');
+    const nameWrap = document.createElement('div');
+    nameWrap.className = 'roster-player-cell';
+    const nameStrong = document.createElement('strong');
+    const fullName = player?.full_name?.trim();
+    const renderedName = fullName || [player?.first_name, player?.last_name].filter(Boolean).join(' ').trim() || 'Без имени';
+    nameStrong.textContent = renderedName;
+    nameWrap.appendChild(nameStrong);
+    if (player?.username) {
+      const usernameSpan = document.createElement('span');
+      usernameSpan.className = 'roster-player-username';
+      usernameSpan.textContent = `@${player.username}`;
+      usernameSpan.style.marginLeft = '6px';
+      usernameSpan.style.color = '#9ca3af';
+      usernameSpan.style.fontSize = '12px';
+      nameWrap.appendChild(usernameSpan);
+    }
+    if (player?.is_captain) {
+      const captainBadge = document.createElement('span');
+      captainBadge.className = 'roster-player-badge';
+      captainBadge.textContent = 'Капитан';
+      captainBadge.style.marginLeft = '6px';
+      captainBadge.style.padding = '2px 6px';
+      captainBadge.style.borderRadius = '6px';
+      captainBadge.style.background = 'rgba(72, 187, 120, 0.15)';
+      captainBadge.style.color = '#68d391';
+      captainBadge.style.fontSize = '11px';
+      nameWrap.appendChild(captainBadge);
+    }
+    if (player?.legacy && player.legacy.row_id) {
+      const legacyBadge = document.createElement('span');
+      legacyBadge.className = 'roster-player-badge roster-player-badge--legacy';
+      legacyBadge.textContent = 'Legacy';
+      legacyBadge.style.marginLeft = '6px';
+      legacyBadge.style.padding = '2px 6px';
+      legacyBadge.style.borderRadius = '6px';
+      legacyBadge.style.background = 'rgba(251, 191, 36, 0.18)';
+      legacyBadge.style.color = '#f6ad55';
+      legacyBadge.style.fontSize = '11px';
+      nameWrap.appendChild(legacyBadge);
+    }
+    nameCell.appendChild(nameWrap);
+
+    const position = player?.position || player?.primary_position || '—';
+    const status = mapPlayerStatus(player?.status);
+    const goals = extractStat(player, 'goals');
+    const assists = extractStat(player, 'assists');
+    const yellow = extractStat(player, 'yellow_cards');
+    const red = extractStat(player, 'red_cards');
+
+    cells.push(nameCell);
+    cells.push(position || '—');
+    cells.push(status);
+    cells.push(goals);
+    cells.push(assists);
+    cells.push(yellow);
+    cells.push(red);
+
+    cells.forEach(cell => {
+      if (cell instanceof HTMLElement) {
+        tr.appendChild(cell);
+      } else {
+        const td = document.createElement('td');
+        td.textContent = cell;
+        tr.appendChild(td);
+      }
+    });
+    return tr;
+  }
+
+  async function renderTeamRosterModal(force = false) {
+    if (!currentRosterContext.teamId) {
+      return;
+    }
+    const modal = document.getElementById('team-roster-modal');
+    const statusEl = document.getElementById('team-roster-status');
+    const tbody = document.getElementById('team-roster-table');
+    const refreshBtn = document.getElementById('team-roster-refresh');
+    if (!modal || !tbody) {
+      return;
+    }
+    const token = Symbol('roster-request');
+    rosterRequestToken = token;
+
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.textContent = 'Загрузка состава...';
+      statusEl.className = 'status-text';
+      statusEl.style.color = '#cbd5f5';
+    }
+    if (refreshBtn) {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = 'Обновление...';
+    }
+
+    try {
+      const snapshot = await ensureTeamRoster(currentRosterContext.teamId, { force });
+      if (rosterRequestToken !== token) {
+        return;
+      }
+      tbody.innerHTML = '';
+      if (!snapshot.players || snapshot.players.length === 0) {
+        const emptyRow = document.createElement('tr');
+        const emptyCell = document.createElement('td');
+        emptyCell.colSpan = 8;
+        emptyCell.textContent = 'Состав пуст';
+        emptyCell.style.textAlign = 'center';
+        emptyRow.appendChild(emptyCell);
+        tbody.appendChild(emptyRow);
+      } else {
+        snapshot.players.forEach(player => {
+          tbody.appendChild(buildRosterRow(player));
+        });
+      }
+      if (statusEl) {
+        statusEl.textContent = formatRosterStatus(snapshot, currentRosterContext.teamName);
+        statusEl.style.display = 'block';
+        statusEl.className = `status-text ${snapshot.source === 'legacy' ? 'status-warning' : 'status-success'}`;
+        statusEl.style.color = snapshot.source === 'legacy' ? '#f6ad55' : '#68d391';
+      }
+    } catch (error) {
+      console.error('openTeamRoster error', error);
+      if (statusEl) {
+        statusEl.textContent = `Ошибка загрузки состава: ${error.message}`;
+        statusEl.className = 'status-text status-error';
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#f87171';
+      }
+      showToast('Не удалось загрузить состав: ' + error.message, 'error');
+    } finally {
+      if (refreshBtn) {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = 'Обновить';
+      }
+    }
+  }
+
+  async function refreshTeamRoster() {
+    if (!currentRosterContext.teamId) {
+      return;
+    }
+    await renderTeamRosterModal(true);
+  }
 
   async function loadTeams() {
     try {
@@ -225,53 +535,17 @@
   async function openTeamRoster(teamId, teamName) {
     const modal = document.getElementById('team-roster-modal');
     const title = document.getElementById('team-roster-title');
-    const status = document.getElementById('team-roster-status');
     const tbody = document.getElementById('team-roster-table');
     if (!modal || !tbody) {
       return;
     }
+    currentRosterContext = { teamId, teamName };
     if (title) {
       title.textContent = `Состав команды: ${teamName}`;
     }
-    if (status) {
-      status.style.display = 'block';
-      status.textContent = 'Загрузка состава...';
-    }
     tbody.innerHTML = '';
-    try {
-      const res = await fetch(`/api/admin/teams/${teamId}/roster`);
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        throw new Error(data.error || 'Ошибка загрузки состава');
-      }
-      // API возвращает players (динамические team_stats_<id>), поддержим также старый ключ roster на всякий случай
-      const list = data.players || data.roster || [];
-      list.forEach((p, idx) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${idx + 1}</td>
-          <td>${p.first_name || ''}</td>
-          <td>${p.last_name || ''}</td>
-          <td>${p.goals ?? 0}</td>
-          <td>${p.assists ?? 0}</td>
-          <td>${p.yellow_cards ?? p.yellow ?? 0}</td>
-          <td>${p.red_cards ?? p.red ?? 0}</td>`;
-        tbody.appendChild(tr);
-      });
-      if (status) {
-        status.textContent = list.length ? '' : 'Состав пуст';
-        if (!list.length) {
-          status.className = 'status-text';
-        }
-      }
-    } catch (e) {
-      console.error('openTeamRoster error', e);
-      if (status) {
-        status.textContent = 'Ошибка загрузки состава: ' + e.message;
-        status.className = 'status-text';
-      }
-    }
     modal.style.display = 'flex';
+    await renderTeamRosterModal(false);
   }
 
   function closeTeamRoster() {
@@ -279,6 +553,8 @@
     if (modal) {
       modal.style.display = 'none';
     }
+    currentRosterContext = { teamId: null, teamName: '' };
+    rosterRequestToken = null;
   }
 
   // Teams management buttons
@@ -290,6 +566,11 @@
   const refreshTeamsBtn = document.getElementById('refresh-teams-btn');
   if (refreshTeamsBtn) {
     refreshTeamsBtn.addEventListener('click', loadTeams);
+  }
+
+  const teamRosterRefreshBtn = document.getElementById('team-roster-refresh');
+  if (teamRosterRefreshBtn) {
+    teamRosterRefreshBtn.addEventListener('click', () => refreshTeamRoster());
   }
 
   const teamSearch = document.getElementById('team-search');
@@ -2067,6 +2348,13 @@
     deleteTeam,
     openTeamRoster,
     closeTeamRoster,
+    refreshTeamRoster,
+  });
+
+  window.AdminRosterStore = Object.assign(window.AdminRosterStore || {}, {
+    ensureTeamRoster,
+    refreshTeamRoster,
+    isRosterStoreEnabled,
   });
 
   // Initialize when DOM is ready

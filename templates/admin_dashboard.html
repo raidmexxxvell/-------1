@@ -162,17 +162,21 @@
                     <div class="modal-content" style="max-width:700px;">
                         <div class="modal-header">
                             <h3 id="team-roster-title">Состав команды</h3>
-                            <button class="modal-close" onclick="window.AdminEnhanced.closeTeamRoster()">&times;</button>
+                            <button type="button" class="modal-close" onclick="window.AdminEnhanced.closeTeamRoster()">&times;</button>
                         </div>
                         <div class="modal-body">
-                            <div id="team-roster-status" class="status-text" style="display:none;"></div>
+                            <div class="modal-toolbar" style="display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-bottom:10px;">
+                                <div id="team-roster-status" class="status-text" style="flex:1 1 auto; display:none;"></div>
+                                <button id="team-roster-refresh" type="button" class="action-btn" style="flex:0 0 auto; min-width:140px;">Обновить</button>
+                            </div>
                             <div class="table-container">
                                 <table class="admin-table">
                                     <thead>
                                         <tr>
-                                            <th>#</th>
-                                            <th>Имя</th>
-                                            <th>Фамилия</th>
+                                            <th>№</th>
+                                            <th>Игрок</th>
+                                            <th>Позиция</th>
+                                            <th>Статус</th>
                                             <th>Голы</th>
                                             <th>Пасы</th>
                                             <th>ЖК</th>
@@ -503,6 +507,7 @@
     </div>
 
     <!-- Scripts -->
+    <script type="module" src="/static/js/admin-roster-store.js"></script>
     <script src="/static/js/telegram-patch.js"></script>
     <script src="/static/js/admin-enhanced.js"></script>
     <script src="/static/js/admin-transfers.js"></script>

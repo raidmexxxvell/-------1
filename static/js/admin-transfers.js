@@ -10,6 +10,74 @@
   let allPlayers = [];
   let allTeams = [];
   let currentPlayerData = null;
+  const playersByKey = new Map();
+  const globalPlayersByKey = new Map();
+
+  function rosterStoreApi() {
+    return window.AdminRosterStore || {};
+  }
+
+  function escapeHtml(value) {
+    if (value === null || value === undefined) {
+      return '';
+    }
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function getPlayerDisplayName(player) {
+    if (!player) {
+      return 'Без имени';
+    }
+    const full = (player.full_name || '').trim();
+    if (full) {
+      return full;
+    }
+    const combo = `${player.first_name || ''} ${player.last_name || ''}`.trim();
+    return combo || 'Без имени';
+  }
+
+  function getPlayerStat(player, key) {
+    if (!player) {
+      return 0;
+    }
+    if (player.stats && typeof player.stats === 'object' && key in player.stats) {
+      const value = player.stats[key];
+      return value ?? 0;
+    }
+    return player[key] ?? 0;
+  }
+
+  function buildRosterKey(team, player, index) {
+    const parts = [
+      team?.id ?? 'team',
+      player?.team_player_id ?? player?.id ?? 'entry',
+      player?.player_id ?? 'player',
+      index,
+    ];
+    return parts.join(':');
+  }
+
+  async function fetchTeamRosterFallback(teamId) {
+    const response = await fetch(`/api/admin/teams/${teamId}/roster`);
+    const data = await response.json();
+    if (!response.ok || data?.error) {
+      throw new Error(data?.error || 'Не удалось загрузить состав команды');
+    }
+    const players = Array.isArray(data.players)
+      ? data.players
+      : Array.isArray(data.roster)
+        ? data.roster
+        : [];
+    return {
+      players,
+      source: data.source === 'legacy' ? 'legacy' : 'normalized',
+    };
+  }
 
   // Утилиты для debounce поиска
   function debounce(func, wait) {
@@ -60,7 +128,8 @@
       teamFilter.innerHTML = '<option value="">Все команды</option>';
       allTeams.forEach(team => {
         const option = document.createElement('option');
-        option.value = team.name;
+        option.value = String(team.id);
+        option.dataset.teamName = team.name;
         option.textContent = team.name;
         teamFilter.appendChild(option);
       });
@@ -70,7 +139,7 @@
       targetTeamSelect.innerHTML = '<option value="">Выберите команду...</option>';
       allTeams.forEach(team => {
         const option = document.createElement('option');
-        option.value = team.name;
+        option.value = String(team.id);
         option.textContent = team.name;
         targetTeamSelect.appendChild(option);
       });
@@ -78,7 +147,7 @@
   }
 
   // Загрузка всех игроков
-  async function loadAllPlayers() {
+  async function loadAllPlayers(force = false) {
     const loadingEl = document.getElementById('transfer-loading');
     const tableEl = document.getElementById('transfer-players-table');
     const noDataEl = document.getElementById('transfer-no-players');
@@ -88,24 +157,33 @@
     if (noDataEl) noDataEl.style.display = 'none';
 
     try {
-      allPlayers = [];
+      const rosterApi = rosterStoreApi();
+      const useStore = typeof rosterApi.ensureTeamRoster === 'function';
+      globalPlayersByKey.clear();
 
-      // Загружаем игроков для каждой команды
       const loadPromises = allTeams.map(async team => {
         try {
-          const response = await fetch(`/api/admin/teams/${team.id}/roster`);
-          if (!response.ok) throw new Error(`Failed to load roster for ${team.name}`);
-
-          const data = await response.json();
-          const players = data.players || [];
-
-          // Добавляем информацию о команде к каждому игроку
-          return players.map(player => ({
-            ...player,
-            team_name: team.name,
-            team_id: team.id,
-            full_name: `${player.first_name || ''} ${player.last_name || ''}`.trim(),
-          }));
+          const snapshot = useStore
+            ? await rosterApi.ensureTeamRoster(team.id, { force })
+            : await fetchTeamRosterFallback(team.id);
+          const source = snapshot?.source || 'normalized';
+          const players = Array.isArray(snapshot?.players) ? snapshot.players : snapshot?.players || [];
+          return players.map((player, index) => {
+            const rosterKey = buildRosterKey(team, player, index);
+            const clone = {
+              ...player,
+              roster_key: rosterKey,
+              team_id: team.id,
+              team_name: team.name,
+              team_player_id: player.id ?? player.team_player_id ?? null,
+              player_id: player.player_id ?? null,
+              roster_source: source,
+              transferEligible: Boolean((player.id ?? null) || (player.player_id ?? null)),
+              full_name: getPlayerDisplayName(player),
+            };
+            globalPlayersByKey.set(rosterKey, clone);
+            return clone;
+          });
         } catch (error) {
           console.warn(`Failed to load roster for team ${team.name}:`, error);
           return [];
@@ -137,6 +215,7 @@
     if (playersToShow.length === 0) {
       if (tableEl) tableEl.style.display = 'none';
       if (noDataEl) noDataEl.style.display = 'block';
+      tbody.innerHTML = '';
       return;
     }
 
@@ -144,37 +223,63 @@
     if (noDataEl) noDataEl.style.display = 'none';
 
     tbody.innerHTML = '';
+    playersByKey.clear();
 
     playersToShow.forEach(player => {
+      const key = player.roster_key || buildRosterKey({ id: player.team_id }, player, 0);
+      playersByKey.set(key, player);
+
+      const inQueue = transferQueue.some(t => t.player_key === key);
+      const transferDisabled = !player.transferEligible;
+      const goals = getPlayerStat(player, 'goals');
+      const assists = getPlayerStat(player, 'assists');
+      const yellows = getPlayerStat(player, 'yellow_cards');
+      const reds = getPlayerStat(player, 'red_cards');
+      const name = escapeHtml(getPlayerDisplayName(player));
+      const teamName = escapeHtml(player.team_name || '—');
+      const disabledAttr = inQueue || transferDisabled ? ' disabled' : '';
+      const transferTitle = transferDisabled
+        ? 'Перевод станет доступен после миграции игрока'
+        : inQueue
+          ? 'Игрок уже добавлен в очередь'
+          : 'Добавить игрока в очередь';
+      const badges = [];
+      if (inQueue) {
+        badges.push('<div class="transfer-badge-compact">В очереди</div>');
+      }
+      if (player.roster_source === 'legacy' || transferDisabled) {
+        badges.push('<div class="transfer-badge-compact" style="background:#f6ad55;">Legacy</div>');
+      }
+
       const row = document.createElement('tr');
-
-      // Проверяем, находится ли игрок в очереди трансферов
-      const inQueue = transferQueue.some(
-        t => t.player_name === player.full_name && t.from_team === player.team_name
-      );
-
       if (inQueue) {
         row.classList.add('player-in-transfer-queue');
       }
-
+      if (transferDisabled) {
+        row.classList.add('player-transfer-disabled');
+      }
       row.innerHTML = `
                 <td class="player-name-compact">
-                    <div><strong>${player.full_name || 'Без имени'}</strong></div>
-                    ${inQueue ? '<div class="transfer-badge-compact">В очереди</div>' : ''}
+                    <div><strong>${name}</strong></div>
+                    ${badges.join('')}
                 </td>
-                <td class="team-name-compact">${player.team_name}</td>
-                <td class="stats-compact">${player.goals || 0}/${player.assists || 0}</td>
+                <td class="team-name-compact">${teamName}</td>
+                <td class="stats-compact">${goals}/${assists}</td>
                 <td class="cards-compact">
-                    <span>🟡${player.yellow_cards || 0}</span>
-                    <span>🔴${player.red_cards || 0}</span>
+                    <span>🟡${yellows}</span>
+                    <span>🔴${reds}</span>
                 </td>
                 <td>
-                    <button class="transfer-btn-compact" onclick="window.TransferManager.openTransferModal('${player.full_name}', '${player.team_name}')" ${inQueue ? 'disabled' : ''}>
+                    <button class="transfer-btn-compact" data-player-key="${escapeHtml(key)}" title="${escapeHtml(transferTitle)}"${disabledAttr}>
                         ↔️
                     </button>
                 </td>
             `;
 
+      const transferBtn = row.querySelector('.transfer-btn-compact');
+      if (transferBtn && !transferBtn.disabled) {
+        transferBtn.addEventListener('click', () => openTransferModalByKey(key));
+      }
       tbody.appendChild(row);
     });
   }
@@ -183,7 +288,7 @@
   function filterPlayers() {
     const searchTerm =
       document.getElementById('transfer-player-search')?.value?.toLowerCase() || '';
-    const teamFilter = document.getElementById('transfer-team-filter')?.value || '';
+    const teamFilterValue = document.getElementById('transfer-team-filter')?.value || '';
 
     let filtered = allPlayers;
 
@@ -193,8 +298,8 @@
     }
 
     // Фильтр по команде
-    if (teamFilter) {
-      filtered = filtered.filter(player => player.team_name === teamFilter);
+    if (teamFilterValue) {
+      filtered = filtered.filter(player => String(player.team_id) === teamFilterValue);
     }
 
     renderPlayersTable(filtered);
@@ -212,7 +317,7 @@
   }
 
   // Открытие модального окна трансфера
-  function openTransferModal(playerName, currentTeam) {
+  function openTransferModalByKey(playerKey) {
     const modal = document.getElementById('transfer-player-modal');
     const playerNameEl = document.getElementById('transfer-player-name');
     const currentTeamEl = document.getElementById('transfer-current-team');
@@ -220,18 +325,29 @@
 
     if (!modal) return;
 
-    currentPlayerData = { playerName, currentTeam };
+  const player = playersByKey.get(playerKey) || globalPlayersByKey.get(playerKey);
+    if (!player) {
+      showNotification('Игрок не найден в загруженном составе', 'error');
+      return;
+    }
 
-    if (playerNameEl) playerNameEl.textContent = playerName;
-    if (currentTeamEl) currentTeamEl.textContent = currentTeam;
+    if (!player.transferEligible) {
+      showNotification('Сначала мигрируйте игрока в нормализованный состав, затем повторите попытку', 'warning');
+      return;
+    }
+
+    currentPlayerData = { key: playerKey, player };
+
+    if (playerNameEl) playerNameEl.textContent = getPlayerDisplayName(player);
+    if (currentTeamEl) currentTeamEl.textContent = player.team_name || '—';
 
     // Очищаем и заполняем селект команд (исключая текущую)
     if (targetTeamSelect) {
       targetTeamSelect.innerHTML = '<option value="">Выберите команду...</option>';
       allTeams.forEach(team => {
-        if (team.name !== currentTeam) {
+        if (team.id !== player.team_id) {
           const option = document.createElement('option');
-          option.value = team.name;
+          option.value = String(team.id);
           option.textContent = team.name;
           targetTeamSelect.appendChild(option);
         }
@@ -239,6 +355,25 @@
     }
 
     modal.style.display = 'flex';
+  }
+
+  function openTransferModal(playerIdentifier, legacyTeamName) {
+    if (playersByKey.has(playerIdentifier)) {
+      openTransferModalByKey(playerIdentifier);
+      return;
+    }
+    if (legacyTeamName !== undefined) {
+      const fallback = allPlayers.find(
+        player =>
+          getPlayerDisplayName(player) === playerIdentifier &&
+          player.team_name === legacyTeamName
+      );
+      if (fallback?.roster_key) {
+        openTransferModalByKey(fallback.roster_key);
+        return;
+      }
+    }
+    showNotification('Игрок не найден в текущем составе', 'error');
   }
 
   // Закрытие модального окна трансфера
@@ -254,19 +389,30 @@
 
   // Добавление в очередь трансферов
   function addToTransferQueue() {
-    if (!currentPlayerData) return;
+    if (!currentPlayerData || !currentPlayerData.player) return;
 
-    const targetTeam = document.getElementById('transfer-target-team')?.value;
-    if (!targetTeam) {
+    const targetTeamSelect = document.getElementById('transfer-target-team');
+    const targetTeamValue = targetTeamSelect?.value;
+    if (!targetTeamValue) {
       showNotification('Выберите команду для перевода', 'error');
+      return;
+    }
+
+    const targetTeam = allTeams.find(team => String(team.id) === targetTeamValue);
+    if (!targetTeam) {
+      showNotification('Команда не найдена', 'error');
+      return;
+    }
+
+    const player = currentPlayerData.player;
+    if (String(player.team_id) === String(targetTeam.id)) {
+      showNotification('Игрок уже числится в этой команде', 'warning');
       return;
     }
 
     // Проверяем, что игрок еще не в очереди
     const existingTransfer = transferQueue.find(
-      t =>
-        t.player_name === currentPlayerData.playerName &&
-        t.from_team === currentPlayerData.currentTeam
+      t => t.player_key === currentPlayerData.key && String(t.to_team_id) === String(targetTeam.id)
     );
 
     if (existingTransfer) {
@@ -274,21 +420,24 @@
       return;
     }
 
-    // Сохраняем данные игрока перед закрытием модального окна
-    const playerName = currentPlayerData.playerName;
-
     // Добавляем в очередь
     transferQueue.push({
-      player_name: currentPlayerData.playerName,
-      from_team: currentPlayerData.currentTeam,
-      to_team: targetTeam,
+      player_key: currentPlayerData.key,
+      team_player_id: player.team_player_id ?? null,
+      player_id: player.player_id ?? null,
+      from_team_id: player.team_id ?? null,
+      to_team_id: targetTeam.id,
+      from_team: player.team_name,
+      to_team: targetTeam.name,
+      player_name: getPlayerDisplayName(player),
+      roster_source: player.roster_source || 'normalized',
     });
 
     updateTransferQueueDisplay();
     closeTransferModal();
     renderPlayersTable(); // Перерисовываем таблицу чтобы показать статус
 
-    showNotification(`Игрок ${playerName} добавлен в очередь переводов`, 'success');
+    showNotification(`Игрок ${getPlayerDisplayName(player)} добавлен в очередь переводов`, 'success');
   }
 
   // Обновление отображения очереди трансферов
@@ -458,7 +607,7 @@
       closeConfirmModal();
 
       // Перезагружаем данные
-      await loadAllPlayers();
+  await loadAllPlayers(true);
 
       // Показываем результат
       if (successfulTransfers.length > 0 && failedTransfers.length === 0) {
@@ -513,7 +662,7 @@
     if (refreshBtn) {
       refreshBtn.addEventListener('click', async () => {
         await loadTeams();
-        await loadAllPlayers();
+        await loadAllPlayers(true);
       });
     }
 
@@ -549,6 +698,7 @@
   window.TransferManager = {
     init: initTransferManager,
     openTransferModal,
+    openTransferModalByKey,
     closeTransferModal,
     closeConfirmModal,
     removeFromQueue,

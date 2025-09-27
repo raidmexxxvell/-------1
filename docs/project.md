@@ -203,7 +203,11 @@
    - Админские CRUD операции (`POST|PATCH|DELETE /api/admin/teams/<team_id>/players`) и трансфер `/api/admin/players/transfer` теперь работают без legacy-таблиц.
    - Публичный `/api/team/roster` использует те же данные и поддерживает `tournament_id`.
 
-2. **Документация и схема БД**
+2. **Админский UI и трансферы**
+   - Модаль «Состав» в `admin-enhanced.js` отображает нормализованные данные, источник (`normalized/legacy`), статистику и поддерживает принудительное обновление Nano Store `teamRosters`.
+   - Окно трансферов (`admin-transfers.js`) использует `AdminRosterStore.ensureTeamRoster`, отправляет `team_player_id`/`player_id` в `/api/admin/players/transfer` и блокирует операции для legacy записей без идентификаторов.
+
+3. **Документация и схема БД**
    - `database_schema.sql` пополнена таблицей `team_players` и индексами.
    - `docs/player.md` содержит обновлённый статус миграции и описание API.
 

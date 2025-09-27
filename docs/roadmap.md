@@ -374,7 +374,9 @@ realtime: { connected: bool, topics: Set, reconnects: number }
 
 - [x] Бэкенд: нормализованные эндпоинты (`team_players`, CRUD, публичный roster) и обновлённая схема БД (`TeamPlayer`) — 27.09.2025
 - [x] Миграционные скрипты и финальная синхронизация данных (dual-read/dual-write) — 27.09.2025 (Alembic `20250927_add_team_players`, фича-флаг `feature:team_roster_store` + dual-read fallback)
-- [ ] Обновление админского UI и Nano Store под новый payload (feature flag `feature:team_roster_store`)
+- [x] Обновление админского UI и Nano Store под новый payload (feature flag `feature:team_roster_store`)
+  - Модаль «Состав» показывает нормализованные данные, источник (normalized/legacy), статистику и позволяет принудительно обновлять кэш.
+  - Модуль трансферов берет игроков из Nano Store, отправляет `team_player_id`/`player_id` в API и блокирует операции для legacy записей без идентификаторов.
 - [ ] Валидация на staging + пошаговый rollout (canary → 100%)
 
 Цель: перевести ввод и CRUD игроков из плоской legacy-логики матчей в централизованный модуль управления игроками у команд. Результат — единая таблица `players`, отдельная таблица статистики по турнирам `player_tournament_stats`, минимальное количество сетевых запросов при импорте/сохранении и безопасный поэтапный rollout.
