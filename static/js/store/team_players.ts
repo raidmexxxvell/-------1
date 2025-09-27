@@ -164,3 +164,4 @@ export function resetTeamRoster(teamId: string | number): void {
 export function getTeamRoster(teamId: string | number): TeamRosterState | undefined {
   return teamRosters.get()[toKey(teamId)];
 }
+
