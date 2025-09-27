@@ -57,12 +57,16 @@
                                     <h4 id="home-team-name">Команда 1</h4>
                                     <div class="lineup-section">
                                         <h5>Основной состав</h5>
-                                        <textarea id="home-main-lineup-input" class="bulk-lineup-input" 
-                                                  placeholder="Введите список игроков (по одному на строку):&#10;Иванов Иван&#10;Петров Петр&#10;Сидоров Сидор"></textarea>
                                         <div id="home-main-lineup" class="lineup-list">
                                             <!-- Основной состав команды хозяев -->
                                         </div>
-                                        <button class="update-lineup-btn" onclick="window.AdminEnhanced.updateTeamLineup('home')">Обновить состав</button>
+                                    </div>
+                                    <div class="lineup-roster">
+                                        <h5>Заявка команды</h5>
+                                        <p class="lineup-roster-hint">Игроки, которые доступны в заявке команды. Нажмите по имени, чтобы добавить его в состав на матч.</p>
+                                        <div id="home-available-roster" class="lineup-roster-list">
+                                            <!-- Доступные игроки команды хозяев -->
+                                        </div>
                                     </div>
                                 </div>
 
@@ -71,12 +75,16 @@
                                     <h4 id="away-team-name">Команда 2</h4>
                                     <div class="lineup-section">
                                         <h5>Основной состав</h5>
-                                        <textarea id="away-main-lineup-input" class="bulk-lineup-input" 
-                                                  placeholder="Введите список игроков (по одному на строку):&#10;Иванов Иван&#10;Петров Петр&#10;Сидоров Сидор"></textarea>
                                         <div id="away-main-lineup" class="lineup-list">
                                             <!-- Основной состав команды гостей -->
                                         </div>
-                                        <button class="update-lineup-btn" onclick="window.AdminEnhanced.updateTeamLineup('away')">Обновить состав</button>
+                                    </div>
+                                    <div class="lineup-roster">
+                                        <h5>Заявка команды</h5>
+                                        <p class="lineup-roster-hint">Список игроков из раздела «Команды → Составы». Добавление в матч возможно только для заявленных игроков.</p>
+                                        <div id="away-available-roster" class="lineup-roster-list">
+                                            <!-- Доступные игроки команды гостей -->
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -165,6 +173,15 @@
                             <button type="button" class="modal-close" onclick="window.AdminEnhanced.closeTeamRoster()">&times;</button>
                         </div>
                         <div class="modal-body">
+                            <div class="bulk-roster-editor">
+                                <label for="team-roster-bulk-input" class="bulk-roster-label">Список игроков (по одному на строку)</label>
+                                <textarea id="team-roster-bulk-input" class="bulk-lineup-input" placeholder="Иванов Иван&#10;Петров Петр&#10;Сидоров Сидор"></textarea>
+                                <div class="bulk-roster-actions">
+                                    <button id="team-roster-bulk-apply" type="button" class="action-btn">Сохранить список</button>
+                                    <button id="team-roster-bulk-fill" type="button" class="action-btn" style="background:#2d3748;">Заполнить текущий</button>
+                                </div>
+                                <p class="help-text">Список заменит активный состав команды. Новые фамилии будут добавлены автоматически, отсутствующие — архивированы.</p>
+                            </div>
                             <div class="modal-toolbar" style="display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-bottom:10px;">
                                 <div id="team-roster-status" class="status-text" style="flex:1 1 auto; display:none;"></div>
                                 <button id="team-roster-refresh" type="button" class="action-btn" style="flex:0 0 auto; min-width:140px;">Обновить</button>

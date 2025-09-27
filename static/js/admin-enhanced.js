@@ -117,6 +117,218 @@
     };
   }
 
+  function normalizeFullName(value) {
+    return (value || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function parseBulkRosterNames(raw) {
+    const lines = (raw || '')
+      .split('\n')
+      .map(line => normalizeFullName(line))
+      .filter(Boolean);
+    const seen = new Set();
+    const result = [];
+    for (const name of lines) {
+      const key = name.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      result.push(name);
+    }
+    return result;
+  }
+
+  function splitFullName(fullName) {
+    const normalized = normalizeFullName(fullName);
+    if (!normalized) {
+      return { firstName: '', lastName: '' };
+    }
+    const parts = normalized.split(' ');
+    const firstName = parts.shift() || '';
+    const lastName = parts.join(' ');
+    return { firstName, lastName };
+  }
+
+  async function requestJson(url, options = {}) {
+    const config = Object.assign({ credentials: 'include' }, options || {});
+    const response = await fetch(url, config);
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (error) {
+      data = null;
+    }
+    if (!response.ok || (data && data.error)) {
+      const message = (data && data.error) || `HTTP ${response.status}`;
+      const error = new Error(message);
+      error.response = data;
+      error.status = response.status;
+      throw error;
+    }
+    return data || {};
+  }
+
+  async function syncTeamRosterFromNames(teamId, names) {
+    if (!Array.isArray(names) || names.length === 0) {
+      throw new Error('Список игроков пуст');
+    }
+
+    const snapshot = await ensureTeamRoster(teamId, { force: true });
+    const existing = Array.isArray(snapshot.players) ? snapshot.players : [];
+    const existingByKey = new Map();
+
+    existing.forEach(player => {
+      const fullName = normalizeFullName(
+        player.full_name || `${player.first_name || ''} ${player.last_name || ''}`
+      );
+      const key = fullName.toLowerCase();
+      if (key) {
+        existingByKey.set(key, player);
+      }
+    });
+
+    let created = 0;
+    let reactivated = 0;
+    let alreadyActive = 0;
+
+    for (const fullName of names) {
+      const key = fullName.toLowerCase();
+      const existingPlayer = existingByKey.get(key);
+      if (existingPlayer && existingPlayer.id) {
+        if (existingPlayer.status === 'archived') {
+          await requestJson(`/api/admin/teams/${teamId}/players/${existingPlayer.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'active' }),
+          });
+          reactivated += 1;
+        } else {
+          alreadyActive += 1;
+        }
+        continue;
+      }
+
+      const { firstName, lastName } = splitFullName(fullName);
+      if (!firstName) {
+        throw new Error(`Не удалось разобрать имя: ${fullName}`);
+      }
+
+      const payload = {
+        first_name: firstName,
+        last_name: lastName || undefined,
+      };
+
+      const createdResponse = await requestJson(`/api/admin/teams/${teamId}/players`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const entryId = createdResponse?.player?.id;
+      if (entryId) {
+        created += 1;
+      }
+    }
+
+    return { created, reactivated, alreadyActive };
+  }
+
+  async function applyBulkRosterList() {
+    if (!currentRosterContext.teamId) {
+      showToast('Сначала выберите команду', 'warning');
+      return;
+    }
+    const input = document.getElementById('team-roster-bulk-input');
+    if (!input) {
+      return;
+    }
+
+    const names = parseBulkRosterNames(input.value);
+    if (names.length === 0) {
+      showToast('Добавьте хотя бы одного игрока', 'warning');
+      input.focus();
+      return;
+    }
+
+    const applyBtn = document.getElementById('team-roster-bulk-apply');
+    const fillBtn = document.getElementById('team-roster-bulk-fill');
+    const refreshBtn = document.getElementById('team-roster-refresh');
+    const statusEl = document.getElementById('team-roster-status');
+
+    [applyBtn, fillBtn, refreshBtn, input].forEach(el => {
+      if (el) {
+        el.disabled = true;
+      }
+    });
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.textContent = 'Синхронизация состава...';
+      statusEl.className = 'status-text';
+      statusEl.style.color = '#cbd5f5';
+    }
+
+    try {
+      const summary = await syncTeamRosterFromNames(currentRosterContext.teamId, names);
+      input.value = '';
+      input.dataset.dirty = '';
+      const summaryParts = [];
+      if (summary.created) {
+        summaryParts.push(`добавлено ${summary.created}`);
+      }
+      if (summary.reactivated) {
+        summaryParts.push(`возвращено ${summary.reactivated}`);
+      }
+      if (summary.alreadyActive) {
+        summaryParts.push(`без изменений ${summary.alreadyActive}`);
+      }
+      if (!summaryParts.length) {
+        summaryParts.push('изменений нет — все игроки уже в составе');
+      }
+      if (statusEl) {
+        statusEl.textContent = summaryParts.join(', ');
+        statusEl.className = 'status-text status-success';
+        statusEl.style.color = '#68d391';
+      }
+      showToast(`Состав обновлён: ${summaryParts.join(', ')}`, 'success');
+      await renderTeamRosterModal(true);
+    } catch (error) {
+      console.error('[Admin] Bulk roster apply error', error);
+      if (statusEl) {
+        statusEl.textContent = `Ошибка: ${error.message}`;
+        statusEl.className = 'status-text status-error';
+        statusEl.style.color = '#f87171';
+      }
+      showToast(error.message || 'Не удалось обновить состав', 'error', 6000);
+    } finally {
+      [applyBtn, fillBtn, refreshBtn, input].forEach(el => {
+        if (el) {
+          el.disabled = false;
+        }
+      });
+    }
+  }
+
+  async function fillBulkRosterFromCurrent() {
+    if (!currentRosterContext.teamId) {
+      showToast('Сначала выберите команду', 'warning');
+      return;
+    }
+    const input = document.getElementById('team-roster-bulk-input');
+    if (!input) {
+      return;
+    }
+    try {
+      const snapshot = await ensureTeamRoster(currentRosterContext.teamId, { force: false });
+      const lines = (snapshot?.players || []).map(player => normalizeFullName(player.full_name));
+      input.value = lines.join('\n');
+      input.dataset.dirty = '1';
+    } catch (error) {
+      console.error('[Admin] Failed to fill roster list', error);
+      showToast('Не удалось загрузить текущий состав', 'error');
+    }
+  }
+
   function formatRosterStatus(snapshot, fallbackTeamName) {
     if (!snapshot) {
       return 'Состав недоступен';
@@ -271,6 +483,7 @@
     const statusEl = document.getElementById('team-roster-status');
     const tbody = document.getElementById('team-roster-table');
     const refreshBtn = document.getElementById('team-roster-refresh');
+    const bulkInput = document.getElementById('team-roster-bulk-input');
     if (!modal || !tbody) {
       return;
     }
@@ -306,6 +519,20 @@
         snapshot.players.forEach(player => {
           tbody.appendChild(buildRosterRow(player));
         });
+      }
+      if (bulkInput && bulkInput.dataset.dirty !== '1') {
+        const lines = snapshot.players.map(player => {
+          const preferred = normalizeFullName(player.full_name);
+          if (preferred) {
+            return preferred;
+          }
+          const fallback = normalizeFullName(
+            [player.first_name, player.last_name].filter(Boolean).join(' ')
+          );
+          return fallback || 'Неизвестный игрок';
+        });
+        bulkInput.value = lines.join('\n');
+        bulkInput.dataset.dirty = '';
       }
       if (statusEl) {
         statusEl.textContent = formatRosterStatus(snapshot, currentRosterContext.teamName);
@@ -539,6 +766,7 @@
     const modal = document.getElementById('team-roster-modal');
     const title = document.getElementById('team-roster-title');
     const tbody = document.getElementById('team-roster-table');
+    const bulkInput = document.getElementById('team-roster-bulk-input');
     if (!modal || !tbody) {
       return;
     }
@@ -547,6 +775,10 @@
       title.textContent = `Состав команды: ${teamName}`;
     }
     tbody.innerHTML = '';
+    if (bulkInput) {
+      bulkInput.value = '';
+      bulkInput.dataset.dirty = '';
+    }
     modal.style.display = 'flex';
     await renderTeamRosterModal(false);
   }
@@ -574,6 +806,23 @@
   const teamRosterRefreshBtn = document.getElementById('team-roster-refresh');
   if (teamRosterRefreshBtn) {
     teamRosterRefreshBtn.addEventListener('click', () => refreshTeamRoster());
+  }
+
+  const teamRosterBulkApplyBtn = document.getElementById('team-roster-bulk-apply');
+  if (teamRosterBulkApplyBtn) {
+    teamRosterBulkApplyBtn.addEventListener('click', () => applyBulkRosterList());
+  }
+
+  const teamRosterBulkFillBtn = document.getElementById('team-roster-bulk-fill');
+  if (teamRosterBulkFillBtn) {
+    teamRosterBulkFillBtn.addEventListener('click', () => fillBulkRosterFromCurrent());
+  }
+
+  const teamRosterBulkInput = document.getElementById('team-roster-bulk-input');
+  if (teamRosterBulkInput) {
+    teamRosterBulkInput.addEventListener('input', () => {
+      teamRosterBulkInput.dataset.dirty = '1';
+    });
   }
 
   const teamSearch = document.getElementById('team-search');
@@ -655,6 +904,7 @@
   // Global variables for lineup management
   let currentMatchId = null;
   let currentLineups = { home: { main: [] }, away: { main: [] } };
+  let currentMatchRosters = { home: [], away: [] };
 
   // Initialize admin dashboard
   function initAdminDashboard() {
@@ -1029,11 +1279,16 @@
           home: { main: [], sub: [] },
           away: { main: [], sub: [] },
         };
+        currentMatchRosters = {
+          home: Array.isArray(data.rosters?.home) ? data.rosters.home : [],
+          away: Array.isArray(data.rosters?.away) ? data.rosters.away : [],
+        };
         renderLineups();
       })
       .catch(err => {
         console.error('[Admin] Error loading lineups:', err);
         currentLineups = { home: { main: [], sub: [] }, away: { main: [], sub: [] } };
+        currentMatchRosters = { home: [], away: [] };
         renderLineups();
       });
   }
@@ -1067,70 +1322,105 @@
         `;
         container.appendChild(playerEl);
       });
+
+      const rosterContainer = document.getElementById(`${team}-available-roster`);
+      if (rosterContainer) {
+        rosterContainer.innerHTML = '';
+        const roster = Array.isArray(currentMatchRosters[team]) ? currentMatchRosters[team] : [];
+        if (roster.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'roster-pool-empty';
+          empty.textContent = 'Заявка не найдена. Добавьте игроков во вкладке «Команды → Составы».';
+          rosterContainer.appendChild(empty);
+        } else {
+          const selectedKeys = new Set(
+            currentLineups[team].main.map(player => normalizeFullName(player.name).toLowerCase())
+          );
+          roster.forEach(rosterPlayer => {
+            const displayName = rosterPlayerDisplayName(rosterPlayer);
+            const key = normalizeFullName(displayName).toLowerCase();
+            const alreadySelected = selectedKeys.has(key);
+
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'roster-pool-item';
+            if (alreadySelected) {
+              item.classList.add('roster-pool-item--selected');
+              item.disabled = true;
+            }
+            if (rosterPlayer.status && rosterPlayer.status !== 'active') {
+              item.classList.add('roster-pool-item--status');
+            }
+            const jerseyLabel =
+              rosterPlayer.jersey_number !== null && rosterPlayer.jersey_number !== undefined && rosterPlayer.jersey_number !== ''
+                ? `#${rosterPlayer.jersey_number}`
+                : '';
+            const statusLabel = rosterPlayer.status && rosterPlayer.status !== 'active'
+              ? mapPlayerStatus(rosterPlayer.status)
+              : '';
+
+            item.innerHTML = `
+              <span class="roster-pool-name">${displayName}</span>
+              <span class="roster-pool-meta">
+                ${jerseyLabel ? `<span class="roster-pool-jersey">${jerseyLabel}</span>` : ''}
+                ${statusLabel ? `<span class="roster-pool-status">${statusLabel}</span>` : ''}
+              </span>
+            `;
+
+            if (!alreadySelected) {
+              item.addEventListener('click', () => {
+                addRosterPlayerToLineup(team, rosterPlayer);
+              });
+            } else {
+              item.title = 'Игрок уже в составе на матч';
+            }
+            rosterContainer.appendChild(item);
+          });
+        }
+      }
     });
   }
 
-  function addPlayerToLineup(team, type) {
-    const playerName = prompt('Введите имя игрока:');
-    if (!playerName) {
+  function rosterPlayerDisplayName(player) {
+    const preferred = normalizeFullName(player?.full_name);
+    if (preferred) {
+      return preferred;
+    }
+    const fallback = normalizeFullName(
+      [player?.first_name, player?.last_name].filter(Boolean).join(' ')
+    );
+    return fallback || 'Неизвестный игрок';
+  }
+
+  function addRosterPlayerToLineup(team, rosterPlayer) {
+    const name = rosterPlayerDisplayName(rosterPlayer);
+    if (!name) {
+      showToast('Не удалось определить имя игрока', 'error');
       return;
     }
-
-    const playerNumber = prompt('Введите номер игрока (или оставьте пустым):');
-    const playerPosition = prompt('Введите позицию (GK/DEF/MID/FWD):');
-
-    const player = {
-      name: playerName.trim(),
-      number: playerNumber ? parseInt(playerNumber) : null,
-      position: playerPosition ? playerPosition.toUpperCase() : null,
-    };
-
-    currentLineups[team][type].push(player);
+    const key = normalizeFullName(name).toLowerCase();
+    const exists = currentLineups[team].main.some(
+      player => normalizeFullName(player.name).toLowerCase() === key
+    );
+    if (exists) {
+      showToast('Игрок уже добавлен в состав', 'warning');
+      return;
+    }
+    currentLineups[team].main.push({
+      name,
+      number: rosterPlayer.jersey_number ?? null,
+      position: null,
+    });
     renderLineups();
   }
 
+  function addPlayerToLineup(team, type) {
+    console.warn('Manual lineup edit is disabled. Use roster picker.');
+    showToast('Добавление вручную отключено. Используйте заявку команды.', 'warning');
+  }
+
   function updateTeamLineup(team) {
-    const inputId = `${team}-main-lineup-input`;
-    const textarea = document.getElementById(inputId);
-    if (!textarea) {
-      return;
-    }
-
-    const lines = textarea.value
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0);
-
-    if (lines.length === 0) {
-      showToast('Введите список игроков', 'error');
-      return;
-    }
-
-    // Проверка дублей
-    const counts = lines.reduce((acc, l) => {
-      const k = l.toLowerCase();
-      acc[k] = (acc[k] || 0) + 1;
-      return acc;
-    }, {});
-    const dups = Object.entries(counts)
-      .filter(([_, c]) => c > 1)
-      .map(([k]) => k);
-    if (dups.length) {
-      textarea.classList.add('has-dup');
-      showToast('Дубликаты: ' + dups.join(', '), 'error', 6000);
-      return;
-    } else {
-      textarea.classList.remove('has-dup');
-    }
-    // Сохраняем
-    currentLineups[team].main = lines.map(name => ({ name, number: null, position: null }));
-    // Очищаем textarea после применения
-    textarea.value = '';
-
-    // Обновляем отображение
-    renderLineups();
-
-    console.log(`[Admin] Updated ${team} lineup:`, currentLineups[team].main);
+    showToast('Измените заявку команды, чтобы обновить список доступных игроков.', 'info');
   }
 
   function removePlayer(team, type, index) {

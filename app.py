@@ -3524,9 +3524,71 @@ def api_admin_get_lineups(match_id: str):
         if not home:
             return jsonify({'error': 'not found'}), 404
         result = { 'home': { 'main': [], 'sub': [] }, 'away': { 'main': [], 'sub': [] } }
+        rosters_payload = { 'home': [], 'away': [] }
         if SessionLocal is not None:
             db: Session = get_db()
             try:
+                _TeamModel = globals().get('Team')
+                _TeamPlayerModel = globals().get('TeamPlayer')
+
+                def _lineup_entry_from_roster(player_payload: dict) -> dict:
+                    full_name = (player_payload.get('full_name') or '').strip()
+                    if not full_name:
+                        parts = [player_payload.get('first_name') or '', player_payload.get('last_name') or '']
+                        full_name = ' '.join([part for part in parts if part]).strip()
+                    if not full_name:
+                        full_name = 'Неизвестный игрок'
+                    jersey = player_payload.get('jersey_number')
+                    return {
+                        'name': full_name,
+                        'number': jersey if jersey not in (None, '') else None,
+                        'position': None,
+                    }
+
+                def _normalized_roster(team_name: str) -> list[dict]:
+                    if not team_name:
+                        return []
+                    if not DATABASE_SYSTEM_AVAILABLE or not _TeamModel or not _TeamPlayerModel:
+                        return []
+                    normalized = team_name.strip()
+                    if not normalized:
+                        return []
+                    try:
+                        team_obj = (
+                            db.query(_TeamModel)
+                            .filter(func.lower(_TeamModel.name) == normalized.lower())
+                            .first()
+                        )
+                    except Exception:
+                        return []
+                    if not team_obj:
+                        return []
+                    try:
+                        entries = (
+                            db.query(_TeamPlayerModel)
+                            .filter(_TeamPlayerModel.team_id == team_obj.id, _TeamPlayerModel.status != 'archived')
+                            .order_by(func.coalesce(_TeamPlayerModel.jersey_number, 999), _TeamPlayerModel.id.asc())
+                            .all()
+                        )
+                    except Exception:
+                        return []
+                    payload = []
+                    for entry in entries:
+                        try:
+                            payload.append(_build_team_player_payload(entry))
+                        except Exception:
+                            payload.append({
+                                'id': getattr(entry, 'id', None),
+                                'player_id': getattr(entry, 'player_id', None),
+                                'team_id': getattr(entry, 'team_id', None),
+                                'full_name': getattr(getattr(entry, 'player', None), 'full_name', None) or '',
+                                'first_name': getattr(getattr(entry, 'player', None), 'first_name', None),
+                                'last_name': getattr(getattr(entry, 'player', None), 'last_name', None),
+                                'jersey_number': getattr(entry, 'jersey_number', None),
+                                'status': getattr(entry, 'status', None),
+                            })
+                    return payload
+
                 rows, db = _db_retry_read(
                     db,
                     lambda s: s.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all(),
@@ -3537,20 +3599,32 @@ def api_admin_get_lineups(match_id: str):
                     bucket = 'main' if r.position=='starting_eleven' else 'sub'
                     result[r.team][bucket].append(entry)
                 # fallback из team_roster если нет данных по матчу
+                home_roster = _normalized_roster(home)
+                away_roster = _normalized_roster(away)
+                rosters_payload['home'] = home_roster
+                rosters_payload['away'] = away_roster
+
                 if not rows:
                     try:
-                        from sqlalchemy import text as _sa_text
-                        home_rows, db = _db_retry_read(db, lambda s: s.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': home}).fetchall(), attempts=2, backoff_base=0.1, label='lineups:admin:get:roster-home')
-                        away_rows, db = _db_retry_read(db, lambda s: s.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': away}).fetchall(), attempts=2, backoff_base=0.1, label='lineups:admin:get:roster-away')
-                        result['home']['main'] = [ { 'name': r.player, 'number': None, 'position': None } for r in home_rows ]
-                        result['away']['main'] = [ { 'name': r.player, 'number': None, 'position': None } for r in away_rows ]
+                        if home_roster:
+                            result['home']['main'] = [_lineup_entry_from_roster(p) for p in home_roster]
+                        if away_roster:
+                            result['away']['main'] = [_lineup_entry_from_roster(p) for p in away_roster]
+                        if not home_roster or not away_roster:
+                            from sqlalchemy import text as _sa_text
+                            if not home_roster:
+                                home_rows, db = _db_retry_read(db, lambda s: s.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': home}).fetchall(), attempts=2, backoff_base=0.1, label='lineups:admin:get:roster-home')
+                                result['home']['main'] = [ { 'name': r.player, 'number': None, 'position': None } for r in home_rows ]
+                            if not away_roster:
+                                away_rows, db = _db_retry_read(db, lambda s: s.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': away}).fetchall(), attempts=2, backoff_base=0.1, label='lineups:admin:get:roster-away')
+                                result['away']['main'] = [ { 'name': r.player, 'number': None, 'position': None } for r in away_rows ]
                     except Exception as _fe:
                         app.logger.warning(f"team_roster fallback failed: {_fe}")
             except Exception:
                 pass
             finally:
                 db.close()
-        return _json_response({'lineups': result})
+        return _json_response({'lineups': result, 'rosters': rosters_payload})
     except Exception as e:
         app.logger.error(f"admin get lineups error: {e}")
         return jsonify({'error': 'internal'}), 500

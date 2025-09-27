@@ -1,5 +1,3 @@
-import { map } from 'nanostores';
-
 export type RosterSource = 'normalized' | 'legacy';
 
 export interface LegacyMetadata {
@@ -45,7 +43,52 @@ export interface TeamRosterState {
 
 export type TeamRosterStore = Record<string, TeamRosterState>;
 
-export const teamRosters = map<TeamRosterStore>({});
+type RosterSubscriber = (state: TeamRosterStore) => void;
+
+class RosterMap {
+  private state: TeamRosterStore = {};
+
+  private subscribers: Set<RosterSubscriber> = new Set();
+
+  get(): TeamRosterStore {
+    return this.state;
+  }
+
+  set(next: TeamRosterStore): void {
+    this.state = { ...next };
+    this.notify();
+  }
+
+  setKey(key: string, value: TeamRosterState): void {
+    this.state = { ...this.state, [key]: value };
+    this.notify();
+  }
+
+  reset(): void {
+    this.state = {};
+    this.notify();
+  }
+
+  subscribe(listener: RosterSubscriber): () => void {
+    this.subscribers.add(listener);
+    listener(this.state);
+    return () => {
+      this.subscribers.delete(listener);
+    };
+  }
+
+  private notify(): void {
+    for (const listener of this.subscribers) {
+      try {
+        listener(this.state);
+      } catch (error) {
+        console.error('[teamRosters] listener error', error);
+      }
+    }
+  }
+}
+
+export const teamRosters = new RosterMap();
 
 function toKey(teamId: string | number): string {
   return String(teamId);
