@@ -477,9 +477,9 @@
         jerseyNumber,
         originalNumber: rosterNumber,
         status: player.status || 'active',
-  // Force unchecked by default: admin will select players manually
-  selected: false,
-  initialSelected: false,
+        // Force unchecked by default: admin will select players manually
+        selected: false,
+        initialSelected: false,
         isLegacy: Boolean(player?.legacy?.source === 'legacy' || rosterSource === 'legacy'),
         missing: false,
         displayOrder: index,
@@ -512,7 +512,7 @@
       });
     });
 
-  players.sort((a, b) => {
+    players.sort((a, b) => {
       if (a.selected !== b.selected) {
         return a.selected ? -1 : 1;
       }
@@ -653,9 +653,9 @@
       sourceEl.style.display = 'none';
       return;
     }
-  const isLegacy = state.rosterSource === 'legacy';
-  // Only show source label for legacy source; hide 'normalized' to reduce UI clutter
-  let text = isLegacy ? 'Источник: legacy' : '';
+    const isLegacy = state.rosterSource === 'legacy';
+    // Only show source label for legacy source; hide 'normalized' to reduce UI clutter
+    let text = isLegacy ? 'Источник: legacy' : '';
     if (state.fetchedAt) {
       const parsed = new Date(state.fetchedAt);
       if (!Number.isNaN(parsed.getTime())) {
