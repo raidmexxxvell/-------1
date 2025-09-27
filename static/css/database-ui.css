@@ -284,15 +284,25 @@
 }
 
 .lineup-number-input {
-    width: 50px;
-    padding: 4px 6px;
+    width: 38px;
+    max-width: 42px;
+    padding: 3px 6px;
     border-radius: 6px;
     border: 1px solid rgba(71, 85, 105, 0.6);
     background: rgba(15, 23, 42, 0.9);
     color: #e2e8f0;
-    font-size: 13px;
+    font-size: 12px;
     text-align: center;
     flex-shrink: 0;
+}
+
+/* More specific rule to override global inputs that set width:100% */
+.lineup-roster-item .lineup-number-input,
+.lineup-list .lineup-number-input {
+    flex: 0 0 auto;
+    width: 36px;
+    max-width: 42px;
+    box-sizing: border-box;
 }
 
 .lineup-number-input:focus {
@@ -308,6 +318,10 @@
 .lineup-number-input--dirty {
     border-color: rgba(129, 230, 217, 0.8);
     background: rgba(129, 230, 217, 0.1);
+}
+
+.lineup-player-name {
+    margin-right: 8px; /* отступ между именем и полем номера */
 }
 
 .lineup-roster-meta {
@@ -331,7 +345,10 @@
 }
 
 .action-btn--team {
-    min-width: 160px;
+    min-width: 120px;
+    padding: 6px 10px;
+    font-size: 13px;
+    border-radius: 6px;
 }
 }
 
