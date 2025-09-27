@@ -299,10 +299,12 @@
 /* More specific rule to override global inputs that set width:100% */
 .lineup-roster-item .lineup-number-input,
 .lineup-list .lineup-number-input {
-    flex: 0 0 auto;
-    width: 36px;
-    max-width: 42px;
-    box-sizing: border-box;
+    /* Strong override to prevent global input styles from stretching number fields */
+    flex: 0 0 36px !important;
+    width: 36px !important;
+    min-width: 30px !important;
+    max-width: 42px !important;
+    box-sizing: border-box !important;
 }
 
 .lineup-number-input:focus {

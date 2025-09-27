@@ -31,7 +31,9 @@
   ],
   "author": "Liga Obninsk Team",
   "license": "MIT",
-  "dependencies": {},
+  "dependencies": {
+    "nanostores": "^0.5.0"
+  },
   "devDependencies": {
     "typescript": "^5.9.2",
     "eslint": "^9.0.0",
