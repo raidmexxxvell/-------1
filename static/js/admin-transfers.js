@@ -167,7 +167,9 @@
             ? await rosterApi.ensureTeamRoster(team.id, { force })
             : await fetchTeamRosterFallback(team.id);
           const source = snapshot?.source || 'normalized';
-          const players = Array.isArray(snapshot?.players) ? snapshot.players : snapshot?.players || [];
+          const players = Array.isArray(snapshot?.players)
+            ? snapshot.players
+            : snapshot?.players || [];
           return players.map((player, index) => {
             const rosterKey = buildRosterKey(team, player, index);
             const clone = {
@@ -325,14 +327,17 @@
 
     if (!modal) return;
 
-  const player = playersByKey.get(playerKey) || globalPlayersByKey.get(playerKey);
+    const player = playersByKey.get(playerKey) || globalPlayersByKey.get(playerKey);
     if (!player) {
       showNotification('Игрок не найден в загруженном составе', 'error');
       return;
     }
 
     if (!player.transferEligible) {
-      showNotification('Сначала мигрируйте игрока в нормализованный состав, затем повторите попытку', 'warning');
+      showNotification(
+        'Сначала мигрируйте игрока в нормализованный состав, затем повторите попытку',
+        'warning'
+      );
       return;
     }
 
@@ -365,8 +370,7 @@
     if (legacyTeamName !== undefined) {
       const fallback = allPlayers.find(
         player =>
-          getPlayerDisplayName(player) === playerIdentifier &&
-          player.team_name === legacyTeamName
+          getPlayerDisplayName(player) === playerIdentifier && player.team_name === legacyTeamName
       );
       if (fallback?.roster_key) {
         openTransferModalByKey(fallback.roster_key);
@@ -437,7 +441,10 @@
     closeTransferModal();
     renderPlayersTable(); // Перерисовываем таблицу чтобы показать статус
 
-    showNotification(`Игрок ${getPlayerDisplayName(player)} добавлен в очередь переводов`, 'success');
+    showNotification(
+      `Игрок ${getPlayerDisplayName(player)} добавлен в очередь переводов`,
+      'success'
+    );
   }
 
   // Обновление отображения очереди трансферов
@@ -607,7 +614,7 @@
       closeConfirmModal();
 
       // Перезагружаем данные
-  await loadAllPlayers(true);
+      await loadAllPlayers(true);
 
       // Показываем результат
       if (successfulTransfers.length > 0 && failedTransfers.length === 0) {

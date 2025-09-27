@@ -100,7 +100,7 @@
     if (storeEnabled && store?.setTeamRoster) {
       store.setTeamRoster(teamId, snapshot.players, {
         source: snapshot.source,
-        tournamentId: snapshot.tournamentId ?? (snapshot.tournament?.id ?? null),
+        tournamentId: snapshot.tournamentId ?? snapshot.tournament?.id ?? null,
         fetchedAt: snapshot.fetchedAt,
       });
       const refreshed = store.getTeamRoster?.(teamId);
@@ -111,7 +111,7 @@
     return {
       players: snapshot.players,
       source: snapshot.source,
-      tournamentId: snapshot.tournamentId ?? (snapshot.tournament?.id ?? null),
+      tournamentId: snapshot.tournamentId ?? snapshot.tournament?.id ?? null,
       fetchedAt: snapshot.fetchedAt,
       tournament: snapshot.tournament || null,
     };
@@ -195,7 +195,10 @@
     nameWrap.className = 'roster-player-cell';
     const nameStrong = document.createElement('strong');
     const fullName = player?.full_name?.trim();
-    const renderedName = fullName || [player?.first_name, player?.last_name].filter(Boolean).join(' ').trim() || 'Без имени';
+    const renderedName =
+      fullName ||
+      [player?.first_name, player?.last_name].filter(Boolean).join(' ').trim() ||
+      'Без имени';
     nameStrong.textContent = renderedName;
     nameWrap.appendChild(nameStrong);
     if (player?.username) {
